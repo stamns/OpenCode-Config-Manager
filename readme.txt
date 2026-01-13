@@ -1,0 +1,3 @@
+我需要写一个单文件带gui的脚本  用来可视化操作pencode和oh my opencode的配置文件  说白的就是供小白使用的配置管理器  把所有的pencode和oh my opencode的配置写到gui界面上  直接点击就可以添加   点击就可以启用或者关闭   可以增加自定义站点和自定义模型  可以直接读取本机的claudecode和codex等配置方便直接写入pencode和oh my opencode的配置文件
+直接用python写就行  逻辑是读取本地的opencode和oh my opencode的配置文件 然后读取其他编辑器的默认配置文件  如果有就读取备用  可以直接用其他的比如cc或者codex的配置信息填入opencode的配置中  没有的话就提示无  然后可以自定义配置opencode和ohmyopencode的配置  只是把所有配置项可视化不用担心格式问题  只是在gui点击脚本会自动映射修改配置文件  opencode的配置项从https://opencode.ai/docs/config/ 中获取    ohmyopencode的配置主要是agent和模型的配置 你可以从c:\user\Administrator\.config\opencode\oh-my-opencode.json 和 https://github.com/code-yeongyu/oh-my-opencode 学习 主要核心是配置的模型必须是opencode中已经有的模型  当然可以包含opencode自带的免费模型
+我要的项目是做一个配置管理工具实现上面的这些功能
