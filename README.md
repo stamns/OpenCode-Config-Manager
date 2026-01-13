@@ -24,11 +24,16 @@
 - 添加/编辑/删除自定义 API 提供商
 - 支持多种 SDK：`@ai-sdk/anthropic`、`@ai-sdk/openai`、`@ai-sdk/google`、`@ai-sdk/azure`
 - API 密钥安全显示/隐藏
+- **SDK 兼容性提示**：选择 SDK 时显示适用的模型系列
 
 ### Model 管理
 - 在 Provider 下添加/管理模型
 - **预设常用模型快速选择**：Claude、GPT、Gemini 系列
-- 配置模型参数：上下文限制、输出限制、附件支持
+- **完整预设配置**：选择预设模型自动填充 options 和 variants
+- **Thinking 模式支持**：
+  - Claude: budgetTokens、thinkingEnabled
+  - OpenAI: reasoningEffort (high/medium/low)
+  - Gemini: thinkingConfig
 
 ### Agent 管理 (Oh My OpenCode)
 - 配置不同用途的 Agent
@@ -45,12 +50,24 @@
 - 常用工具快捷按钮
 
 ### 外部导入
-- 自动检测 Claude Code 配置
-- 一键导入已有配置
+- 自动检测多种配置文件：
+  - Claude Code (settings.json, providers.json)
+  - Codex (config.toml)
+  - Gemini (config.json)
+  - cc-switch (config.json)
+- **预览转换结果**后再导入
+- 冲突检测和处理
+
+### 备份恢复
+- **首次启动备份提示**
+- 自动备份配置文件
+- **多版本备份管理**
+- 恢复备份对话框
 
 ### 其他特性
 - 现代化 UI 设计，侧边栏导航
-- 自动备份配置文件
+- **全局 Tooltip 提示**：解释各参数含义
+- **统一保存逻辑**：保存修改直接写入文件
 - 配置优先级说明文档
 
 ---
@@ -59,7 +76,7 @@
 
 ### 方式一：下载预编译版本
 
-从 [Releases](https://github.com/yourname/opencode-config-manager/releases) 下载对应平台的可执行文件：
+从 [Releases](https://github.com/icysaintdx/OpenCode-Config-Manager/releases) 下载对应平台的可执行文件：
 
 | 平台 | 文件 |
 |------|------|
@@ -71,8 +88,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourname/opencode-config-manager.git
-cd opencode-config-manager
+git clone https://github.com/icysaintdx/OpenCode-Config-Manager.git
+cd OpenCode-Config-Manager
 
 # 运行（无需安装依赖，仅使用 Python 标准库）
 python opencode_config_manager.py
@@ -160,7 +177,7 @@ opencode-config-manager/
 
 ## 相关项目
 
-- [OpenCode](https://github.com/opencode-ai/opencode) - AI 编程助手
+- [OpenCode](https://github.com/anomalyco/opencode) - AI 编程助手
 - [Oh My OpenCode](https://github.com/code-yeongyu/oh-my-opencode) - OpenCode 增强插件
 
 ---

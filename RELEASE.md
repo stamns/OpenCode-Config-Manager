@@ -1,5 +1,55 @@
 # Release Notes / 发布说明
 
+## v0.5.0 (2026-01-14)
+
+### 重大更新
+
+- **完善模型预设配置**
+  - Claude 系列：支持 extended thinking 模式（budgetTokens、thinkingEnabled）
+  - OpenAI/Codex 系列：支持 reasoningEffort 参数（high/medium/low）
+  - Gemini 系列：支持 thinkingConfig 配置
+  - 选择预设模型时自动填充完整配置（options、variants）
+
+- **统一保存逻辑**
+  - 所有"保存修改"按钮现在直接写入文件
+  - 不再需要两步操作（先保存修改再点顶部保存）
+  - 删除操作也会立即生效
+
+- **备份恢复功能增强**
+  - 首次启动时提示备份原配置
+  - 支持多版本备份管理
+  - 新增"恢复备份"对话框，可查看、恢复、删除备份
+  - 备份文件带时间戳和标签（auto/manual/before_save）
+
+- **全局 Tooltip 提示**
+  - Provider 参数说明（名称、SDK、API地址、密钥）
+  - Model 参数说明（options、variants、上下文限制）
+  - Agent/Category 参数说明
+  - SDK 兼容性提示（选择 SDK 时显示适用的模型系列）
+
+- **外部导入功能重构**
+  - 支持 Claude Code settings.json 和 providers.json
+  - 支持 Codex config.toml
+  - 支持 Gemini config.json
+  - 支持 cc-switch config.json
+  - 预览转换结果后再导入
+  - 冲突检测和处理
+
+### 界面改进
+
+- Provider 列表新增 SDK 列
+- 工具栏新增"恢复备份"按钮
+- 保存按钮改为"保存全部"
+- 各保存按钮旁添加"(直接保存到文件)"提示
+
+### Bug 修复
+
+- 修复 Provider 保存时创建新条目而非更新原条目的问题
+- 修复权限管理保存后列表不同步的问题
+- 修复 Model 删除后未保存到文件的问题
+
+---
+
 ## v0.4.0 (2026-01-13)
 
 ### 新功能
@@ -93,9 +143,9 @@
 
 | 平台 | 下载链接 | 大小 |
 |------|---------|------|
-| Windows | [OpenCodeConfigManager.exe](https://github.com/yourname/opencode-config-manager/releases/download/v0.4.0/OpenCodeConfigManager.exe) | ~15 MB |
-| macOS | [OpenCodeConfigManager.app.zip](https://github.com/yourname/opencode-config-manager/releases/download/v0.4.0/OpenCodeConfigManager.app.zip) | ~20 MB |
-| Linux | [OpenCodeConfigManager](https://github.com/yourname/opencode-config-manager/releases/download/v0.4.0/OpenCodeConfigManager) | ~15 MB |
+| Windows | [OpenCodeConfigManager.exe](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/download/v0.5.0/OpenCodeConfigManager.exe) | ~15 MB |
+| macOS | [OpenCodeConfigManager.app.zip](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/download/v0.5.0/OpenCodeConfigManager.app.zip) | ~20 MB |
+| Linux | [OpenCodeConfigManager](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/download/v0.5.0/OpenCodeConfigManager) | ~15 MB |
 
 ---
 
@@ -139,4 +189,4 @@
 
 ## 反馈
 
-如有问题或建议，请提交 [Issue](https://github.com/yourname/opencode-config-manager/issues)
+如有问题或建议，请提交 [Issue](https://github.com/icysaintdx/OpenCode-Config-Manager/issues)
