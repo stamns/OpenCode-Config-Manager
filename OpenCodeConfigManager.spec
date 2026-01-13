@@ -1,6 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-# OpenCode Config Manager v0.5.0 构建配置
+# OpenCode Config Manager 构建配置
 # 图标已嵌入 exe，无需外部 assets 目录
+# 使用方法: pyinstaller OpenCodeConfigManager.spec --noconfirm
+# 构建后手动重命名为带版本号的文件名
+
+VERSION = '0.6.1'
 
 a = Analysis(
     ['opencode_config_manager.py'],
@@ -23,7 +27,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='OpenCodeConfigManager',
+    name=f'OpenCodeConfigManager_v{VERSION}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

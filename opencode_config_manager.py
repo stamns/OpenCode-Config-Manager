@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v0.6.0
+OpenCode & Oh My OpenCode 配置管理器 v0.6.1
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
+
+更新日志 v0.6.1:
+- 新增上下文压缩 (compaction) 配置功能
+- 侧边栏显示配置文件完整路径（点击可复制）
+- exe 文件名带版本号，支持增量构建
+- 修复若干界面问题
 
 更新日志 v0.6.0:
 - 修正 options/variants 配置结构，符合 OpenCode 官方规范
@@ -2734,6 +2740,129 @@ class ImportTab(tk.Frame):
             messagebox.showinfo("成功", f"已导入 {source} 的配置")
 
 
+# ==================== 上下文压缩配置选项卡 ====================
+class CompactionTab(tk.Frame):
+    def __init__(self, parent, app):
+        super().__init__(parent, bg=COLORS["bg"])
+        self.app = app
+        self.setup_ui()
+
+    def setup_ui(self):
+        main_frame = tk.Frame(self, bg=COLORS["bg"])
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 上下文压缩配置
+        compaction_card = Card(main_frame, title="上下文压缩 (Compaction)")
+        compaction_card.pack(fill=tk.X, pady=(0, 16))
+
+        form = tk.Frame(compaction_card.content, bg=COLORS["card_bg"])
+        form.pack(fill=tk.X, padx=10, pady=10)
+
+        # 说明
+        tk.Label(
+            form,
+            text="上下文压缩用于在会话上下文接近满时自动压缩，以节省 tokens 并保持会话连续性。",
+            font=FONTS["body"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            wraplength=500,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(0, 16))
+
+        # auto 选项
+        auto_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        auto_frame.pack(fill=tk.X, pady=(0, 8))
+        self.auto_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            auto_frame,
+            text="自动压缩 (auto)",
+            variable=self.auto_var,
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            font=FONTS["body"],
+            activebackground=COLORS["card_bg"],
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            auto_frame,
+            text="当上下文已满时自动压缩会话",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        # prune 选项
+        prune_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        prune_frame.pack(fill=tk.X, pady=(0, 16))
+        self.prune_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            prune_frame,
+            text="修剪旧输出 (prune)",
+            variable=self.prune_var,
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            font=FONTS["body"],
+            activebackground=COLORS["card_bg"],
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            prune_frame,
+            text="删除旧的工具输出以节省 tokens",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        # 保存按钮
+        ModernButton(form, "保存设置", self.save_compaction, "success", 100, 36).pack(
+            anchor=tk.W
+        )
+
+        # 配置预览
+        preview_card = Card(main_frame, title="配置预览")
+        preview_card.pack(fill=tk.BOTH, expand=True)
+
+        self.preview_text = tk.Text(
+            preview_card.content,
+            height=8,
+            font=FONTS["mono"],
+            bd=1,
+            relief=tk.SOLID,
+            bg=COLORS["sidebar_bg"],
+            fg=COLORS["text"],
+        )
+        self.preview_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.refresh_preview()
+
+    def refresh_list(self):
+        """刷新显示（供 MainWindow 调用）"""
+        compaction = self.app.opencode_config.get("compaction", {})
+        self.auto_var.set(compaction.get("auto", True))
+        self.prune_var.set(compaction.get("prune", True))
+        self.refresh_preview()
+
+    def refresh_preview(self):
+        """刷新配置预览"""
+        config = {
+            "compaction": {"auto": self.auto_var.get(), "prune": self.prune_var.get()}
+        }
+        self.preview_text.config(state=tk.NORMAL)
+        self.preview_text.delete("1.0", tk.END)
+        self.preview_text.insert(
+            "1.0", json.dumps(config, indent=2, ensure_ascii=False)
+        )
+        self.preview_text.config(state=tk.DISABLED)
+
+    def save_compaction(self):
+        """保存上下文压缩配置"""
+        self.app.opencode_config["compaction"] = {
+            "auto": self.auto_var.get(),
+            "prune": self.prune_var.get(),
+        }
+        self.refresh_preview()
+        self.app.save_configs_silent()
+        messagebox.showinfo("成功", "上下文压缩配置已保存")
+
+
 # ==================== MCP 服务器配置选项卡 ====================
 class MCPTab(tk.Frame):
     def __init__(self, parent, app):
@@ -3498,7 +3627,7 @@ class HelpTab(tk.Frame):
         ).pack(pady=(20, 5))
         tk.Label(
             center_frame,
-            text="v0.6.0",
+            text="v0.6.1",
             font=FONTS["subtitle"],
             bg=COLORS["card_bg"],
             fg=COLORS["text_secondary"],
@@ -3512,7 +3641,7 @@ class HelpTab(tk.Frame):
         ).pack(pady=5)
         tk.Label(
             center_frame,
-            text="支持 Provider、Model、Agent、MCP、Permission 管理",
+            text="支持 Provider、Model、Agent、MCP、Compaction 管理",
             font=FONTS["body"],
             bg=COLORS["card_bg"],
             fg=COLORS["text"],
@@ -3559,7 +3688,7 @@ class Sidebar(tk.Frame):
         ).pack(anchor=tk.W)
         tk.Label(
             logo_frame,
-            text="配置管理器",
+            text="配置管理器 v0.6.1",
             font=FONTS["small"],
             bg=COLORS["sidebar_bg"],
             fg=COLORS["text_secondary"],
@@ -3570,28 +3699,72 @@ class Sidebar(tk.Frame):
             fill=tk.X, padx=16, pady=(0, 16)
         )
 
-        # OpenCode 分组
+        # OpenCode 分组 - 显示配置文件路径
+        opencode_header = tk.Frame(self, bg=COLORS["sidebar_bg"])
+        opencode_header.pack(fill=tk.X, padx=16, pady=(0, 8))
         tk.Label(
-            self,
+            opencode_header,
             text="OpenCode",
             font=FONTS["small"],
             bg=COLORS["sidebar_bg"],
             fg=COLORS["text_secondary"],
-        ).pack(anchor=tk.W, padx=16, pady=(0, 8))
+        ).pack(anchor=tk.W)
+        opencode_path = str(ConfigPaths.get_opencode_config())
+        self.opencode_path_label = tk.Label(
+            opencode_header,
+            text=opencode_path[:40] + "..."
+            if len(opencode_path) > 40
+            else opencode_path,
+            font=("Consolas", 8),
+            bg=COLORS["sidebar_bg"],
+            fg=COLORS["text_secondary"],
+            cursor="hand2",
+        )
+        self.opencode_path_label.pack(anchor=tk.W)
+        ToolTip(
+            self.opencode_path_label, f"配置文件路径:\n{opencode_path}\n\n点击复制路径"
+        )
+        self.opencode_path_label.bind(
+            "<Button-1>", lambda e: self.copy_path(opencode_path)
+        )
+
         self.add_nav_button("provider", "Provider 管理")
         self.add_nav_button("model", "Model 管理")
         self.add_nav_button("opencode_agent", "Agent 配置")
         self.add_nav_button("mcp", "MCP 服务器")
+        self.add_nav_button("compaction", "上下文压缩")
         self.add_nav_button("permission", "权限管理")
 
-        # Oh My OpenCode 分组
+        # Oh My OpenCode 分组 - 显示配置文件路径
+        ohmyopencode_header = tk.Frame(self, bg=COLORS["sidebar_bg"])
+        ohmyopencode_header.pack(fill=tk.X, padx=16, pady=(20, 8))
         tk.Label(
-            self,
+            ohmyopencode_header,
             text="Oh My OpenCode",
             font=FONTS["small"],
             bg=COLORS["sidebar_bg"],
             fg=COLORS["text_secondary"],
-        ).pack(anchor=tk.W, padx=16, pady=(20, 8))
+        ).pack(anchor=tk.W)
+        ohmyopencode_path = str(ConfigPaths.get_ohmyopencode_config())
+        self.ohmyopencode_path_label = tk.Label(
+            ohmyopencode_header,
+            text=ohmyopencode_path[:40] + "..."
+            if len(ohmyopencode_path) > 40
+            else ohmyopencode_path,
+            font=("Consolas", 8),
+            bg=COLORS["sidebar_bg"],
+            fg=COLORS["text_secondary"],
+            cursor="hand2",
+        )
+        self.ohmyopencode_path_label.pack(anchor=tk.W)
+        ToolTip(
+            self.ohmyopencode_path_label,
+            f"配置文件路径:\n{ohmyopencode_path}\n\n点击复制路径",
+        )
+        self.ohmyopencode_path_label.bind(
+            "<Button-1>", lambda e: self.copy_path(ohmyopencode_path)
+        )
+
         self.add_nav_button("agent", "Agent 管理")
         self.add_nav_button("category", "Category 管理")
 
@@ -3617,6 +3790,12 @@ class Sidebar(tk.Frame):
             fg=COLORS["text_secondary"],
         )
         self.status_label.pack(anchor=tk.W)
+
+    def copy_path(self, path):
+        """复制路径到剪贴板"""
+        self.app.root.clipboard_clear()
+        self.app.root.clipboard_append(path)
+        self.status_label.config(text="路径已复制")
 
     def add_nav_button(self, key, text):
         btn = tk.Label(
@@ -3658,7 +3837,7 @@ class Sidebar(tk.Frame):
 class MainWindow:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("OpenCode 配置管理器 v0.6.0")
+        self.root.title("OpenCode 配置管理器 v0.6.1")
         self.root.geometry("1200x750")
         self.root.minsize(1000, 600)
         self.root.configure(bg=COLORS["bg"])
@@ -3792,6 +3971,7 @@ class MainWindow:
         self.pages["model"] = ModelTab(self.content_frame, self)
         self.pages["opencode_agent"] = OpenCodeAgentTab(self.content_frame, self)
         self.pages["mcp"] = MCPTab(self.content_frame, self)
+        self.pages["compaction"] = CompactionTab(self.content_frame, self)
         self.pages["permission"] = PermissionTab(self.content_frame, self)
         self.pages["agent"] = AgentTab(self.content_frame, self)
         self.pages["category"] = CategoryTab(self.content_frame, self)
@@ -3831,6 +4011,7 @@ class MainWindow:
         self.pages["model"].refresh_providers()
         self.pages["opencode_agent"].refresh_list()
         self.pages["mcp"].refresh_list()
+        self.pages["compaction"].refresh_list()
         self.pages["permission"].refresh_list()
         self.pages["agent"].refresh_models()
         self.pages["agent"].refresh_list()
