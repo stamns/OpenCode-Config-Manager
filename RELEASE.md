@@ -1,5 +1,49 @@
 # Release Notes / 发布说明
 
+## v0.6.0 (2026-01-14)
+
+### 重大更新
+
+- **修正 Options/Variants 配置结构**（符合 OpenCode 官方规范）
+  - **options**: 模型默认配置，每次调用都会使用
+  - **variants**: 可切换变体配置，通过 `variant_cycle` 快捷键切换
+  - 更新所有预设模型配置，正确区分 options 和 variants
+
+- **新增 MCP 服务器配置管理**
+  - 支持 Local 类型：配置启动命令、环境变量
+  - 支持 Remote 类型：配置服务器 URL、请求头
+  - 支持启用/禁用、超时设置
+  - 预设常用 MCP 服务器（Context7、Sentry 等）
+
+- **新增 OpenCode 原生 Agent 配置**
+  - 模式设置：primary（主Agent）/ subagent（子Agent）/ all
+  - 参数配置：temperature、maxSteps、hidden、disable
+  - 工具权限：配置 Agent 可用的工具（write/edit/bash 等）
+  - 权限控制：配置 edit/bash/webfetch 权限级别
+  - 系统提示词：自定义 Agent 行为
+  - 预设模板：build、plan、explore、code-reviewer、docs-writer、security-auditor
+
+- **更新预设模型配置**
+  - 新增 GPT-5、GPT-5.1 Codex
+  - 新增 Claude Opus 4.5、Claude Haiku 4.5
+  - 新增 Gemini 3 Pro
+  - 新增 Minimax M2.1
+  - 更新所有模型的 options/variants 配置
+
+- **完善 Tooltip 提示**
+  - 新增 MCP 相关提示（type、command、url、headers、environment、timeout、oauth）
+  - 新增 OpenCode Agent 相关提示（mode、temperature、maxSteps、tools、permission、hidden）
+  - 新增 Options/Variants 详细说明
+  - 新增各厂商 thinking 模式参数说明
+
+### 界面改进
+
+- 侧边栏新增「Agent 配置」和「MCP 服务器」导航项
+- Agent 配置页面支持滚动，适应更多配置项
+- 预设按钮快速加载常用配置
+
+---
+
 ## v0.5.0 (2026-01-14)
 
 ### 重大更新

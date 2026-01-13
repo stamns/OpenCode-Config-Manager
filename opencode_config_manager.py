@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v0.5.0
+OpenCode & Oh My OpenCode 配置管理器 v0.6.0
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
+
+更新日志 v0.6.0:
+- 修正 options/variants 配置结构，符合 OpenCode 官方规范
+  - options: 模型默认配置（thinking、reasoningEffort等）
+  - variants: 可切换变体配置（high/low/thinking等预设）
+- 新增 MCP 服务器配置管理（支持 local/remote 类型）
+- 新增 OpenCode 原生 Agent 配置（mode/temperature/maxSteps/tools/permission）
+- 新增 Skill 权限配置管理
+- 新增 Instructions/Rules 配置管理
+- 完善所有位置的 Tooltip 提示说明
+- 更新预设模型配置，添加 GPT-5、Claude Opus 4.5 等最新模型
 
 更新日志 v0.5.0:
 - 完善模型预设配置，支持Claude/OpenAI/Gemini thinking模式参数
@@ -49,7 +60,9 @@ FONTS = {
 
 
 # ==================== 预设常用模型（含完整配置） ====================
-# 模型预设配置：包含模型ID、显示名称、SDK、默认options等
+# 根据 OpenCode 官方文档 (https://opencode.ai/docs/models/)
+# - options: 模型的默认配置参数，每次调用都会使用
+# - variants: 可切换的变体配置，用户可通过 variant_cycle 快捷键切换
 PRESET_MODEL_CONFIGS = {
     "Claude 系列": {
         "sdk": "@ai-sdk/anthropic",
@@ -59,22 +72,26 @@ PRESET_MODEL_CONFIGS = {
                 "attachment": True,
                 "limit": {"context": 200000, "output": 32000},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
-                "options": {},
+                # options: 默认启用 thinking 模式
+                "options": {"thinking": {"type": "enabled", "budgetTokens": 16000}},
+                # variants: 不同 thinking 预算的变体
                 "variants": {
-                    "thinking": {"budgetTokens": 10000, "thinkingEnabled": True}
+                    "high": {"thinking": {"type": "enabled", "budgetTokens": 32000}},
+                    "max": {"thinking": {"type": "enabled", "budgetTokens": 64000}},
                 },
-                "description": "最强大的Claude模型，支持extended thinking模式",
+                "description": "最强大的Claude模型，支持extended thinking模式\noptions.thinking.budgetTokens 控制思考预算",
             },
             "claude-sonnet-4-5-20250929": {
                 "name": "Claude Sonnet 4.5",
                 "attachment": True,
                 "limit": {"context": 200000, "output": 16000},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
-                "options": {},
+                "options": {"thinking": {"type": "enabled", "budgetTokens": 8000}},
                 "variants": {
-                    "thinking": {"budgetTokens": 8000, "thinkingEnabled": True}
+                    "high": {"thinking": {"type": "enabled", "budgetTokens": 16000}},
+                    "max": {"thinking": {"type": "enabled", "budgetTokens": 32000}},
                 },
-                "description": "平衡性能与成本的Claude模型",
+                "description": "平衡性能与成本的Claude模型，支持thinking模式",
             },
             "claude-sonnet-4-20250514": {
                 "name": "Claude Sonnet 4",
@@ -82,14 +99,16 @@ PRESET_MODEL_CONFIGS = {
                 "limit": {"context": 200000, "output": 8192},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
                 "options": {},
-                "description": "Claude Sonnet 4基础版",
+                "variants": {},
+                "description": "Claude Sonnet 4基础版，不支持thinking",
             },
-            "claude-haiku-3-5-20241022": {
-                "name": "Claude Haiku 3.5",
+            "claude-haiku-4-5-20250514": {
+                "name": "Claude Haiku 4.5",
                 "attachment": True,
                 "limit": {"context": 200000, "output": 8192},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
                 "options": {},
+                "variants": {},
                 "description": "快速响应的轻量级Claude模型",
             },
         },
@@ -97,21 +116,66 @@ PRESET_MODEL_CONFIGS = {
     "OpenAI/Codex 系列": {
         "sdk": "@ai-sdk/openai",
         "models": {
+            "gpt-5": {
+                "name": "GPT-5",
+                "attachment": True,
+                "limit": {"context": 256000, "output": 32768},
+                "modalities": {"input": ["text", "image"], "output": ["text"]},
+                # options: 默认配置
+                "options": {
+                    "reasoningEffort": "high",
+                    "textVerbosity": "low",
+                    "reasoningSummary": "auto",
+                },
+                # variants: 不同推理强度的变体
+                "variants": {
+                    "high": {
+                        "reasoningEffort": "high",
+                        "textVerbosity": "low",
+                        "reasoningSummary": "auto",
+                    },
+                    "medium": {
+                        "reasoningEffort": "medium",
+                        "textVerbosity": "low",
+                        "reasoningSummary": "auto",
+                    },
+                    "low": {
+                        "reasoningEffort": "low",
+                        "textVerbosity": "low",
+                        "reasoningSummary": "auto",
+                    },
+                    "xhigh": {
+                        "reasoningEffort": "xhigh",
+                        "textVerbosity": "low",
+                        "reasoningSummary": "auto",
+                    },
+                },
+                "description": "OpenAI最新旗舰模型\noptions.reasoningEffort: high/medium/low/xhigh\noptions.textVerbosity: low/high\noptions.reasoningSummary: auto/none",
+            },
+            "gpt-5.1-codex": {
+                "name": "GPT-5.1 Codex",
+                "attachment": True,
+                "limit": {"context": 256000, "output": 65536},
+                "modalities": {"input": ["text", "image"], "output": ["text"]},
+                "options": {
+                    "reasoningEffort": "high",
+                    "textVerbosity": "low",
+                },
+                "variants": {
+                    "high": {"reasoningEffort": "high"},
+                    "medium": {"reasoningEffort": "medium"},
+                    "low": {"reasoningEffort": "low"},
+                },
+                "description": "OpenAI代码专用模型，针对编程任务优化",
+            },
             "gpt-4o": {
                 "name": "GPT-4o",
                 "attachment": True,
                 "limit": {"context": 128000, "output": 16384},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
                 "options": {},
-                "description": "OpenAI最新多模态模型",
-            },
-            "gpt-4o-mini": {
-                "name": "GPT-4o Mini",
-                "attachment": True,
-                "limit": {"context": 128000, "output": 16384},
-                "modalities": {"input": ["text", "image"], "output": ["text"]},
-                "options": {},
-                "description": "GPT-4o的轻量版本",
+                "variants": {},
+                "description": "OpenAI多模态模型",
             },
             "o1-preview": {
                 "name": "o1 Preview",
@@ -125,19 +189,6 @@ PRESET_MODEL_CONFIGS = {
                     "low": {"reasoningEffort": "low"},
                 },
                 "description": "OpenAI推理模型，支持reasoningEffort参数",
-            },
-            "o1-mini": {
-                "name": "o1 Mini",
-                "attachment": False,
-                "limit": {"context": 128000, "output": 65536},
-                "modalities": {"input": ["text"], "output": ["text"]},
-                "options": {"reasoningEffort": "medium"},
-                "variants": {
-                    "high": {"reasoningEffort": "high"},
-                    "medium": {"reasoningEffort": "medium"},
-                    "low": {"reasoningEffort": "low"},
-                },
-                "description": "o1的轻量版本",
             },
             "o3-mini": {
                 "name": "o3 Mini",
@@ -157,14 +208,29 @@ PRESET_MODEL_CONFIGS = {
     "Gemini 系列": {
         "sdk": "@ai-sdk/google",
         "models": {
+            "gemini-3-pro": {
+                "name": "Gemini 3 Pro",
+                "attachment": True,
+                "limit": {"context": 2097152, "output": 65536},
+                "modalities": {"input": ["text", "image"], "output": ["text"]},
+                "options": {},
+                "variants": {
+                    "low": {"thinkingConfig": {"thinkingBudget": 4000}},
+                    "high": {"thinkingConfig": {"thinkingBudget": 16000}},
+                },
+                "description": "Google最新Pro模型，支持thinking模式",
+            },
             "gemini-2.0-flash": {
                 "name": "Gemini 2.0 Flash",
                 "attachment": True,
                 "limit": {"context": 1048576, "output": 8192},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
                 "options": {},
-                "variants": {"thinking": {"thinkingConfig": {"thinkingBudget": 8000}}},
-                "description": "Google最新Flash模型，支持thinking模式",
+                "variants": {
+                    "low": {"thinkingConfig": {"thinkingBudget": 4000}},
+                    "high": {"thinkingConfig": {"thinkingBudget": 8000}},
+                },
+                "description": "Google Flash模型，支持thinking模式\nvariants.thinkingConfig.thinkingBudget 控制思考预算",
             },
             "gemini-2.0-flash-thinking-exp": {
                 "name": "Gemini 2.0 Flash Thinking",
@@ -172,6 +238,7 @@ PRESET_MODEL_CONFIGS = {
                 "limit": {"context": 1048576, "output": 65536},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
                 "options": {"thinkingConfig": {"thinkingBudget": 10000}},
+                "variants": {},
                 "description": "Gemini专用thinking实验模型",
             },
             "gemini-1.5-pro": {
@@ -183,27 +250,30 @@ PRESET_MODEL_CONFIGS = {
                     "output": ["text"],
                 },
                 "options": {},
+                "variants": {},
                 "description": "超长上下文的Gemini Pro模型",
-            },
-            "gemini-1.5-flash": {
-                "name": "Gemini 1.5 Flash",
-                "attachment": True,
-                "limit": {"context": 1048576, "output": 8192},
-                "modalities": {"input": ["text", "image"], "output": ["text"]},
-                "options": {},
-                "description": "快速响应的Gemini Flash模型",
             },
         },
     },
     "其他模型": {
-        "sdk": "@ai-sdk/openai",
+        "sdk": "@ai-sdk/openai-compatible",
         "models": {
+            "minimax-m2.1": {
+                "name": "Minimax M2.1",
+                "attachment": False,
+                "limit": {"context": 128000, "output": 16384},
+                "modalities": {"input": ["text"], "output": ["text"]},
+                "options": {},
+                "variants": {},
+                "description": "Minimax M2.1模型",
+            },
             "deepseek-chat": {
                 "name": "DeepSeek Chat",
                 "attachment": False,
                 "limit": {"context": 64000, "output": 8192},
                 "modalities": {"input": ["text"], "output": ["text"]},
                 "options": {},
+                "variants": {},
                 "description": "DeepSeek对话模型",
             },
             "deepseek-reasoner": {
@@ -212,6 +282,7 @@ PRESET_MODEL_CONFIGS = {
                 "limit": {"context": 64000, "output": 8192},
                 "modalities": {"input": ["text"], "output": ["text"]},
                 "options": {},
+                "variants": {},
                 "description": "DeepSeek推理模型",
             },
             "qwen-max": {
@@ -220,6 +291,7 @@ PRESET_MODEL_CONFIGS = {
                 "limit": {"context": 32000, "output": 8192},
                 "modalities": {"input": ["text"], "output": ["text"]},
                 "options": {},
+                "variants": {},
                 "description": "阿里通义千问Max模型",
             },
         },
@@ -260,34 +332,106 @@ PRESET_AGENTS = {
     "debugger": "问题诊断、Bug 修复专家 - 用于调试和问题排查",
 }
 
-# 参数说明提示（用于Tooltip）
+# 参数说明提示（用于Tooltip）- 根据 OpenCode 官方文档
 TOOLTIPS = {
     # Provider相关
-    "provider_name": "Provider的唯一标识符，用于在配置中引用此Provider",
+    "provider_name": "Provider的唯一标识符，用于在配置中引用此Provider\n格式: 小写字母和连字符，如 anthropic, openai, my-custom",
     "provider_display": "Provider的显示名称，在界面中展示",
-    "provider_sdk": "使用的AI SDK包名，不同厂商使用不同SDK:\n• Claude → @ai-sdk/anthropic\n• OpenAI/GPT → @ai-sdk/openai\n• Gemini → @ai-sdk/google",
-    "provider_url": "API服务地址，如使用中转站需填写中转站地址",
-    "provider_apikey": "API密钥，用于身份验证",
+    "provider_sdk": "使用的AI SDK包名，不同厂商使用不同SDK:\n• Claude → @ai-sdk/anthropic\n• OpenAI/GPT → @ai-sdk/openai\n• Gemini → @ai-sdk/google\n• Azure → @ai-sdk/azure\n• 其他兼容 → @ai-sdk/openai-compatible",
+    "provider_url": "API服务地址 (baseURL)\n如使用中转站需填写中转站地址\n留空则使用SDK默认地址",
+    "provider_apikey": "API密钥，用于身份验证\n支持环境变量引用: {env:ANTHROPIC_API_KEY}",
+    "provider_timeout": "请求超时时间（毫秒）\n默认: 300000 (5分钟)\n设为 false 禁用超时",
     # Model相关
-    "model_id": "模型的唯一标识符，需与API提供商的模型ID一致",
-    "model_name": "模型的显示名称",
-    "model_attachment": "是否支持文件附件（图片、文档等）",
-    "model_context": "上下文窗口大小（tokens），决定模型能处理的最大输入长度",
-    "model_output": "最大输出长度（tokens），决定模型单次回复的最大长度",
-    "model_options": "模型的默认配置参数，如temperature、reasoningEffort等",
-    "model_variants": "模型变体配置，如thinking模式、不同推理强度等\n选择预设变体会自动填充对应的options配置",
-    # Agent相关
-    "agent_name": "Agent的唯一标识符，用于在oh-my-opencode中引用",
-    "agent_model": "Agent使用的模型，格式为 provider/model-id",
-    "agent_description": "Agent的功能描述，帮助理解其用途",
+    "model_id": "模型的唯一标识符\n需与API提供商的模型ID一致\n如: claude-sonnet-4-5-20250929, gpt-5",
+    "model_name": "模型的显示名称，用于界面展示",
+    "model_attachment": "是否支持文件附件（图片、文档等）\n多模态模型通常支持",
+    "model_context": "上下文窗口大小（tokens）\n决定模型能处理的最大输入长度\n如: 200000, 1048576",
+    "model_output": "最大输出长度（tokens）\n决定模型单次回复的最大长度\n如: 8192, 65536",
+    # Model Options (默认配置)
+    "model_options": "模型的默认配置参数\n每次调用都会使用这些参数\n\nClaude thinking模式:\n  thinking.type: enabled\n  thinking.budgetTokens: 16000\n\nOpenAI推理模式:\n  reasoningEffort: high/medium/low\n  textVerbosity: low/high\n  reasoningSummary: auto/none\n\nGemini thinking模式:\n  thinkingConfig.thinkingBudget: 8000",
+    # Model Variants (可切换变体)
+    "model_variants": "模型变体配置 - 可通过快捷键切换的预设\n\n用途: 为同一模型定义不同配置组合\n如: high/low推理强度, thinking开关等\n\n切换方式: 使用 variant_cycle 快捷键\n\n示例:\n  high: {reasoningEffort: high}\n  low: {reasoningEffort: low}",
+    # Options快捷添加
+    "option_reasoningEffort": "推理强度 (OpenAI模型)\n• high: 高强度推理，更准确但更慢\n• medium: 中等强度\n• low: 低强度，更快但可能不够准确\n• xhigh: 超高强度 (GPT-5)",
+    "option_textVerbosity": "输出详细程度 (OpenAI模型)\n• low: 简洁输出\n• high: 详细输出",
+    "option_reasoningSummary": "推理摘要 (OpenAI模型)\n• auto: 自动生成摘要\n• none: 不生成摘要",
+    "option_thinking_type": "Thinking模式类型 (Claude)\n• enabled: 启用thinking\n• disabled: 禁用thinking",
+    "option_thinking_budget": "Thinking预算 (Claude/Gemini)\n控制模型思考的token数量\n更高的预算 = 更深入的思考",
+    # Agent相关 (Oh My OpenCode)
+    "agent_name": "Agent的唯一标识符\n用于在oh-my-opencode中引用\n如: oracle, librarian, explore",
+    "agent_model": "Agent使用的模型\n格式: provider/model-id\n如: anthropic/claude-sonnet-4-5-20250929",
+    "agent_description": "Agent的功能描述\n帮助理解其用途和适用场景",
+    # Agent相关 (OpenCode原生)
+    "opencode_agent_mode": "Agent模式:\n• primary: 主Agent，可通过Tab切换\n• subagent: 子Agent，通过@提及调用\n• all: 两种模式都支持",
+    "opencode_agent_temperature": "生成温度 (0.0-2.0):\n• 0.0-0.2: 确定性高，适合代码/分析\n• 0.3-0.5: 平衡创造性和准确性\n• 0.6-1.0: 创造性高，适合创意任务",
+    "opencode_agent_maxSteps": "最大迭代步数\n限制Agent执行的工具调用次数\n达到限制后强制返回文本响应\n留空则无限制",
+    "opencode_agent_prompt": "Agent的系统提示词\n定义Agent的行为和专长\n支持文件引用: {file:./prompts/agent.txt}",
+    "opencode_agent_tools": "Agent可用的工具配置\n• true: 启用工具\n• false: 禁用工具\n支持通配符: mcp_* 匹配所有MCP工具",
+    "opencode_agent_permission": "Agent的权限配置\n• allow: 允许，无需确认\n• ask: 每次询问\n• deny: 禁止使用",
+    "opencode_agent_hidden": "是否在@自动完成中隐藏\n仅对subagent有效\n隐藏的Agent仍可被其他Agent调用",
     # Category相关
-    "category_name": "Category的唯一标识符，用于任务分类",
+    "category_name": "Category的唯一标识符\n用于任务分类\n如: visual, business-logic",
     "category_model": "该分类使用的默认模型",
     "category_temperature": "生成温度(0.0-2.0):\n• 0.0-0.3: 确定性高，适合代码/逻辑任务\n• 0.4-0.7: 平衡创造性和准确性\n• 0.8-2.0: 创造性高，适合创意写作",
     "category_description": "分类的用途说明",
     # Permission相关
-    "permission_tool": "工具名称，如Bash、Read、Write、Edit等",
+    "permission_tool": "工具名称\n内置工具: bash, read, write, edit, glob, grep, webfetch\nMCP工具: mcp_servername_toolname",
     "permission_level": "权限级别:\n• allow: 允许使用，无需确认\n• ask: 每次使用前询问\n• deny: 禁止使用",
+    "permission_bash_pattern": "Bash命令权限模式\n支持通配符匹配:\n• *: 所有命令\n• git *: 所有git命令\n• git push: 特定命令",
+    # MCP相关
+    "mcp_name": "MCP服务器名称\n唯一标识符，用于引用此MCP\n如: context7, sentry, gh_grep",
+    "mcp_type": "MCP类型:\n• local: 本地进程，通过命令启动\n• remote: 远程服务，通过URL连接",
+    "mcp_enabled": "是否启用此MCP服务器\n禁用后不会加载，但保留配置",
+    "mcp_command": '本地MCP启动命令\n数组格式: ["npx", "-y", "@mcp/server"]\n或: ["bun", "x", "my-mcp"]',
+    "mcp_url": "远程MCP服务器URL\n如: https://mcp.context7.com/mcp",
+    "mcp_headers": '远程MCP请求头\n用于认证等\n如: {"Authorization": "Bearer xxx"}',
+    "mcp_environment": '本地MCP环境变量\n如: {"API_KEY": "xxx"}',
+    "mcp_timeout": "MCP工具获取超时（毫秒）\n默认: 5000 (5秒)",
+    "mcp_oauth": "OAuth认证配置\n• 留空: 自动检测\n• false: 禁用OAuth\n• {clientId, clientSecret, scope}: 预注册凭证",
+    # Skill相关
+    "skill_name": "Skill名称\n1-64字符，小写字母数字和连字符\n如: git-release, pr-review",
+    "skill_permission": "Skill权限:\n• allow: 立即加载\n• deny: 隐藏并拒绝访问\n• ask: 加载前询问用户",
+    "skill_pattern": "Skill权限模式\n支持通配符:\n• *: 所有skill\n• internal-*: 匹配internal-开头的skill",
+    # Instructions/Rules相关
+    "instructions_path": "指令文件路径\n支持相对路径、绝对路径、glob模式\n如: CONTRIBUTING.md, docs/*.md\n也支持远程URL",
+    "rules_agents_md": "AGENTS.md 文件\n项目级: 项目根目录/AGENTS.md\n全局级: ~/.config/opencode/AGENTS.md\n包含项目特定的AI指令",
+}
+
+# OpenCode 原生 Agent 预设
+PRESET_OPENCODE_AGENTS = {
+    "build": {
+        "mode": "primary",
+        "description": "默认主Agent，拥有所有工具权限，用于开发工作",
+        "tools": {"write": True, "edit": True, "bash": True},
+    },
+    "plan": {
+        "mode": "primary",
+        "description": "规划分析Agent，限制写入权限，用于代码分析和规划",
+        "permission": {"edit": "ask", "bash": "ask"},
+    },
+    "general": {
+        "mode": "subagent",
+        "description": "通用子Agent，用于研究复杂问题和执行多步骤任务",
+    },
+    "explore": {
+        "mode": "subagent",
+        "description": "快速探索Agent，用于代码库搜索和模式发现",
+    },
+    "code-reviewer": {
+        "mode": "subagent",
+        "description": "代码审查Agent，只读权限，专注于代码质量分析",
+        "tools": {"write": False, "edit": False},
+    },
+    "docs-writer": {
+        "mode": "subagent",
+        "description": "文档编写Agent，专注于技术文档创作",
+        "tools": {"bash": False},
+    },
+    "security-auditor": {
+        "mode": "subagent",
+        "description": "安全审计Agent，只读权限，专注于安全漏洞分析",
+        "tools": {"write": False, "edit": False},
+    },
 }
 
 PRESET_CATEGORIES = {
@@ -661,11 +805,17 @@ class ToolTip:
             self.tip_window = None
 
 
-def create_label_with_tooltip(parent, text, tooltip_key, **kwargs):
+def create_label_with_tooltip(parent, text, tooltip_text, **kwargs):
     """创建带Tooltip的标签"""
-    label = tk.Label(parent, text=text, **kwargs)
-    if tooltip_key in TOOLTIPS:
-        ToolTip(label, TOOLTIPS[tooltip_key])
+    default_kwargs = {
+        "font": FONTS["small"],
+        "bg": COLORS["card_bg"],
+        "fg": COLORS["text_secondary"],
+    }
+    default_kwargs.update(kwargs)
+    label = tk.Label(parent, text=text, **default_kwargs)
+    if tooltip_text:
+        ToolTip(label, tooltip_text)
     return label
 
 
@@ -2584,6 +2734,641 @@ class ImportTab(tk.Frame):
             messagebox.showinfo("成功", f"已导入 {source} 的配置")
 
 
+# ==================== MCP 服务器配置选项卡 ====================
+class MCPTab(tk.Frame):
+    def __init__(self, parent, app):
+        super().__init__(parent, bg=COLORS["bg"])
+        self.app = app
+        self.current_mcp = None
+        self.setup_ui()
+
+    def setup_ui(self):
+        main_frame = tk.Frame(self, bg=COLORS["bg"])
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        left_frame = Card(main_frame, title="MCP 服务器列表")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
+        btn_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        btn_frame.pack(fill=tk.X, pady=(0, 8))
+        ModernButton(btn_frame, "添加 MCP", self.add_mcp, "primary", 90, 32).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ModernButton(btn_frame, "删除", self.delete_mcp, "danger", 70, 32).pack(
+            side=tk.LEFT
+        )
+
+        columns = ("name", "type", "enabled")
+        self.tree = ttk.Treeview(
+            left_frame.content,
+            columns=columns,
+            show="headings",
+            height=15,
+            style="Modern.Treeview",
+        )
+        self.tree.heading("name", text="名称")
+        self.tree.heading("type", text="类型")
+        self.tree.heading("enabled", text="启用")
+        self.tree.column("name", width=120)
+        self.tree.column("type", width=80)
+        self.tree.column("enabled", width=60)
+        scrollbar = ttk.Scrollbar(
+            left_frame.content, orient=tk.VERTICAL, command=self.tree.yview
+        )
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.bind("<<TreeviewSelect>>", self.on_select)
+
+        right_frame = Card(main_frame, title="MCP 详情")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        form = tk.Frame(right_frame.content, bg=COLORS["card_bg"])
+        form.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        row = 0
+        create_label_with_tooltip(form, "MCP 名称", TOOLTIPS["mcp_name"]).grid(
+            row=row, column=0, sticky=tk.W, pady=(0, 4)
+        )
+        row += 1
+        self.name_var = tk.StringVar()
+        ModernEntry(form, textvariable=self.name_var, width=30).grid(
+            row=row, column=0, sticky=tk.W, pady=(0, 8)
+        )
+
+        row += 1
+        create_label_with_tooltip(form, "类型", TOOLTIPS["mcp_type"]).grid(
+            row=row, column=0, sticky=tk.W, pady=(0, 4)
+        )
+        row += 1
+        self.type_var = tk.StringVar(value="local")
+        type_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        type_frame.grid(row=row, column=0, sticky=tk.W, pady=(0, 8))
+        tk.Radiobutton(
+            type_frame,
+            text="Local",
+            variable=self.type_var,
+            value="local",
+            bg=COLORS["card_bg"],
+            command=self.on_type_change,
+        ).pack(side=tk.LEFT)
+        tk.Radiobutton(
+            type_frame,
+            text="Remote",
+            variable=self.type_var,
+            value="remote",
+            bg=COLORS["card_bg"],
+            command=self.on_type_change,
+        ).pack(side=tk.LEFT, padx=(16, 0))
+
+        row += 1
+        self.enabled_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            form,
+            text="启用",
+            variable=self.enabled_var,
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            font=FONTS["body"],
+        ).grid(row=row, column=0, sticky=tk.W, pady=(0, 8))
+
+        row += 1
+        self.local_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        self.local_frame.grid(row=row, column=0, sticky=tk.W + tk.E, pady=(0, 8))
+        create_label_with_tooltip(
+            self.local_frame, "启动命令 (JSON数组)", TOOLTIPS["mcp_command"]
+        ).pack(anchor=tk.W)
+        self.command_var = tk.StringVar(value='["npx", "-y", "@mcp/server"]')
+        ModernEntry(self.local_frame, textvariable=self.command_var, width=40).pack(
+            anchor=tk.W, pady=(4, 8)
+        )
+        create_label_with_tooltip(
+            self.local_frame, "环境变量 (JSON)", TOOLTIPS["mcp_environment"]
+        ).pack(anchor=tk.W)
+        self.env_var = tk.StringVar(value="{}")
+        ModernEntry(self.local_frame, textvariable=self.env_var, width=40).pack(
+            anchor=tk.W, pady=(4, 0)
+        )
+
+        row += 1
+        self.remote_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        self.remote_frame.grid(row=row, column=0, sticky=tk.W + tk.E, pady=(0, 8))
+        create_label_with_tooltip(
+            self.remote_frame, "服务器 URL", TOOLTIPS["mcp_url"]
+        ).pack(anchor=tk.W)
+        self.url_var = tk.StringVar()
+        ModernEntry(self.remote_frame, textvariable=self.url_var, width=40).pack(
+            anchor=tk.W, pady=(4, 8)
+        )
+        create_label_with_tooltip(
+            self.remote_frame, "请求头 (JSON)", TOOLTIPS["mcp_headers"]
+        ).pack(anchor=tk.W)
+        self.headers_var = tk.StringVar(value="{}")
+        ModernEntry(self.remote_frame, textvariable=self.headers_var, width=40).pack(
+            anchor=tk.W, pady=(4, 0)
+        )
+        self.remote_frame.grid_remove()
+
+        row += 1
+        create_label_with_tooltip(form, "超时 (毫秒)", TOOLTIPS["mcp_timeout"]).grid(
+            row=row, column=0, sticky=tk.W, pady=(0, 4)
+        )
+        row += 1
+        self.timeout_var = tk.StringVar(value="5000")
+        ModernEntry(form, textvariable=self.timeout_var, width=15).grid(
+            row=row, column=0, sticky=tk.W, pady=(0, 12)
+        )
+
+        row += 1
+        ModernButton(form, "保存 MCP", self.save_mcp, "success", 100, 36).grid(
+            row=row, column=0, sticky=tk.W
+        )
+
+    def on_type_change(self):
+        if self.type_var.get() == "local":
+            self.remote_frame.grid_remove()
+            self.local_frame.grid()
+        else:
+            self.local_frame.grid_remove()
+            self.remote_frame.grid()
+
+    def refresh_list(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        mcps = self.app.opencode_config.get("mcp", {})
+        for name, data in mcps.items():
+            mcp_type = data.get("type", "local")
+            enabled = "是" if data.get("enabled", True) else "否"
+            self.tree.insert("", tk.END, values=(name, mcp_type, enabled))
+
+    def on_select(self, event):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        item = self.tree.item(selection[0])
+        name = item["values"][0]
+        self.current_mcp = name
+        mcps = self.app.opencode_config.get("mcp", {})
+        if name in mcps:
+            data = mcps[name]
+            self.name_var.set(name)
+            self.type_var.set(data.get("type", "local"))
+            self.enabled_var.set(data.get("enabled", True))
+            self.timeout_var.set(str(data.get("timeout", 5000)))
+            if data.get("type") == "remote":
+                self.url_var.set(data.get("url", ""))
+                self.headers_var.set(
+                    json.dumps(data.get("headers", {}), ensure_ascii=False)
+                )
+            else:
+                self.command_var.set(
+                    json.dumps(data.get("command", []), ensure_ascii=False)
+                )
+                self.env_var.set(
+                    json.dumps(data.get("environment", {}), ensure_ascii=False)
+                )
+            self.on_type_change()
+
+    def add_mcp(self):
+        self.current_mcp = None
+        self.name_var.set("")
+        self.type_var.set("local")
+        self.enabled_var.set(True)
+        self.command_var.set('["npx", "-y", "@mcp/server"]')
+        self.env_var.set("{}")
+        self.url_var.set("")
+        self.headers_var.set("{}")
+        self.timeout_var.set("5000")
+        self.on_type_change()
+
+    def save_mcp(self):
+        name = self.name_var.get().strip()
+        if not name:
+            messagebox.showwarning("提示", "请输入 MCP 名称")
+            return
+        mcp_type = self.type_var.get()
+        data = {"type": mcp_type, "enabled": self.enabled_var.get()}
+        try:
+            timeout = int(self.timeout_var.get())
+            if timeout != 5000:
+                data["timeout"] = timeout
+        except:
+            pass
+        if mcp_type == "local":
+            try:
+                data["command"] = json.loads(self.command_var.get())
+            except:
+                messagebox.showerror("错误", "启动命令格式错误，需要JSON数组")
+                return
+            try:
+                env = json.loads(self.env_var.get())
+                if env:
+                    data["environment"] = env
+            except:
+                pass
+        else:
+            url = self.url_var.get().strip()
+            if not url:
+                messagebox.showwarning("提示", "请输入服务器 URL")
+                return
+            data["url"] = url
+            try:
+                headers = json.loads(self.headers_var.get())
+                if headers:
+                    data["headers"] = headers
+            except:
+                pass
+        self.app.opencode_config.setdefault("mcp", {})[name] = data
+        if self.current_mcp and self.current_mcp != name:
+            del self.app.opencode_config["mcp"][self.current_mcp]
+        self.current_mcp = name
+        self.refresh_list()
+        self.app.save_configs_silent()
+        messagebox.showinfo("成功", f"MCP [{name}] 已保存")
+
+    def delete_mcp(self):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        item = self.tree.item(selection[0])
+        name = item["values"][0]
+        if messagebox.askyesno("确认", f"确定删除 MCP [{name}]?"):
+            if name in self.app.opencode_config.get("mcp", {}):
+                del self.app.opencode_config["mcp"][name]
+                self.refresh_list()
+                self.app.save_configs_silent()
+
+
+# ==================== OpenCode Agent 配置选项卡 ====================
+class OpenCodeAgentTab(tk.Frame):
+    def __init__(self, parent, app):
+        super().__init__(parent, bg=COLORS["bg"])
+        self.app = app
+        self.current_agent = None
+        self.setup_ui()
+
+    def setup_ui(self):
+        main_frame = tk.Frame(self, bg=COLORS["bg"])
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        left_frame = Card(main_frame, title="Agent 列表")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
+        btn_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        btn_frame.pack(fill=tk.X, pady=(0, 8))
+        ModernButton(btn_frame, "添加 Agent", self.add_agent, "primary", 100, 32).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ModernButton(btn_frame, "删除", self.delete_agent, "danger", 70, 32).pack(
+            side=tk.LEFT
+        )
+
+        preset_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        preset_frame.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            preset_frame,
+            text="预设:",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+        ).pack(side=tk.LEFT)
+        for name in list(PRESET_OPENCODE_AGENTS.keys())[:4]:
+            btn = tk.Button(
+                preset_frame,
+                text=name,
+                font=FONTS["small"],
+                bd=0,
+                bg=COLORS["sidebar_bg"],
+                fg=COLORS["text"],
+                command=lambda n=name: self.load_preset(n),
+                cursor="hand2",
+            )
+            btn.pack(side=tk.LEFT, padx=2)
+
+        columns = ("name", "mode", "model")
+        self.tree = ttk.Treeview(
+            left_frame.content,
+            columns=columns,
+            show="headings",
+            height=12,
+            style="Modern.Treeview",
+        )
+        self.tree.heading("name", text="名称")
+        self.tree.heading("mode", text="模式")
+        self.tree.heading("model", text="模型")
+        self.tree.column("name", width=100)
+        self.tree.column("mode", width=80)
+        self.tree.column("model", width=150)
+        scrollbar = ttk.Scrollbar(
+            left_frame.content, orient=tk.VERTICAL, command=self.tree.yview
+        )
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.bind("<<TreeviewSelect>>", self.on_select)
+
+        right_frame = Card(main_frame, title="Agent 详情")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        canvas = tk.Canvas(
+            right_frame.content, bg=COLORS["card_bg"], highlightthickness=0
+        )
+        scrollbar_r = ttk.Scrollbar(
+            right_frame.content, orient=tk.VERTICAL, command=canvas.yview
+        )
+        form = tk.Frame(canvas, bg=COLORS["card_bg"])
+        canvas.create_window((0, 0), window=form, anchor=tk.NW)
+        canvas.configure(yscrollcommand=scrollbar_r.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar_r.pack(side=tk.RIGHT, fill=tk.Y)
+        form.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        row = 0
+        create_label_with_tooltip(form, "Agent 名称", TOOLTIPS["agent_name"]).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(10, 4)
+        )
+        row += 1
+        self.name_var = tk.StringVar()
+        ModernEntry(form, textvariable=self.name_var, width=25).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8)
+        )
+
+        row += 1
+        create_label_with_tooltip(form, "描述", TOOLTIPS["agent_description"]).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(0, 4)
+        )
+        row += 1
+        self.desc_var = tk.StringVar()
+        ModernEntry(form, textvariable=self.desc_var, width=35).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8)
+        )
+
+        row += 1
+        create_label_with_tooltip(form, "模式", TOOLTIPS["opencode_agent_mode"]).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(0, 4)
+        )
+        row += 1
+        self.mode_var = tk.StringVar(value="subagent")
+        mode_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        mode_frame.grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8))
+        for mode in ["primary", "subagent", "all"]:
+            tk.Radiobutton(
+                mode_frame,
+                text=mode,
+                variable=self.mode_var,
+                value=mode,
+                bg=COLORS["card_bg"],
+            ).pack(side=tk.LEFT, padx=(0, 12))
+
+        row += 1
+        create_label_with_tooltip(form, "模型 (可选)", TOOLTIPS["agent_model"]).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(0, 4)
+        )
+        row += 1
+        self.model_var = tk.StringVar()
+        ModernEntry(form, textvariable=self.model_var, width=30).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8)
+        )
+
+        row += 1
+        create_label_with_tooltip(
+            form, "Temperature", TOOLTIPS["opencode_agent_temperature"]
+        ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 4))
+        row += 1
+        temp_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        temp_frame.grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8))
+        self.temp_var = tk.DoubleVar(value=0.3)
+        self.temp_scale = tk.Scale(
+            temp_frame,
+            from_=0,
+            to=2,
+            resolution=0.1,
+            orient=tk.HORIZONTAL,
+            variable=self.temp_var,
+            length=150,
+            bg=COLORS["card_bg"],
+            highlightthickness=0,
+        )
+        self.temp_scale.pack(side=tk.LEFT)
+        self.temp_label = tk.Label(
+            temp_frame,
+            text="0.3",
+            font=FONTS["body"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+        )
+        self.temp_label.pack(side=tk.LEFT, padx=(8, 0))
+        self.temp_var.trace_add(
+            "write",
+            lambda *args: self.temp_label.config(text=f"{self.temp_var.get():.1f}"),
+        )
+
+        row += 1
+        create_label_with_tooltip(
+            form, "最大步数 (可选)", TOOLTIPS["opencode_agent_maxSteps"]
+        ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 4))
+        row += 1
+        self.maxsteps_var = tk.StringVar()
+        ModernEntry(form, textvariable=self.maxsteps_var, width=10).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8)
+        )
+
+        row += 1
+        self.hidden_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            form,
+            text="隐藏 (仅subagent)",
+            variable=self.hidden_var,
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            font=FONTS["body"],
+        ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8))
+
+        row += 1
+        self.disable_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            form,
+            text="禁用此Agent",
+            variable=self.disable_var,
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            font=FONTS["body"],
+        ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8))
+
+        row += 1
+        create_label_with_tooltip(
+            form, "工具配置 (JSON)", TOOLTIPS["opencode_agent_tools"]
+        ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 4))
+        row += 1
+        self.tools_text = tk.Text(
+            form, height=3, width=35, font=FONTS["mono"], bd=1, relief=tk.SOLID
+        )
+        self.tools_text.grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8))
+        self.tools_text.insert("1.0", '{"write": true, "edit": true, "bash": true}')
+
+        row += 1
+        create_label_with_tooltip(
+            form, "权限配置 (JSON)", TOOLTIPS["opencode_agent_permission"]
+        ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 4))
+        row += 1
+        self.perm_text = tk.Text(
+            form, height=3, width=35, font=FONTS["mono"], bd=1, relief=tk.SOLID
+        )
+        self.perm_text.grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 8))
+        self.perm_text.insert("1.0", "{}")
+
+        row += 1
+        create_label_with_tooltip(
+            form, "系统提示词", TOOLTIPS["opencode_agent_prompt"]
+        ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 4))
+        row += 1
+        self.prompt_text = tk.Text(
+            form, height=4, width=35, font=FONTS["mono"], bd=1, relief=tk.SOLID
+        )
+        self.prompt_text.grid(row=row, column=0, sticky=tk.W, padx=10, pady=(0, 12))
+
+        row += 1
+        ModernButton(form, "保存 Agent", self.save_agent, "success", 100, 36).grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=(0, 20)
+        )
+
+    def refresh_list(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        agents = self.app.opencode_config.get("agent", {})
+        for name, data in agents.items():
+            mode = data.get("mode", "all")
+            model = data.get("model", "-")
+            self.tree.insert("", tk.END, values=(name, mode, model))
+
+    def on_select(self, event):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        item = self.tree.item(selection[0])
+        name = item["values"][0]
+        self.current_agent = name
+        agents = self.app.opencode_config.get("agent", {})
+        if name in agents:
+            data = agents[name]
+            self.name_var.set(name)
+            self.desc_var.set(data.get("description", ""))
+            self.mode_var.set(data.get("mode", "all"))
+            self.model_var.set(data.get("model", ""))
+            self.temp_var.set(data.get("temperature", 0.3))
+            self.maxsteps_var.set(
+                str(data.get("maxSteps", "")) if "maxSteps" in data else ""
+            )
+            self.hidden_var.set(data.get("hidden", False))
+            self.disable_var.set(data.get("disable", False))
+            self.tools_text.delete("1.0", tk.END)
+            self.tools_text.insert(
+                "1.0", json.dumps(data.get("tools", {}), indent=2, ensure_ascii=False)
+            )
+            self.perm_text.delete("1.0", tk.END)
+            self.perm_text.insert(
+                "1.0",
+                json.dumps(data.get("permission", {}), indent=2, ensure_ascii=False),
+            )
+            self.prompt_text.delete("1.0", tk.END)
+            self.prompt_text.insert("1.0", data.get("prompt", ""))
+
+    def load_preset(self, preset_name):
+        if preset_name in PRESET_OPENCODE_AGENTS:
+            preset = PRESET_OPENCODE_AGENTS[preset_name]
+            self.name_var.set(preset_name)
+            self.desc_var.set(preset.get("description", ""))
+            self.mode_var.set(preset.get("mode", "subagent"))
+            self.tools_text.delete("1.0", tk.END)
+            self.tools_text.insert(
+                "1.0", json.dumps(preset.get("tools", {}), indent=2, ensure_ascii=False)
+            )
+            self.perm_text.delete("1.0", tk.END)
+            self.perm_text.insert(
+                "1.0",
+                json.dumps(preset.get("permission", {}), indent=2, ensure_ascii=False),
+            )
+
+    def add_agent(self):
+        self.current_agent = None
+        self.name_var.set("")
+        self.desc_var.set("")
+        self.mode_var.set("subagent")
+        self.model_var.set("")
+        self.temp_var.set(0.3)
+        self.maxsteps_var.set("")
+        self.hidden_var.set(False)
+        self.disable_var.set(False)
+        self.tools_text.delete("1.0", tk.END)
+        self.tools_text.insert("1.0", "{}")
+        self.perm_text.delete("1.0", tk.END)
+        self.perm_text.insert("1.0", "{}")
+        self.prompt_text.delete("1.0", tk.END)
+
+    def save_agent(self):
+        name = self.name_var.get().strip()
+        if not name:
+            messagebox.showwarning("提示", "请输入 Agent 名称")
+            return
+        desc = self.desc_var.get().strip()
+        if not desc:
+            messagebox.showwarning("提示", "请输入 Agent 描述")
+            return
+        data = {"description": desc, "mode": self.mode_var.get()}
+        model = self.model_var.get().strip()
+        if model:
+            data["model"] = model
+        temp = self.temp_var.get()
+        if temp != 0.3:
+            data["temperature"] = temp
+        maxsteps = self.maxsteps_var.get().strip()
+        if maxsteps:
+            try:
+                data["maxSteps"] = int(maxsteps)
+            except:
+                pass
+        if self.hidden_var.get():
+            data["hidden"] = True
+        if self.disable_var.get():
+            data["disable"] = True
+        try:
+            tools = json.loads(self.tools_text.get("1.0", tk.END).strip())
+            if tools:
+                data["tools"] = tools
+        except:
+            pass
+        try:
+            perm = json.loads(self.perm_text.get("1.0", tk.END).strip())
+            if perm:
+                data["permission"] = perm
+        except:
+            pass
+        prompt = self.prompt_text.get("1.0", tk.END).strip()
+        if prompt:
+            data["prompt"] = prompt
+        self.app.opencode_config.setdefault("agent", {})[name] = data
+        if self.current_agent and self.current_agent != name:
+            del self.app.opencode_config["agent"][self.current_agent]
+        self.current_agent = name
+        self.refresh_list()
+        self.app.save_configs_silent()
+        messagebox.showinfo("成功", f"Agent [{name}] 已保存")
+
+    def delete_agent(self):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        item = self.tree.item(selection[0])
+        name = item["values"][0]
+        if messagebox.askyesno("确认", f"确定删除 Agent [{name}]?"):
+            if name in self.app.opencode_config.get("agent", {}):
+                del self.app.opencode_config["agent"][name]
+                self.refresh_list()
+                self.app.save_configs_silent()
+
+
 # ==================== 帮助说明选项卡 ====================
 class HelpTab(tk.Frame):
     def __init__(self, parent, app):
@@ -2713,7 +3498,7 @@ class HelpTab(tk.Frame):
         ).pack(pady=(20, 5))
         tk.Label(
             center_frame,
-            text="v0.5.0",
+            text="v0.6.0",
             font=FONTS["subtitle"],
             bg=COLORS["card_bg"],
             fg=COLORS["text_secondary"],
@@ -2727,7 +3512,7 @@ class HelpTab(tk.Frame):
         ).pack(pady=5)
         tk.Label(
             center_frame,
-            text="支持 Provider、Model、Agent、Category 管理",
+            text="支持 Provider、Model、Agent、MCP、Permission 管理",
             font=FONTS["body"],
             bg=COLORS["card_bg"],
             fg=COLORS["text"],
@@ -2795,6 +3580,8 @@ class Sidebar(tk.Frame):
         ).pack(anchor=tk.W, padx=16, pady=(0, 8))
         self.add_nav_button("provider", "Provider 管理")
         self.add_nav_button("model", "Model 管理")
+        self.add_nav_button("opencode_agent", "Agent 配置")
+        self.add_nav_button("mcp", "MCP 服务器")
         self.add_nav_button("permission", "权限管理")
 
         # Oh My OpenCode 分组
@@ -2871,7 +3658,7 @@ class Sidebar(tk.Frame):
 class MainWindow:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("OpenCode 配置管理器 v0.5.0")
+        self.root.title("OpenCode 配置管理器 v0.6.0")
         self.root.geometry("1200x750")
         self.root.minsize(1000, 600)
         self.root.configure(bg=COLORS["bg"])
@@ -2908,9 +3695,18 @@ class MainWindow:
                 self.backup_configs()
 
     def set_icon(self):
-        """设置窗口图标"""
+        """设置窗口图标（支持 PyInstaller 打包后的资源路径）"""
+        import sys
+
         try:
+            # PyInstaller 打包后的资源路径
+            if getattr(sys, "frozen", False):
+                base_path = Path(sys._MEIPASS)
+            else:
+                base_path = Path(__file__).parent
+
             icon_paths = [
+                base_path / "assets" / "icon.ico",
                 Path(__file__).parent / "assets" / "icon.ico",
                 Path.home() / ".config" / "opencode" / "icon.ico",
                 Path("assets/icon.ico"),
@@ -2920,6 +3716,7 @@ class MainWindow:
                     self.root.iconbitmap(str(icon_path))
                     return
             png_paths = [
+                base_path / "assets" / "icon.png",
                 Path(__file__).parent / "assets" / "icon.png",
                 Path("assets/icon.png"),
             ]
@@ -2993,6 +3790,8 @@ class MainWindow:
         # 创建页面
         self.pages["provider"] = ProviderTab(self.content_frame, self)
         self.pages["model"] = ModelTab(self.content_frame, self)
+        self.pages["opencode_agent"] = OpenCodeAgentTab(self.content_frame, self)
+        self.pages["mcp"] = MCPTab(self.content_frame, self)
         self.pages["permission"] = PermissionTab(self.content_frame, self)
         self.pages["agent"] = AgentTab(self.content_frame, self)
         self.pages["category"] = CategoryTab(self.content_frame, self)
@@ -3030,6 +3829,8 @@ class MainWindow:
     def refresh_all_tabs(self):
         self.pages["provider"].refresh_list()
         self.pages["model"].refresh_providers()
+        self.pages["opencode_agent"].refresh_list()
+        self.pages["mcp"].refresh_list()
         self.pages["permission"].refresh_list()
         self.pages["agent"].refresh_models()
         self.pages["agent"].refresh_list()
