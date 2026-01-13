@@ -4,7 +4,7 @@
 # 使用方法: pyinstaller OpenCodeConfigManager.spec --noconfirm
 # 构建后手动重命名为带版本号的文件名
 
-VERSION = '0.6.1'
+VERSION = '0.7.0'
 
 a = Analysis(
     ['opencode_config_manager.py'],

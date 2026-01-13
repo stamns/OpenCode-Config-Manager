@@ -1,8 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v0.6.1
+OpenCode & Oh My OpenCode 配置管理器 v0.7.0
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
+
+更新日志 v0.7.0:
+- 集成 ttkbootstrap 现代化 UI 框架
+- 支持 10 种内置主题（深色/浅色各 5 种）
+- 实时主题切换，无需重启应用
+- 工具栏按钮美化，使用 bootstyle 样式
+- 移除手动颜色配置，使用框架原生主题系统
+
+更新日志 v0.6.5:
+- 实现实时主题切换（深色/浅色模式无需重启）
+- 优化主题配色（采用现代 Fluent Design 风格）
+- 重构 ThemeManager 支持动态刷新
+- 优化 ttk 样式配置，增强视觉一致性
+
+更新日志 v0.6.4:
+- 优化深色/浅色主题配色方案
+- 新增 hover/press 状态颜色配置
+- 完善 setup_modern_styles 函数
+
+更新日志 v0.6.3:
+- 新增顶部工具栏 GitHub 链接和作者信息
+- 新增版本同步检查功能（自动检测 GitHub 最新版本）
+- 新增更新提示徽章（有新版本时显示）
+- 美化界面：统一输入框、下拉菜单、标签页样式
+- 新增 ModernCombobox、ModernCheckbutton 组件
+- 优化 Treeview、Notebook 等控件的现代化样式
+
+更新日志 v0.6.2:
+- 新增 Skill 管理功能（权限配置 + 创建SKILL.md文件）
+- 新增 Rules 管理功能（instructions配置 + 编辑AGENTS.md文件）
+- 优化 Options Tab，添加 Claude/Gemini thinking 快捷按钮
+- 扩展 TOOLTIPS 字典，添加详细的白话中文解释
+- 侧边栏文件路径只显示文件名，tooltip显示完整路径
+- 修复 Gemini 模型 thinking 配置位置（从variants移到options）
 
 更新日志 v0.6.1:
 - 新增上下文压缩 (compaction) 配置功能
@@ -33,28 +67,115 @@ OpenCode & Oh My OpenCode 配置管理器 v0.6.1
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import messagebox, scrolledtext
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from ttkbootstrap.scrolled import ScrolledFrame
 import json
 from pathlib import Path
 from datetime import datetime
 import shutil
+import webbrowser
+import urllib.request
+import urllib.error
+import threading
+import re
 
 
-# ==================== 配色方案 ====================
-COLORS = {
-    "bg": "#FAFBFC",  # 主背景色
-    "card_bg": "#FFFFFF",  # 卡片背景
-    "sidebar_bg": "#F6F8FA",  # 侧边栏背景
-    "border": "#E1E4E8",  # 边框色
-    "text": "#24292E",  # 主文字
-    "text_secondary": "#586069",  # 次要文字
-    "primary": "#0366D6",  # 主色调（蓝色）
-    "primary_hover": "#0256B9",  # 主色调悬停
-    "success": "#28A745",  # 成功色
-    "warning": "#F9A825",  # 警告色
-    "danger": "#D73A49",  # 危险色
-    "accent": "#6F42C1",  # 强调色（紫色）
+# ==================== 版本和项目信息 ====================
+APP_VERSION = "0.7.0"
+GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
+GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
+GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+AUTHOR_NAME = "IcySaint"
+AUTHOR_GITHUB = "https://github.com/icysaintdx"
+
+# ==================== 主题配置 ====================
+# 浅色主题 - 现代 Fluent Design 风格
+LIGHT_THEME = {
+    # 背景色系
+    "bg": "#F5F5F5",  # 主背景 - 柔和浅灰
+    "card_bg": "#FFFFFF",  # 卡片背景 - 纯白
+    "sidebar_bg": "#FAFAFA",  # 侧边栏背景
+    "border": "#E0E0E0",  # 边框色
+    # 文字色系
+    "text": "#1A1A1A",  # 主文字 - 深灰黑
+    "text_secondary": "#666666",  # 次要文字
+    "text_muted": "#999999",  # 弱化文字
+    # 主题色系 - 微软 Fluent 蓝
+    "primary": "#0078D4",  # 主色调
+    "primary_hover": "#106EBE",  # 悬浮色
+    "primary_light": "#E6F2FB",  # 浅色背景
+    # 状态色系
+    "success": "#107C10",  # 成功绿
+    "success_light": "#DFF6DD",
+    "warning": "#FFB900",  # 警告黄
+    "warning_light": "#FFF4CE",
+    "danger": "#D13438",  # 危险红
+    "danger_light": "#FDE7E9",
+    "accent": "#8764B8",  # 强调紫
+    "accent_light": "#F3E8FF",
+    "github": "#24292F",
+    # 输入控件
+    "input_bg": "#FFFFFF",
+    "input_border": "#D1D1D1",
+    "input_focus": "#0078D4",
+    # 滚动条
+    "scrollbar_bg": "#F0F0F0",
+    "scrollbar_fg": "#C8C8C8",
+    # 选中状态
+    "tree_selected": "#E6F2FB",
+    "tree_selected_fg": "#0078D4",
+    # 控件悬浮/按下
+    "hover": "#F0F0F0",
+    "press": "#E5E5E5",
 }
+
+# 深色主题 - 现代 Fluent Design 风格
+DARK_THEME = {
+    # 背景色系 - 柔和深色，不刺眼
+    "bg": "#1E1E1E",  # 主背景 - VS Code 同款深灰
+    "card_bg": "#2D2D2D",  # 卡片背景 - 浅一级
+    "sidebar_bg": "#252526",  # 侧边栏背景
+    "border": "#3E3E3E",  # 边框色
+    # 文字色系
+    "text": "#FFFFFF",  # 主文字 - 纯白
+    "text_secondary": "#B0B0B0",  # 次要文字
+    "text_muted": "#808080",  # 弱化文字
+    # 主题色系 - 微软 Fluent 蓝
+    "primary": "#0078D4",  # 主色调
+    "primary_hover": "#1A86D9",  # 悬浮色
+    "primary_light": "#264F78",  # 深色背景下的浅色
+    # 状态色系
+    "success": "#4CAF50",  # 成功绿
+    "success_light": "#1B3D1B",
+    "warning": "#FFB900",  # 警告黄
+    "warning_light": "#3D3000",
+    "danger": "#F44336",  # 危险红
+    "danger_light": "#4A1A1A",
+    "accent": "#B388FF",  # 强调紫
+    "accent_light": "#2D2052",
+    "github": "#FFFFFF",
+    # 输入控件
+    "input_bg": "#3C3C3C",
+    "input_border": "#4E4E4E",
+    "input_focus": "#0078D4",
+    # 滚动条
+    "scrollbar_bg": "#2D2D2D",
+    "scrollbar_fg": "#5A5A5A",
+    # 选中状态
+    "tree_selected": "#264F78",
+    "tree_selected_fg": "#FFFFFF",
+    # 控件悬浮/按下
+    "hover": "#3E3E3E",
+    "press": "#4A4A4A",
+}
+
+# 当前使用的颜色（默认浅色）
+COLORS = LIGHT_THEME.copy()
+
+# 当前主题模式: "light", "dark", "system"
+CURRENT_THEME = "system"
 
 FONTS = {
     "title": ("Microsoft YaHei UI", 14, "bold"),
@@ -219,24 +340,29 @@ PRESET_MODEL_CONFIGS = {
                 "attachment": True,
                 "limit": {"context": 2097152, "output": 65536},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
-                "options": {},
+                # options: 默认启用 thinking 模式
+                "options": {"thinkingConfig": {"thinkingBudget": 8000}},
+                # variants: 不同 thinking 预算的变体
                 "variants": {
                     "low": {"thinkingConfig": {"thinkingBudget": 4000}},
                     "high": {"thinkingConfig": {"thinkingBudget": 16000}},
+                    "max": {"thinkingConfig": {"thinkingBudget": 32000}},
                 },
-                "description": "Google最新Pro模型，支持thinking模式",
+                "description": "Google最新Pro模型，支持thinking模式\noptions.thinkingConfig.thinkingBudget 控制默认思考预算",
             },
             "gemini-2.0-flash": {
                 "name": "Gemini 2.0 Flash",
                 "attachment": True,
                 "limit": {"context": 1048576, "output": 8192},
                 "modalities": {"input": ["text", "image"], "output": ["text"]},
-                "options": {},
+                # options: 默认启用 thinking 模式
+                "options": {"thinkingConfig": {"thinkingBudget": 4000}},
+                # variants: 不同 thinking 预算的变体
                 "variants": {
-                    "low": {"thinkingConfig": {"thinkingBudget": 4000}},
+                    "low": {"thinkingConfig": {"thinkingBudget": 2000}},
                     "high": {"thinkingConfig": {"thinkingBudget": 8000}},
                 },
-                "description": "Google Flash模型，支持thinking模式\nvariants.thinkingConfig.thinkingBudget 控制思考预算",
+                "description": "Google Flash模型，支持thinking模式\noptions.thinkingConfig.thinkingBudget 控制默认思考预算",
             },
             "gemini-2.0-flash-thinking-exp": {
                 "name": "Gemini 2.0 Flash Thinking",
@@ -339,68 +465,419 @@ PRESET_AGENTS = {
 }
 
 # 参数说明提示（用于Tooltip）- 根据 OpenCode 官方文档
+# 所有提示都包含：关键字 + 白话解释 + 使用场景 + 示例
 TOOLTIPS = {
     # Provider相关
-    "provider_name": "Provider的唯一标识符，用于在配置中引用此Provider\n格式: 小写字母和连字符，如 anthropic, openai, my-custom",
-    "provider_display": "Provider的显示名称，在界面中展示",
-    "provider_sdk": "使用的AI SDK包名，不同厂商使用不同SDK:\n• Claude → @ai-sdk/anthropic\n• OpenAI/GPT → @ai-sdk/openai\n• Gemini → @ai-sdk/google\n• Azure → @ai-sdk/azure\n• 其他兼容 → @ai-sdk/openai-compatible",
-    "provider_url": "API服务地址 (baseURL)\n如使用中转站需填写中转站地址\n留空则使用SDK默认地址",
-    "provider_apikey": "API密钥，用于身份验证\n支持环境变量引用: {env:ANTHROPIC_API_KEY}",
-    "provider_timeout": "请求超时时间（毫秒）\n默认: 300000 (5分钟)\n设为 false 禁用超时",
+    "provider_name": """Provider 名称 ⓘ
+
+【作用】Provider的唯一标识符，用于在配置中引用
+
+【格式】小写字母和连字符，如 anthropic, openai, my-proxy
+
+【使用场景】配置模型时需要指定 provider/model-id 格式""",
+    "provider_display": """显示名称 ⓘ
+
+【作用】在界面中显示的友好名称
+
+【示例】Anthropic (Claude)、OpenAI 官方、我的中转站""",
+    "provider_sdk": """SDK 包名 ⓘ
+
+【作用】指定使用哪个AI SDK来调用API
+
+【选择指南】
+• Claude系列 → @ai-sdk/anthropic
+• GPT/OpenAI系列 → @ai-sdk/openai
+• Gemini系列 → @ai-sdk/google
+• Azure OpenAI → @ai-sdk/azure
+• 其他兼容API → @ai-sdk/openai-compatible
+
+【重要】SDK必须与模型厂商匹配！""",
+    "provider_url": """API 地址 (baseURL) ⓘ
+
+【作用】API服务的访问地址
+
+【使用场景】
+• 官方API → 留空（自动使用默认地址）
+• 中转站 → 填写中转站地址
+• 私有部署 → 填写私有服务地址""",
+    "provider_apikey": """API 密钥 ⓘ
+
+【作用】用于身份验证的密钥
+
+【安全提示】
+• 支持环境变量: {env:ANTHROPIC_API_KEY}
+• 不要提交到代码仓库""",
+    "provider_timeout": """请求超时 ⓘ
+
+【单位】毫秒 (ms)
+【默认】300000 (5分钟)
+【特殊值】false = 禁用超时""",
     # Model相关
-    "model_id": "模型的唯一标识符\n需与API提供商的模型ID一致\n如: claude-sonnet-4-5-20250929, gpt-5",
-    "model_name": "模型的显示名称，用于界面展示",
-    "model_attachment": "是否支持文件附件（图片、文档等）\n多模态模型通常支持",
-    "model_context": "上下文窗口大小（tokens）\n决定模型能处理的最大输入长度\n如: 200000, 1048576",
-    "model_output": "最大输出长度（tokens）\n决定模型单次回复的最大长度\n如: 8192, 65536",
-    # Model Options (默认配置)
-    "model_options": "模型的默认配置参数\n每次调用都会使用这些参数\n\nClaude thinking模式:\n  thinking.type: enabled\n  thinking.budgetTokens: 16000\n\nOpenAI推理模式:\n  reasoningEffort: high/medium/low\n  textVerbosity: low/high\n  reasoningSummary: auto/none\n\nGemini thinking模式:\n  thinkingConfig.thinkingBudget: 8000",
-    # Model Variants (可切换变体)
-    "model_variants": "模型变体配置 - 可通过快捷键切换的预设\n\n用途: 为同一模型定义不同配置组合\n如: high/low推理强度, thinking开关等\n\n切换方式: 使用 variant_cycle 快捷键\n\n示例:\n  high: {reasoningEffort: high}\n  low: {reasoningEffort: low}",
+    "model_id": """模型 ID ⓘ
+
+【作用】模型的唯一标识符，必须与API提供商一致
+
+【示例】
+• Claude: claude-sonnet-4-5-20250929
+• GPT: gpt-5, gpt-4o
+• Gemini: gemini-3-pro
+
+【重要】模型ID错误会导致API调用失败！""",
+    "model_name": """显示名称 ⓘ
+
+【作用】在界面中显示的友好名称
+
+【示例】Claude Sonnet 4.5、GPT-5 旗舰版""",
+    "model_attachment": """支持附件 ⓘ
+
+【作用】是否支持上传文件（图片、文档等）
+
+【支持情况】
+✓ 多模态模型支持（Claude、GPT-4o、Gemini）
+✗ 纯文本模型不支持（o1系列）""",
+    "model_context": """上下文窗口 ⓘ
+
+【作用】模型能处理的最大输入长度（tokens）
+
+【常见大小】
+• 128K ≈ 10万字
+• 200K ≈ 15万字
+• 1M ≈ 80万字
+• 2M ≈ 160万字""",
+    "model_output": """最大输出 ⓘ
+
+【作用】模型单次回复的最大长度（tokens）
+
+【常见大小】
+• 8K ≈ 6000字
+• 16K ≈ 12000字
+• 32K ≈ 24000字
+• 64K ≈ 48000字""",
+    "model_options": """模型默认配置 (Options) ⓘ
+
+【作用】每次调用模型时自动使用的参数
+
+【重要区别】
+• Options = 默认配置，每次都用
+• Variants = 可切换的预设，按需切换
+
+【Claude thinking模式】
+thinking.type = "enabled"
+thinking.budgetTokens = 16000
+
+【OpenAI推理模式】
+reasoningEffort = "high"
+textVerbosity = "low"
+
+【Gemini thinking模式】
+thinkingConfig.thinkingBudget = 8000
+
+【提示】选择预设模型会自动填充推荐配置""",
+    "model_variants": """模型变体 (Variants) ⓘ
+
+【作用】可通过快捷键切换的预设配置组合
+
+【使用场景】
+• 同一模型的不同配置
+• 快速切换推理强度
+• 切换thinking开关
+
+【切换方式】使用 variant_cycle 快捷键
+
+【与Options的区别】
+Options是默认值，Variants是可选预设""",
     # Options快捷添加
-    "option_reasoningEffort": "推理强度 (OpenAI模型)\n• high: 高强度推理，更准确但更慢\n• medium: 中等强度\n• low: 低强度，更快但可能不够准确\n• xhigh: 超高强度 (GPT-5)",
-    "option_textVerbosity": "输出详细程度 (OpenAI模型)\n• low: 简洁输出\n• high: 详细输出",
-    "option_reasoningSummary": "推理摘要 (OpenAI模型)\n• auto: 自动生成摘要\n• none: 不生成摘要",
-    "option_thinking_type": "Thinking模式类型 (Claude)\n• enabled: 启用thinking\n• disabled: 禁用thinking",
-    "option_thinking_budget": "Thinking预算 (Claude/Gemini)\n控制模型思考的token数量\n更高的预算 = 更深入的思考",
+    "option_reasoningEffort": """推理强度 (reasoningEffort) ⓘ
+
+【作用】控制模型的推理深度（OpenAI模型）
+
+【可选值】
+• xhigh - 超高强度（GPT-5专属）
+• high - 高强度，更准确但更慢
+• medium - 中等强度
+• low - 低强度，更快
+
+【使用建议】
+• 复杂问题 → high/xhigh
+• 简单问题 → low/medium""",
+    "option_textVerbosity": """输出详细程度 (textVerbosity) ⓘ
+
+【作用】控制回复的详细程度（OpenAI模型）
+
+【可选值】
+• low - 简洁输出
+• high - 详细输出
+
+【使用建议】
+• 代码生成 → low
+• 学习解释 → high""",
+    "option_reasoningSummary": """推理摘要 (reasoningSummary) ⓘ
+
+【作用】是否生成推理过程的摘要（OpenAI模型）
+
+【可选值】
+• auto - 自动决定
+• none - 不生成摘要""",
+    "option_thinking_type": """Thinking模式 (thinking.type) ⓘ
+
+【作用】是否启用Claude的extended thinking功能
+
+【可选值】
+• enabled - 启用thinking模式
+• disabled - 禁用thinking模式
+
+【什么是Thinking模式？】
+让Claude在回答前进行深度思考
+
+【适用模型】Claude Opus 4.5、Claude Sonnet 4.5
+
+【使用建议】
+• 复杂推理/编程 → enabled
+• 简单对话 → disabled""",
+    "option_thinking_budget": """Thinking预算 (budgetTokens) ⓘ
+
+【作用】控制模型思考的token数量
+
+【推荐值】
+• Claude: 8000-32000
+• Gemini: 4000-16000
+
+【影响】
+• 预算越高 → 思考越深入 → 回答越准确
+• 预算越高 → 消耗tokens越多 → 成本越高
+
+【使用建议】
+• 简单问题: 4000-8000
+• 复杂问题: 16000-32000
+• 极难问题: 32000-64000""",
     # Agent相关 (Oh My OpenCode)
-    "agent_name": "Agent的唯一标识符\n用于在oh-my-opencode中引用\n如: oracle, librarian, explore",
-    "agent_model": "Agent使用的模型\n格式: provider/model-id\n如: anthropic/claude-sonnet-4-5-20250929",
-    "agent_description": "Agent的功能描述\n帮助理解其用途和适用场景",
+    "agent_name": """Agent 名称 ⓘ
+
+【作用】Agent的唯一标识符
+
+【预设Agent】oracle, librarian, explore, code-reviewer""",
+    "agent_model": """绑定模型 ⓘ
+
+【格式】provider/model-id
+
+【示例】anthropic/claude-sonnet-4-5-20250929""",
+    "agent_description": """Agent 描述 ⓘ
+
+【作用】描述Agent的功能和适用场景""",
     # Agent相关 (OpenCode原生)
-    "opencode_agent_mode": "Agent模式:\n• primary: 主Agent，可通过Tab切换\n• subagent: 子Agent，通过@提及调用\n• all: 两种模式都支持",
-    "opencode_agent_temperature": "生成温度 (0.0-2.0):\n• 0.0-0.2: 确定性高，适合代码/分析\n• 0.3-0.5: 平衡创造性和准确性\n• 0.6-1.0: 创造性高，适合创意任务",
-    "opencode_agent_maxSteps": "最大迭代步数\n限制Agent执行的工具调用次数\n达到限制后强制返回文本响应\n留空则无限制",
-    "opencode_agent_prompt": "Agent的系统提示词\n定义Agent的行为和专长\n支持文件引用: {file:./prompts/agent.txt}",
-    "opencode_agent_tools": "Agent可用的工具配置\n• true: 启用工具\n• false: 禁用工具\n支持通配符: mcp_* 匹配所有MCP工具",
-    "opencode_agent_permission": "Agent的权限配置\n• allow: 允许，无需确认\n• ask: 每次询问\n• deny: 禁止使用",
-    "opencode_agent_hidden": "是否在@自动完成中隐藏\n仅对subagent有效\n隐藏的Agent仍可被其他Agent调用",
+    "opencode_agent_mode": """Agent 模式 ⓘ
+
+【可选值】
+• primary - 主Agent，可通过Tab键切换
+• subagent - 子Agent，通过@提及调用
+• all - 两种模式都支持""",
+    "opencode_agent_temperature": """生成温度 ⓘ
+
+【取值范围】0.0 - 2.0
+
+【推荐设置】
+• 0.0-0.2: 适合代码/分析
+• 0.3-0.5: 平衡创造性和准确性
+• 0.6-1.0: 适合创意任务""",
+    "opencode_agent_maxSteps": """最大步数 ⓘ
+
+【作用】限制Agent执行的工具调用次数
+
+【推荐设置】
+• 留空 = 无限制
+• 10-20: 简单任务
+• 50-100: 复杂任务""",
+    "opencode_agent_prompt": """系统提示词 ⓘ
+
+【作用】定义Agent的行为和专长
+
+【支持格式】
+• 直接写入提示词文本
+• 文件引用: {file:./prompts/agent.txt}""",
+    "opencode_agent_tools": """工具配置 ⓘ
+
+【格式】JSON对象
+
+【配置方式】
+• true - 启用工具
+• false - 禁用工具
+
+【支持通配符】mcp_* 匹配所有MCP工具""",
+    "opencode_agent_permission": """权限配置 ⓘ
+
+【权限级别】
+• allow - 允许，无需确认
+• ask - 每次询问用户
+• deny - 禁止使用""",
+    "opencode_agent_hidden": """隐藏 ⓘ
+
+【作用】是否在@自动完成中隐藏此Agent
+
+【仅对subagent有效】
+
+【注意】隐藏的Agent仍可被其他Agent调用""",
     # Category相关
-    "category_name": "Category的唯一标识符\n用于任务分类\n如: visual, business-logic",
-    "category_model": "该分类使用的默认模型",
-    "category_temperature": "生成温度(0.0-2.0):\n• 0.0-0.3: 确定性高，适合代码/逻辑任务\n• 0.4-0.7: 平衡创造性和准确性\n• 0.8-2.0: 创造性高，适合创意写作",
-    "category_description": "分类的用途说明",
+    "category_name": """Category 名称 ⓘ
+
+【预设分类】visual, business-logic, documentation, code-analysis""",
+    "category_model": """绑定模型 ⓘ
+
+【格式】provider/model-id""",
+    "category_temperature": """Temperature ⓘ
+
+【推荐设置】
+• visual (前端): 0.7
+• business-logic (后端): 0.1
+• documentation (文档): 0.3""",
+    "category_description": """分类描述 ⓘ
+
+【作用】说明该分类的用途和适用场景""",
     # Permission相关
-    "permission_tool": "工具名称\n内置工具: bash, read, write, edit, glob, grep, webfetch\nMCP工具: mcp_servername_toolname",
-    "permission_level": "权限级别:\n• allow: 允许使用，无需确认\n• ask: 每次使用前询问\n• deny: 禁止使用",
-    "permission_bash_pattern": "Bash命令权限模式\n支持通配符匹配:\n• *: 所有命令\n• git *: 所有git命令\n• git push: 特定命令",
+    "permission_tool": """工具名称 ⓘ
+
+【内置工具】Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch, Task
+
+【MCP工具格式】mcp_servername_toolname""",
+    "permission_level": """权限级别 ⓘ
+
+【可选值】
+• allow - 直接使用，无需确认
+• ask - 每次使用前询问用户
+• deny - 禁止使用
+
+【安全建议】
+• 危险操作 → ask 或 deny
+• 只读操作 → allow""",
+    "permission_bash_pattern": """Bash 命令模式 ⓘ
+
+【支持通配符】
+• * - 匹配所有命令
+• git * - 匹配所有git命令
+• git push - 匹配特定命令""",
     # MCP相关
-    "mcp_name": "MCP服务器名称\n唯一标识符，用于引用此MCP\n如: context7, sentry, gh_grep",
-    "mcp_type": "MCP类型:\n• local: 本地进程，通过命令启动\n• remote: 远程服务，通过URL连接",
-    "mcp_enabled": "是否启用此MCP服务器\n禁用后不会加载，但保留配置",
-    "mcp_command": '本地MCP启动命令\n数组格式: ["npx", "-y", "@mcp/server"]\n或: ["bun", "x", "my-mcp"]',
-    "mcp_url": "远程MCP服务器URL\n如: https://mcp.context7.com/mcp",
-    "mcp_headers": '远程MCP请求头\n用于认证等\n如: {"Authorization": "Bearer xxx"}',
-    "mcp_environment": '本地MCP环境变量\n如: {"API_KEY": "xxx"}',
-    "mcp_timeout": "MCP工具获取超时（毫秒）\n默认: 5000 (5秒)",
-    "mcp_oauth": "OAuth认证配置\n• 留空: 自动检测\n• false: 禁用OAuth\n• {clientId, clientSecret, scope}: 预注册凭证",
+    "mcp_name": """MCP 名称 ⓘ
+
+【作用】MCP服务器的唯一标识符
+
+【示例】context7, sentry, gh_grep, filesystem""",
+    "mcp_type": """MCP 类型 ⓘ
+
+【可选值】
+• local - 本地进程，通过命令启动
+• remote - 远程服务，通过URL连接""",
+    "mcp_enabled": """启用状态 ⓘ
+
+【作用】是否启用此MCP服务器
+
+禁用后保留配置但不加载""",
+    "mcp_command": """启动命令 (Local类型) ⓘ
+
+【格式】JSON数组
+
+【示例】
+["npx", "-y", "@mcp/server"]
+["bun", "x", "my-mcp"]
+["python", "-m", "mcp_server"]""",
+    "mcp_url": """服务器 URL (Remote类型) ⓘ
+
+【格式】完整的HTTP/HTTPS URL
+
+【示例】https://mcp.context7.com/mcp""",
+    "mcp_headers": """请求头 (Remote类型) ⓘ
+
+【格式】JSON对象
+
+【示例】{"Authorization": "Bearer your-api-key"}""",
+    "mcp_environment": """环境变量 (Local类型) ⓘ
+
+【格式】JSON对象
+
+【示例】{"API_KEY": "xxx", "DEBUG": "true"}""",
+    "mcp_timeout": """超时时间 ⓘ
+
+【单位】毫秒 (ms)
+【默认值】5000 (5秒)""",
+    "mcp_oauth": """OAuth 配置 ⓘ
+
+【可选值】
+• 留空 - 自动检测
+• false - 禁用OAuth
+• JSON对象 - 预注册凭证""",
     # Skill相关
-    "skill_name": "Skill名称\n1-64字符，小写字母数字和连字符\n如: git-release, pr-review",
-    "skill_permission": "Skill权限:\n• allow: 立即加载\n• deny: 隐藏并拒绝访问\n• ask: 加载前询问用户",
-    "skill_pattern": "Skill权限模式\n支持通配符:\n• *: 所有skill\n• internal-*: 匹配internal-开头的skill",
+    "skill_name": """Skill 名称 ⓘ
+
+【格式要求】
+• 1-64字符
+• 小写字母、数字、连字符
+• 不能以连字符开头或结尾
+
+【示例】git-release, pr-review, code-format""",
+    "skill_permission": """Skill 权限 ⓘ
+
+【可选值】
+• allow - 立即加载，无需确认
+• deny - 隐藏并拒绝访问
+• ask - 加载前询问用户""",
+    "skill_pattern": """权限模式 ⓘ
+
+【支持通配符】
+• * - 匹配所有Skill
+• internal-* - 匹配internal-开头的Skill""",
+    "skill_description": """Skill 描述 ⓘ
+
+【作用】描述Skill的功能，帮助Agent选择
+
+【要求】1-1024字符，具体明确""",
+    "skill_frontmatter": """SKILL.md Frontmatter ⓘ
+
+【必填字段】
+• name - Skill名称（必须与目录名一致）
+• description - 功能描述
+
+【可选字段】
+• license - 许可证
+• compatibility - 兼容性
+• metadata - 自定义元数据""",
     # Instructions/Rules相关
-    "instructions_path": "指令文件路径\n支持相对路径、绝对路径、glob模式\n如: CONTRIBUTING.md, docs/*.md\n也支持远程URL",
-    "rules_agents_md": "AGENTS.md 文件\n项目级: 项目根目录/AGENTS.md\n全局级: ~/.config/opencode/AGENTS.md\n包含项目特定的AI指令",
+    "instructions_path": """指令文件路径 ⓘ
+
+【支持格式】
+• 相对路径: CONTRIBUTING.md
+• 绝对路径: /path/to/rules.md
+• Glob模式: docs/*.md
+• 远程URL: https://example.com/rules.md""",
+    "rules_agents_md": """AGENTS.md 文件 ⓘ
+
+【文件位置】
+• 项目级: 项目根目录/AGENTS.md
+• 全局级: ~/.config/opencode/AGENTS.md
+
+【内容建议】
+• 项目结构说明
+• 代码规范要求
+• 特殊约定说明
+
+【创建方式】运行 /init 命令自动生成""",
+    # Compaction相关
+    "compaction_auto": """自动压缩 ⓘ
+
+【作用】当上下文接近满时自动压缩会话
+
+【建议】
+• 长对话 → 启用
+• 短对话 → 可以禁用
+
+【默认值】true (启用)""",
+    "compaction_prune": """修剪旧输出 ⓘ
+
+【作用】删除旧的工具输出以节省tokens
+
+【好处】
+• 节省tokens
+• 保持对话连续性
+• 减少成本
+
+【默认值】true (启用)""",
 }
 
 # OpenCode 原生 Agent 预设
@@ -768,9 +1245,154 @@ class ImportService:
         return result
 
 
+# ==================== 主题管理 ====================
+class ThemeManager:
+    """主题管理器 - 支持浅色/深色/跟随系统，实时切换无需重启"""
+
+    _instance = None
+    _callbacks = []
+    _root = None  # 主窗口引用
+    _style = None  # ttk.Style 引用
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def __init__(self):
+        self.current_mode = "system"  # "light", "dark", "system"
+        self._apply_theme()  # 初始化时应用主题
+
+    def set_root(self, root):
+        """设置主窗口引用，用于实时刷新"""
+        self._root = root
+        self._style = ttk.Style(root)
+
+    def _detect_system_theme(self):
+        """检测系统主题（Windows）"""
+        try:
+            import winreg
+
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            )
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            winreg.CloseKey(key)
+            return "light" if value == 1 else "dark"
+        except:
+            return "light"
+
+    def get_effective_theme(self):
+        """获取实际使用的主题"""
+        if self.current_mode == "system":
+            return self._detect_system_theme()
+        return self.current_mode
+
+    def set_theme(self, mode):
+        """设置主题模式"""
+        self.current_mode = mode
+        self._apply_theme()
+        self._refresh_styles()
+        for callback in self._callbacks:
+            try:
+                callback()
+            except Exception as e:
+                print(f"主题回调执行失败: {e}")
+
+    def toggle_theme(self):
+        """切换主题"""
+        effective = self.get_effective_theme()
+        if effective == "light":
+            self.set_theme("dark")
+        else:
+            self.set_theme("light")
+
+    def _apply_theme(self):
+        """应用主题到全局 COLORS"""
+        global COLORS
+        if self.get_effective_theme() == "dark":
+            COLORS.update(DARK_THEME)
+        else:
+            COLORS.update(LIGHT_THEME)
+
+    def _refresh_styles(self):
+        """刷新所有 ttk 样式"""
+        if self._style is None:
+            return
+
+        # 重新配置所有样式
+        setup_modern_styles(self._style)
+
+    def register_callback(self, callback):
+        """注册主题变更回调"""
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+
+    def unregister_callback(self, callback):
+        """取消注册主题变更回调"""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def is_dark(self):
+        """是否为深色主题"""
+        return self.get_effective_theme() == "dark"
+
+
+# ==================== 版本检查服务 ====================
+class VersionChecker:
+    """GitHub 版本检查服务"""
+
+    def __init__(self, callback=None):
+        self.callback = callback
+        self.latest_version = None
+        self.release_url = None
+        self.checking = False
+
+    def check_update_async(self):
+        """异步检查更新"""
+        if self.checking:
+            return
+        self.checking = True
+        thread = threading.Thread(target=self._check_update, daemon=True)
+        thread.start()
+
+    def _check_update(self):
+        """检查 GitHub 最新版本"""
+        try:
+            req = urllib.request.Request(
+                GITHUB_RELEASES_API, headers={"User-Agent": "OpenCode-Config-Manager"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                tag_name = data.get("tag_name", "")
+                # 提取版本号 (v0.6.3 -> 0.6.3)
+                version_match = re.search(r"v?(\d+\.\d+\.\d+)", tag_name)
+                if version_match:
+                    self.latest_version = version_match.group(1)
+                    self.release_url = data.get("html_url", GITHUB_URL + "/releases")
+                    if self.callback:
+                        self.callback(self.latest_version, self.release_url)
+        except Exception as e:
+            print(f"Version check failed: {e}")
+        finally:
+            self.checking = False
+
+    @staticmethod
+    def compare_versions(current, latest):
+        """比较版本号，返回 True 如果有新版本"""
+        try:
+            current_parts = [int(x) for x in current.split(".")]
+            latest_parts = [int(x) for x in latest.split(".")]
+            return latest_parts > current_parts
+        except:
+            return False
+
+
 # ==================== 自定义控件 ====================
 class ToolTip:
-    """鼠标悬停提示框"""
+    """鼠标悬停提示框 - 支持深色主题"""
 
     def __init__(self, widget, text):
         self.widget = widget
@@ -790,18 +1412,30 @@ class ToolTip:
         self.tip_window = tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
+
+        # 根据主题选择颜色
+        tm = ThemeManager.get_instance()
+        if tm.is_dark():
+            bg_color = "#2D333B"
+            fg_color = "#E6EDF3"
+            border_color = "#444C56"
+        else:
+            bg_color = "#FFFFD0"
+            fg_color = "#333333"
+            border_color = "#CCCC00"
+
         label = tk.Label(
             tw,
             text=self.text,
             justify=tk.LEFT,
-            background="#FFFFD0",
-            foreground="#333333",
+            background=bg_color,
+            foreground=fg_color,
             relief=tk.SOLID,
             borderwidth=1,
             font=FONTS["small"],
             padx=8,
             pady=4,
-            wraplength=300,
+            wraplength=350,
         )
         label.pack()
 
@@ -911,22 +1545,172 @@ class ModernButton(tk.Canvas):
             self.command()
 
 
+class IconButton(tk.Canvas):
+    """图标按钮（用于工具栏）"""
+
+    def __init__(
+        self,
+        parent,
+        icon_text,
+        command=None,
+        tooltip="",
+        width=32,
+        height=32,
+        bg_color=None,
+    ):
+        self.bg_color = bg_color or COLORS["card_bg"]
+        super().__init__(
+            parent, width=width, height=height, highlightthickness=0, bg=self.bg_color
+        )
+        self.command = command
+        self.icon_text = icon_text
+        self.width = width
+        self.height = height
+        self.hover = False
+        self.tooltip_text = tooltip
+
+        self.draw()
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+        self.bind("<Button-1>", self.on_click)
+
+        if tooltip:
+            ToolTip(self, tooltip)
+
+    def draw(self):
+        self.delete("all")
+        if self.hover:
+            # 绘制悬停背景
+            self.create_oval(
+                2, 2, self.width - 2, self.height - 2, fill=COLORS["border"], outline=""
+            )
+        self.create_text(
+            self.width // 2,
+            self.height // 2,
+            text=self.icon_text,
+            fill=COLORS["text"],
+            font=("Segoe UI Emoji", 12),
+        )
+
+    def on_enter(self, e):
+        self.hover = True
+        self.draw()
+
+    def on_leave(self, e):
+        self.hover = False
+        self.draw()
+
+    def on_click(self, e):
+        if self.command:
+            self.command()
+
+
+class GitHubButton(tk.Canvas):
+    """GitHub 图标按钮"""
+
+    def __init__(self, parent, command=None, tooltip="", width=28, height=28):
+        super().__init__(
+            parent,
+            width=width,
+            height=height,
+            highlightthickness=0,
+            bg=COLORS["card_bg"],
+        )
+        self.command = command
+        self.width = width
+        self.height = height
+        self.hover = False
+
+        self.draw()
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+        self.bind("<Button-1>", self.on_click)
+
+        if tooltip:
+            ToolTip(self, tooltip)
+
+    def draw(self):
+        self.delete("all")
+        # 绘制 GitHub 图标（简化版圆形）
+        cx, cy = self.width // 2, self.height // 2
+        r = min(self.width, self.height) // 2 - 2
+        fill_color = COLORS["primary"] if self.hover else COLORS["github"]
+        self.create_oval(cx - r, cy - r, cx + r, cy + r, fill=fill_color, outline="")
+        # 绘制 GitHub 猫头图标（使用文字代替）
+        self.create_text(
+            cx, cy, text="⌘", fill="#FFFFFF", font=("Segoe UI Symbol", 10, "bold")
+        )
+
+    def on_enter(self, e):
+        self.hover = True
+        self.draw()
+        self.config(cursor="hand2")
+
+    def on_leave(self, e):
+        self.hover = False
+        self.draw()
+
+    def on_click(self, e):
+        if self.command:
+            self.command()
+
+
+class UpdateBadge(tk.Frame):
+    """版本更新提示徽章"""
+
+    def __init__(self, parent, version="", url=""):
+        super().__init__(parent, bg=COLORS["card_bg"])
+        self.version = version
+        self.url = url
+        self.visible = False
+
+        self.badge = tk.Label(
+            self,
+            text=f"🔔 新版本 v{version}",
+            font=("Microsoft YaHei UI", 9),
+            bg=COLORS["success_light"],
+            fg=COLORS["success"],
+            padx=8,
+            pady=2,
+            cursor="hand2",
+        )
+        self.badge.bind("<Button-1>", self.on_click)
+        ToolTip(self.badge, f"点击下载新版本 v{version}")
+
+    def show(self, version, url):
+        self.version = version
+        self.url = url
+        self.badge.config(text=f"🔔 新版本 v{version}")
+        self.badge.pack()
+        self.visible = True
+
+    def hide(self):
+        self.badge.pack_forget()
+        self.visible = False
+
+    def on_click(self, e):
+        if self.url:
+            webbrowser.open(self.url)
+
+
 class Card(tk.Frame):
-    """卡片容器"""
+    """卡片容器 - 现代化设计"""
 
     def __init__(self, parent, title=None, **kwargs):
         super().__init__(parent, bg=COLORS["card_bg"], **kwargs)
         self.configure(highlightbackground=COLORS["border"], highlightthickness=1)
         if title:
+            title_frame = tk.Frame(self, bg=COLORS["card_bg"])
+            title_frame.pack(fill=tk.X, padx=16, pady=(16, 8))
             title_label = tk.Label(
-                self,
+                title_frame,
                 text=title,
                 font=FONTS["subtitle"],
                 bg=COLORS["card_bg"],
                 fg=COLORS["text"],
                 anchor="w",
             )
-            title_label.pack(fill=tk.X, padx=16, pady=(16, 8))
+            title_label.pack(side=tk.LEFT)
             sep = tk.Frame(self, height=1, bg=COLORS["border"])
             sep.pack(fill=tk.X, padx=16)
         self.content = tk.Frame(self, bg=COLORS["card_bg"])
@@ -934,18 +1718,28 @@ class Card(tk.Frame):
 
 
 class ModernEntry(tk.Frame):
-    """现代风格输入框"""
+    """现代风格输入框 - 带圆角效果和聚焦动画"""
 
-    def __init__(self, parent, textvariable=None, width=30, show=None, placeholder=""):
-        super().__init__(parent, bg=COLORS["card_bg"])
+    def __init__(
+        self,
+        parent,
+        textvariable=None,
+        width=30,
+        show=None,
+        placeholder="",
+        bg_color=None,
+    ):
+        bg = bg_color or COLORS["card_bg"]
+        super().__init__(parent, bg=bg)
         self.var = textvariable or tk.StringVar()
         self.placeholder = placeholder
         self.showing_placeholder = False
+        self.bg_color = bg
 
         self.container = tk.Frame(
             self,
-            bg=COLORS["card_bg"],
-            highlightbackground=COLORS["border"],
+            bg=COLORS["input_bg"],
+            highlightbackground=COLORS["input_border"],
             highlightthickness=1,
         )
         self.container.pack(fill=tk.X)
@@ -956,9 +1750,11 @@ class ModernEntry(tk.Frame):
             font=FONTS["body"],
             width=width,
             bd=0,
-            bg=COLORS["card_bg"],
+            bg=COLORS["input_bg"],
             fg=COLORS["text"],
-            insertbackground=COLORS["text"],
+            insertbackground=COLORS["primary"],
+            selectbackground=COLORS["primary_light"],
+            selectforeground=COLORS["text"],
         )
         if show:
             self.entry.config(show=show)
@@ -967,21 +1763,402 @@ class ModernEntry(tk.Frame):
         self.entry.bind("<FocusIn>", self.on_focus_in)
         self.entry.bind("<FocusOut>", self.on_focus_out)
 
+        # 显示占位符
+        if placeholder and not self.var.get():
+            self._show_placeholder()
+
+    def _show_placeholder(self):
+        if not self.var.get():
+            self.entry.config(fg=COLORS["text_muted"])
+            self.var.set(self.placeholder)
+            self.showing_placeholder = True
+
+    def _hide_placeholder(self):
+        if self.showing_placeholder:
+            self.var.set("")
+            self.entry.config(fg=COLORS["text"])
+            self.showing_placeholder = False
+
     def on_focus_in(self, e):
         self.container.config(
-            highlightbackground=COLORS["primary"], highlightthickness=2
+            highlightbackground=COLORS["input_focus"], highlightthickness=2
         )
+        self._hide_placeholder()
 
     def on_focus_out(self, e):
         self.container.config(
-            highlightbackground=COLORS["border"], highlightthickness=1
+            highlightbackground=COLORS["input_border"], highlightthickness=1
         )
+        if self.placeholder and not self.var.get():
+            self._show_placeholder()
+
+    def get(self):
+        if self.showing_placeholder:
+            return ""
+        return self.var.get()
+
+    def set(self, value):
+        self._hide_placeholder()
+        self.var.set(value)
+
+
+class ModernCombobox(tk.Frame):
+    """现代风格下拉框"""
+
+    def __init__(
+        self,
+        parent,
+        values=None,
+        textvariable=None,
+        width=28,
+        state="readonly",
+        bg_color=None,
+    ):
+        bg = bg_color or COLORS["card_bg"]
+        super().__init__(parent, bg=bg)
+        self.var = textvariable or tk.StringVar()
+
+        # 配置下拉框样式
+        style = ttk.Style()
+        style.configure(
+            "Modern.TCombobox",
+            fieldbackground=COLORS["input_bg"],
+            background=COLORS["input_bg"],
+            foreground=COLORS["text"],
+            arrowcolor=COLORS["text_secondary"],
+            borderwidth=1,
+            relief="flat",
+            padding=(8, 6),
+        )
+        style.map(
+            "Modern.TCombobox",
+            fieldbackground=[
+                ("readonly", COLORS["input_bg"]),
+                ("disabled", COLORS["sidebar_bg"]),
+            ],
+            foreground=[("disabled", COLORS["text_muted"])],
+            bordercolor=[("focus", COLORS["input_focus"])],
+        )
+
+        self.combobox = ttk.Combobox(
+            self,
+            textvariable=self.var,
+            values=values or [],
+            width=width,
+            state=state,
+            style="Modern.TCombobox",
+            font=FONTS["body"],
+        )
+        self.combobox.pack(fill=tk.X)
 
     def get(self):
         return self.var.get()
 
     def set(self, value):
         self.var.set(value)
+
+    def config(self, **kwargs):
+        if "values" in kwargs:
+            self.combobox["values"] = kwargs.pop("values")
+        if "state" in kwargs:
+            self.combobox["state"] = kwargs.pop("state")
+        if kwargs:
+            self.combobox.config(**kwargs)
+
+    def bind(self, event, handler):
+        self.combobox.bind(event, handler)
+
+    def current(self, index=None):
+        if index is not None:
+            self.combobox.current(index)
+        else:
+            return self.combobox.current()
+
+
+class ModernCheckbutton(tk.Frame):
+    """现代风格复选框"""
+
+    def __init__(self, parent, text="", variable=None, command=None, bg_color=None):
+        bg = bg_color or COLORS["card_bg"]
+        super().__init__(parent, bg=bg)
+        self.var = variable or tk.BooleanVar()
+
+        self.check = tk.Checkbutton(
+            self,
+            text=text,
+            variable=self.var,
+            command=command,
+            font=FONTS["body"],
+            bg=bg,
+            fg=COLORS["text"],
+            activebackground=bg,
+            activeforeground=COLORS["text"],
+            selectcolor=COLORS["input_bg"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.check.pack(side=tk.LEFT)
+
+    def get(self):
+        return self.var.get()
+
+    def set(self, value):
+        self.var.set(value)
+
+
+def setup_modern_styles(style=None):
+    """配置全局现代化样式，支持动态刷新
+
+    Args:
+        style: ttk.Style 实例，如果为 None 则创建新实例
+    """
+    if style is None:
+        style = ttk.Style()
+
+    # 使用 clam 主题作为基础（更现代）
+    try:
+        style.theme_use("clam")
+    except:
+        pass
+
+    # ========== 通用基础样式 ==========
+    style.configure(
+        ".",
+        background=COLORS["bg"],
+        foreground=COLORS["text"],
+        bordercolor=COLORS["border"],
+        darkcolor=COLORS["border"],
+        lightcolor=COLORS["border"],
+        troughcolor=COLORS["sidebar_bg"],
+        selectbackground=COLORS["primary"],
+        selectforeground="#FFFFFF",
+        fieldbackground=COLORS["input_bg"],
+        font=FONTS["body"],
+    )
+
+    # ========== Treeview 样式 ==========
+    style.configure(
+        "Modern.Treeview",
+        background=COLORS["card_bg"],
+        foreground=COLORS["text"],
+        fieldbackground=COLORS["card_bg"],
+        rowheight=32,
+        font=FONTS["body"],
+        borderwidth=0,
+        relief="flat",
+    )
+    style.configure(
+        "Modern.Treeview.Heading",
+        font=("Microsoft YaHei UI", 9, "bold"),
+        background=COLORS["sidebar_bg"],
+        foreground=COLORS["text_secondary"],
+        borderwidth=0,
+        relief="flat",
+        padding=(8, 6),
+    )
+    style.map(
+        "Modern.Treeview",
+        background=[("selected", COLORS["tree_selected"])],
+        foreground=[("selected", COLORS["tree_selected_fg"])],
+    )
+    style.map(
+        "Modern.Treeview.Heading",
+        background=[("active", COLORS["border"])],
+    )
+
+    # ========== Notebook (标签页) 样式 ==========
+    style.configure(
+        "Modern.TNotebook",
+        background=COLORS["bg"],
+        borderwidth=0,
+        tabmargins=[4, 4, 4, 0],
+    )
+    style.configure(
+        "Modern.TNotebook.Tab",
+        background=COLORS["sidebar_bg"],
+        foreground=COLORS["text_secondary"],
+        padding=[20, 10],
+        font=("Microsoft YaHei UI", 10),
+        borderwidth=0,
+    )
+    style.map(
+        "Modern.TNotebook.Tab",
+        background=[("selected", COLORS["card_bg"]), ("active", COLORS["hover"])],
+        foreground=[("selected", COLORS["primary"]), ("active", COLORS["text"])],
+        expand=[("selected", [0, 0, 0, 2])],
+    )
+
+    # ========== Scrollbar 样式 ==========
+    style.configure(
+        "Modern.Vertical.TScrollbar",
+        background=COLORS["scrollbar_fg"],
+        troughcolor=COLORS["scrollbar_bg"],
+        borderwidth=0,
+        arrowsize=0,
+        width=8,
+    )
+    style.map(
+        "Modern.Vertical.TScrollbar",
+        background=[
+            ("active", COLORS["text_secondary"]),
+            ("pressed", COLORS["primary"]),
+        ],
+    )
+
+    # ========== Combobox 样式 ==========
+    style.configure(
+        "Modern.TCombobox",
+        fieldbackground=COLORS["input_bg"],
+        background=COLORS["input_bg"],
+        foreground=COLORS["text"],
+        arrowcolor=COLORS["text_secondary"],
+        borderwidth=1,
+        relief="flat",
+        padding=(10, 8),
+        arrowsize=14,
+    )
+    style.map(
+        "Modern.TCombobox",
+        fieldbackground=[
+            ("readonly", COLORS["input_bg"]),
+            ("disabled", COLORS["sidebar_bg"]),
+            ("focus", COLORS["input_bg"]),
+        ],
+        foreground=[("disabled", COLORS["text_muted"])],
+        bordercolor=[("focus", COLORS["input_focus"])],
+    )
+
+    # ========== Entry 样式 ==========
+    style.configure(
+        "Modern.TEntry",
+        fieldbackground=COLORS["input_bg"],
+        foreground=COLORS["text"],
+        borderwidth=1,
+        relief="flat",
+        padding=(10, 8),
+    )
+    style.map(
+        "Modern.TEntry",
+        fieldbackground=[
+            ("focus", COLORS["input_bg"]),
+            ("disabled", COLORS["sidebar_bg"]),
+        ],
+        bordercolor=[("focus", COLORS["input_focus"])],
+    )
+
+    # ========== Button 样式 ==========
+    style.configure(
+        "Modern.TButton",
+        background=COLORS["primary"],
+        foreground="#FFFFFF",
+        borderwidth=0,
+        padding=(16, 8),
+        font=FONTS["body"],
+    )
+    style.map(
+        "Modern.TButton",
+        background=[
+            ("active", COLORS["primary_hover"]),
+            ("pressed", COLORS["primary_hover"]),
+        ],
+    )
+
+    # Secondary Button 样式
+    style.configure(
+        "Secondary.TButton",
+        background=COLORS["sidebar_bg"],
+        foreground=COLORS["text"],
+        borderwidth=1,
+        padding=(16, 8),
+        font=FONTS["body"],
+    )
+    style.map(
+        "Secondary.TButton",
+        background=[
+            ("active", COLORS["hover"]),
+            ("pressed", COLORS["press"]),
+        ],
+    )
+
+    # ========== Checkbutton 样式 ==========
+    style.configure(
+        "Modern.TCheckbutton",
+        background=COLORS["card_bg"],
+        foreground=COLORS["text"],
+        font=FONTS["body"],
+        indicatorbackground=COLORS["input_bg"],
+        indicatorforeground=COLORS["primary"],
+    )
+    style.map(
+        "Modern.TCheckbutton",
+        background=[("active", COLORS["card_bg"])],
+        indicatorbackground=[("selected", COLORS["primary"])],
+    )
+
+    # ========== Radiobutton 样式 ==========
+    style.configure(
+        "Modern.TRadiobutton",
+        background=COLORS["card_bg"],
+        foreground=COLORS["text"],
+        font=FONTS["body"],
+        indicatorbackground=COLORS["input_bg"],
+    )
+    style.map(
+        "Modern.TRadiobutton",
+        background=[("active", COLORS["card_bg"])],
+        indicatorbackground=[("selected", COLORS["primary"])],
+    )
+
+    # ========== LabelFrame 样式 ==========
+    style.configure(
+        "Modern.TLabelframe",
+        background=COLORS["card_bg"],
+        foreground=COLORS["text"],
+        borderwidth=1,
+        relief="flat",
+    )
+    style.configure(
+        "Modern.TLabelframe.Label",
+        background=COLORS["card_bg"],
+        foreground=COLORS["text_secondary"],
+        font=("Microsoft YaHei UI", 9, "bold"),
+    )
+
+    # ========== Frame 样式 ==========
+    style.configure(
+        "Card.TFrame",
+        background=COLORS["card_bg"],
+    )
+    style.configure(
+        "Sidebar.TFrame",
+        background=COLORS["sidebar_bg"],
+    )
+
+    # ========== Label 样式 ==========
+    style.configure(
+        "TLabel",
+        background=COLORS["bg"],
+        foreground=COLORS["text"],
+    )
+    style.configure(
+        "Card.TLabel",
+        background=COLORS["card_bg"],
+        foreground=COLORS["text"],
+    )
+    style.configure(
+        "Title.TLabel",
+        background=COLORS["bg"],
+        foreground=COLORS["text"],
+        font=FONTS["title"],
+    )
+    style.configure(
+        "Subtitle.TLabel",
+        background=COLORS["bg"],
+        foreground=COLORS["text_secondary"],
+        font=FONTS["subtitle"],
+    )
+
+    return style
 
 
 # ==================== Provider 管理选项卡 ====================
@@ -1505,23 +2682,74 @@ class ModelTab(tk.Frame):
         form = tk.Frame(parent, bg=COLORS["card_bg"])
         form.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        tk.Label(
-            form,
-            text="模型 Options 配置（键值对）",
-            font=FONTS["small"],
+        # 标题带tooltip
+        title_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        title_frame.pack(anchor=tk.W, pady=(0, 8))
+        lbl = create_label_with_tooltip(
+            title_frame,
+            "模型 Options 配置 ⓘ",
+            TOOLTIPS.get("model_options", ""),
+            font=FONTS["subtitle"],
             bg=COLORS["card_bg"],
-            fg=COLORS["text_secondary"],
-        ).pack(anchor=tk.W, pady=(0, 8))
+            fg=COLORS["text"],
+        )
+        lbl.pack(side=tk.LEFT)
 
-        preset_frame = tk.Frame(form, bg=COLORS["card_bg"])
-        preset_frame.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(
-            preset_frame,
-            text="快捷添加:",
+        # Claude Thinking 快捷添加
+        claude_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        claude_frame.pack(fill=tk.X, pady=(0, 8))
+        lbl = create_label_with_tooltip(
+            claude_frame,
+            "Claude Thinking ⓘ",
+            TOOLTIPS.get("option_thinking_type", ""),
             font=FONTS["small"],
             bg=COLORS["card_bg"],
-            fg=COLORS["text_secondary"],
-        ).pack(side=tk.LEFT)
+            fg=COLORS["accent"],
+        )
+        lbl.pack(side=tk.LEFT)
+        tk.Button(
+            claude_frame,
+            text="thinking.type=enabled",
+            font=FONTS["small"],
+            bd=0,
+            bg=COLORS["accent"],
+            fg="#FFFFFF",
+            command=lambda: self.add_thinking_config("type", "enabled"),
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=(8, 2))
+        tk.Button(
+            claude_frame,
+            text="budgetTokens=16000",
+            font=FONTS["small"],
+            bd=0,
+            bg=COLORS["accent"],
+            fg="#FFFFFF",
+            command=lambda: self.add_thinking_config("budgetTokens", 16000),
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=2)
+        tk.Button(
+            claude_frame,
+            text="一键添加Thinking",
+            font=FONTS["small"],
+            bd=0,
+            bg=COLORS["success"],
+            fg="#FFFFFF",
+            command=self.add_full_thinking_config,
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        # OpenAI 快捷添加
+        openai_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        openai_frame.pack(fill=tk.X, pady=(0, 8))
+        lbl = create_label_with_tooltip(
+            openai_frame,
+            "OpenAI 推理 ⓘ",
+            TOOLTIPS.get("option_reasoningEffort", ""),
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["primary"],
+        )
+        lbl.pack(side=tk.LEFT)
         presets = [
             ("reasoningEffort", "high"),
             ("textVerbosity", "low"),
@@ -1529,8 +2757,8 @@ class ModelTab(tk.Frame):
         ]
         for key, val in presets:
             btn = tk.Button(
-                preset_frame,
-                text=key,
+                openai_frame,
+                text=f"{key}={val}",
                 font=FONTS["small"],
                 bd=0,
                 bg=COLORS["sidebar_bg"],
@@ -1539,6 +2767,39 @@ class ModelTab(tk.Frame):
                 cursor="hand2",
             )
             btn.pack(side=tk.LEFT, padx=2)
+
+        # Gemini Thinking 快捷添加
+        gemini_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        gemini_frame.pack(fill=tk.X, pady=(0, 8))
+        lbl = create_label_with_tooltip(
+            gemini_frame,
+            "Gemini Thinking ⓘ",
+            TOOLTIPS.get("option_thinking_budget", ""),
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["success"],
+        )
+        lbl.pack(side=tk.LEFT)
+        tk.Button(
+            gemini_frame,
+            text="thinkingBudget=8000",
+            font=FONTS["small"],
+            bd=0,
+            bg=COLORS["success"],
+            fg="#FFFFFF",
+            command=lambda: self.add_gemini_thinking_config(8000),
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=(8, 2))
+        tk.Button(
+            gemini_frame,
+            text="thinkingBudget=16000",
+            font=FONTS["small"],
+            bd=0,
+            bg=COLORS["success"],
+            fg="#FFFFFF",
+            command=lambda: self.add_gemini_thinking_config(16000),
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=2)
 
         list_frame = tk.Frame(form, bg=COLORS["card_bg"])
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
@@ -1709,6 +2970,29 @@ class ModelTab(tk.Frame):
     def add_option_preset(self, key, value):
         self.option_key_var.set(key)
         self.option_value_var.set(value)
+
+    def add_thinking_config(self, param, value):
+        """添加Claude thinking配置参数"""
+        options = self.current_model_data.setdefault("options", {})
+        thinking = options.setdefault("thinking", {})
+        thinking[param] = value
+        self.refresh_options_tree()
+
+    def add_full_thinking_config(self):
+        """一键添加完整的Claude thinking配置"""
+        options = self.current_model_data.setdefault("options", {})
+        options["thinking"] = {"type": "enabled", "budgetTokens": 16000}
+        self.refresh_options_tree()
+        messagebox.showinfo(
+            "成功",
+            "已添加 Claude Thinking 配置:\nthinking.type = enabled\nthinking.budgetTokens = 16000",
+        )
+
+    def add_gemini_thinking_config(self, budget):
+        """添加Gemini thinking配置"""
+        options = self.current_model_data.setdefault("options", {})
+        options["thinkingConfig"] = {"thinkingBudget": budget}
+        self.refresh_options_tree()
 
     def add_option(self):
         key = self.option_key_var.get().strip()
@@ -2863,6 +4147,574 @@ class CompactionTab(tk.Frame):
         messagebox.showinfo("成功", "上下文压缩配置已保存")
 
 
+# ==================== Skill 管理选项卡 ====================
+class SkillTab(tk.Frame):
+    """Skill权限管理和SKILL.md文件创建"""
+
+    def __init__(self, parent, app):
+        super().__init__(parent, bg=COLORS["bg"])
+        self.app = app
+        self.setup_ui()
+
+    def setup_ui(self):
+        main_frame = tk.Frame(self, bg=COLORS["bg"])
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 左侧：Skill权限配置
+        left_frame = Card(main_frame, title="Skill 权限配置")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
+        # 说明
+        desc_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        desc_frame.pack(fill=tk.X, pady=(0, 12))
+        tk.Label(
+            desc_frame,
+            text="配置Skill的加载权限。Skill是可复用的指令文件，Agent可按需加载。",
+            font=FONTS["body"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            wraplength=350,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+
+        # 权限列表
+        btn_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        btn_frame.pack(fill=tk.X, pady=(0, 8))
+        ModernButton(
+            btn_frame, "添加权限", self.add_permission, "primary", 90, 32
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ModernButton(btn_frame, "删除", self.delete_permission, "danger", 70, 32).pack(
+            side=tk.LEFT
+        )
+
+        columns = ("pattern", "permission")
+        self.tree = ttk.Treeview(
+            left_frame.content,
+            columns=columns,
+            show="headings",
+            height=8,
+            style="Modern.Treeview",
+        )
+        self.tree.heading("pattern", text="模式")
+        self.tree.heading("permission", text="权限")
+        self.tree.column("pattern", width=150)
+        self.tree.column("permission", width=80)
+        scrollbar = ttk.Scrollbar(
+            left_frame.content, orient=tk.VERTICAL, command=self.tree.yview
+        )
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.bind("<<TreeviewSelect>>", self.on_select)
+
+        # 编辑区域
+        edit_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        edit_frame.pack(fill=tk.X, pady=(12, 0))
+
+        row = 0
+        create_label_with_tooltip(
+            edit_frame, "模式 ⓘ", TOOLTIPS.get("skill_pattern", "")
+        ).grid(row=row, column=0, sticky=tk.W, pady=(0, 4))
+        row += 1
+        self.pattern_var = tk.StringVar(value="*")
+        ModernEntry(edit_frame, textvariable=self.pattern_var, width=20).grid(
+            row=row, column=0, sticky=tk.W, pady=(0, 8)
+        )
+
+        row += 1
+        create_label_with_tooltip(
+            edit_frame, "权限 ⓘ", TOOLTIPS.get("skill_permission", "")
+        ).grid(row=row, column=0, sticky=tk.W, pady=(0, 4))
+        row += 1
+        self.perm_var = tk.StringVar(value="ask")
+        perm_frame = tk.Frame(edit_frame, bg=COLORS["card_bg"])
+        perm_frame.grid(row=row, column=0, sticky=tk.W, pady=(0, 8))
+        for val, txt, color in [
+            ("allow", "允许", COLORS["success"]),
+            ("ask", "询问", COLORS["warning"]),
+            ("deny", "拒绝", COLORS["danger"]),
+        ]:
+            tk.Radiobutton(
+                perm_frame,
+                text=txt,
+                variable=self.perm_var,
+                value=val,
+                bg=COLORS["card_bg"],
+                fg=color,
+                font=FONTS["body"],
+            ).pack(side=tk.LEFT, padx=(0, 12))
+
+        row += 1
+        ModernButton(
+            edit_frame, "保存权限", self.save_permission, "success", 90, 32
+        ).grid(row=row, column=0, sticky=tk.W, pady=(8, 0))
+
+        # 右侧：创建SKILL.md
+        right_frame = Card(main_frame, title="创建 SKILL.md")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        form = tk.Frame(right_frame.content, bg=COLORS["card_bg"])
+        form.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Skill名称
+        create_label_with_tooltip(
+            form, "Skill 名称 ⓘ", TOOLTIPS.get("skill_name", "")
+        ).pack(anchor=tk.W)
+        self.skill_name_var = tk.StringVar()
+        ModernEntry(form, textvariable=self.skill_name_var, width=30).pack(
+            anchor=tk.W, pady=(4, 8)
+        )
+
+        # Skill描述
+        create_label_with_tooltip(
+            form, "描述 ⓘ", TOOLTIPS.get("skill_description", "")
+        ).pack(anchor=tk.W)
+        self.skill_desc_var = tk.StringVar()
+        ModernEntry(form, textvariable=self.skill_desc_var, width=40).pack(
+            anchor=tk.W, pady=(4, 8)
+        )
+
+        # Skill内容
+        tk.Label(
+            form,
+            text="Skill 内容（Markdown格式）",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+        ).pack(anchor=tk.W)
+        self.skill_content_text = scrolledtext.ScrolledText(
+            form, height=10, width=45, font=FONTS["mono"], bd=1, relief=tk.SOLID
+        )
+        self.skill_content_text.pack(fill=tk.BOTH, expand=True, pady=(4, 8))
+        self.skill_content_text.insert(
+            "1.0",
+            """## What I do
+- 描述这个Skill的功能
+
+## When to use me
+- 描述何时使用这个Skill
+
+## Instructions
+- 具体的指令内容
+""",
+        )
+
+        # 位置选择
+        loc_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        loc_frame.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            loc_frame,
+            text="保存位置:",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+        ).pack(side=tk.LEFT)
+        self.skill_location_var = tk.StringVar(value="global")
+        tk.Radiobutton(
+            loc_frame,
+            text="全局 (~/.config/opencode/skill/)",
+            variable=self.skill_location_var,
+            value="global",
+            bg=COLORS["card_bg"],
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Radiobutton(
+            loc_frame,
+            text="项目 (.opencode/skill/)",
+            variable=self.skill_location_var,
+            value="project",
+            bg=COLORS["card_bg"],
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        # 按钮
+        btn_frame2 = tk.Frame(form, bg=COLORS["card_bg"])
+        btn_frame2.pack(fill=tk.X)
+        ModernButton(
+            btn_frame2, "创建 SKILL.md", self.create_skill, "success", 120, 36
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ModernButton(btn_frame2, "预览", self.preview_skill, "secondary", 70, 36).pack(
+            side=tk.LEFT
+        )
+
+    def refresh_list(self):
+        """刷新权限列表"""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        permissions = self.app.opencode_config.get("permission", {}).get("skill", {})
+        # 确保 permissions 是字典类型
+        if isinstance(permissions, dict):
+            for pattern, perm in permissions.items():
+                self.tree.insert("", tk.END, values=(pattern, perm))
+        elif isinstance(permissions, str):
+            # 如果是字符串，显示为单条记录
+            self.tree.insert("", tk.END, values=("*", permissions))
+
+    def on_select(self, event):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        item = self.tree.item(selection[0])
+        self.pattern_var.set(item["values"][0])
+        self.perm_var.set(item["values"][1])
+
+    def add_permission(self):
+        self.pattern_var.set("")
+        self.perm_var.set("ask")
+
+    def delete_permission(self):
+        selection = self.tree.selection()
+        if not selection:
+            return
+        item = self.tree.item(selection[0])
+        pattern = item["values"][0]
+        if messagebox.askyesno("确认", f"删除 Skill 权限 [{pattern}]?"):
+            skill_perms = self.app.opencode_config.get("permission", {}).get(
+                "skill", {}
+            )
+            if pattern in skill_perms:
+                del skill_perms[pattern]
+                self.app.save_configs_silent()
+                self.refresh_list()
+
+    def save_permission(self):
+        pattern = self.pattern_var.get().strip()
+        if not pattern:
+            messagebox.showwarning("提示", "请输入模式")
+            return
+        perm = self.app.opencode_config.setdefault("permission", {})
+        skill_perm = perm.setdefault("skill", {})
+        skill_perm[pattern] = self.perm_var.get()
+        self.app.save_configs_silent()
+        self.refresh_list()
+        messagebox.showinfo("成功", f"Skill 权限 [{pattern}] 已保存")
+
+    def preview_skill(self):
+        """预览SKILL.md内容"""
+        name = self.skill_name_var.get().strip()
+        desc = self.skill_desc_var.get().strip()
+        content = self.skill_content_text.get("1.0", tk.END).strip()
+
+        if not name or not desc:
+            messagebox.showwarning("提示", "请填写Skill名称和描述")
+            return
+
+        preview = f"""---
+name: {name}
+description: {desc}
+---
+
+{content}
+"""
+        # 显示预览窗口
+        preview_win = tk.Toplevel(self)
+        preview_win.title(f"预览: {name}/SKILL.md")
+        preview_win.geometry("500x400")
+        text = scrolledtext.ScrolledText(preview_win, font=FONTS["mono"])
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        text.insert("1.0", preview)
+        text.config(state=tk.DISABLED)
+
+    def create_skill(self):
+        """创建SKILL.md文件"""
+        name = self.skill_name_var.get().strip()
+        desc = self.skill_desc_var.get().strip()
+        content = self.skill_content_text.get("1.0", tk.END).strip()
+
+        if not name:
+            messagebox.showwarning("提示", "请输入Skill名称")
+            return
+        if not desc:
+            messagebox.showwarning("提示", "请输入Skill描述")
+            return
+
+        # 验证名称格式
+        import re
+
+        if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", name):
+            messagebox.showerror(
+                "错误",
+                "Skill名称格式错误！\n要求：小写字母、数字、连字符，不能以连字符开头或结尾",
+            )
+            return
+
+        # 确定保存路径
+        if self.skill_location_var.get() == "global":
+            base_path = Path.home() / ".config" / "opencode" / "skill"
+        else:
+            base_path = Path.cwd() / ".opencode" / "skill"
+
+        skill_dir = base_path / name
+        skill_file = skill_dir / "SKILL.md"
+
+        # 创建目录和文件
+        try:
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            skill_content = f"""---
+name: {name}
+description: {desc}
+---
+
+{content}
+"""
+            with open(skill_file, "w", encoding="utf-8") as f:
+                f.write(skill_content)
+
+            messagebox.showinfo("成功", f"Skill 已创建:\n{skill_file}")
+        except Exception as e:
+            messagebox.showerror("错误", f"创建失败: {e}")
+
+
+# ==================== Rules/Instructions 管理选项卡 ====================
+class RulesTab(tk.Frame):
+    """Rules/Instructions管理和AGENTS.md文件编辑"""
+
+    def __init__(self, parent, app):
+        super().__init__(parent, bg=COLORS["bg"])
+        self.app = app
+        self.setup_ui()
+
+    def setup_ui(self):
+        main_frame = tk.Frame(self, bg=COLORS["bg"])
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 左侧：Instructions配置
+        left_frame = Card(main_frame, title="Instructions 配置")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
+        # 说明
+        desc_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        desc_frame.pack(fill=tk.X, pady=(0, 12))
+        tk.Label(
+            desc_frame,
+            text="配置额外的指令文件，这些文件会与AGENTS.md合并加载。",
+            font=FONTS["body"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            wraplength=350,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+
+        # Instructions列表
+        btn_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        btn_frame.pack(fill=tk.X, pady=(0, 8))
+        ModernButton(btn_frame, "添加", self.add_instruction, "primary", 70, 32).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ModernButton(btn_frame, "删除", self.delete_instruction, "danger", 70, 32).pack(
+            side=tk.LEFT
+        )
+
+        self.instructions_listbox = tk.Listbox(
+            left_frame.content,
+            height=8,
+            font=FONTS["body"],
+            bd=1,
+            relief=tk.SOLID,
+            selectmode=tk.SINGLE,
+        )
+        self.instructions_listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        # 添加输入框
+        add_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        add_frame.pack(fill=tk.X, pady=(0, 8))
+        create_label_with_tooltip(
+            add_frame, "文件路径 ⓘ", TOOLTIPS.get("instructions_path", "")
+        ).pack(anchor=tk.W)
+        self.instruction_path_var = tk.StringVar()
+        ModernEntry(add_frame, textvariable=self.instruction_path_var, width=35).pack(
+            anchor=tk.W, pady=(4, 0)
+        )
+
+        # 常用路径快捷按钮
+        quick_frame = tk.Frame(left_frame.content, bg=COLORS["card_bg"])
+        quick_frame.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            quick_frame,
+            text="快捷:",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+        ).pack(side=tk.LEFT)
+        for path in ["CONTRIBUTING.md", "docs/*.md", ".cursor/rules/*.md"]:
+            tk.Button(
+                quick_frame,
+                text=path,
+                font=FONTS["small"],
+                bd=0,
+                bg=COLORS["sidebar_bg"],
+                fg=COLORS["text"],
+                command=lambda p=path: self.instruction_path_var.set(p),
+                cursor="hand2",
+            ).pack(side=tk.LEFT, padx=2)
+
+        ModernButton(
+            left_frame.content, "保存配置", self.save_instructions, "success", 90, 32
+        ).pack(anchor=tk.W)
+
+        # 右侧：AGENTS.md编辑
+        right_frame = Card(main_frame, title="AGENTS.md 编辑")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        form = tk.Frame(right_frame.content, bg=COLORS["card_bg"])
+        form.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # 位置选择
+        loc_frame = tk.Frame(form, bg=COLORS["card_bg"])
+        loc_frame.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            loc_frame,
+            text="编辑位置:",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+        ).pack(side=tk.LEFT)
+        self.agents_location_var = tk.StringVar(value="global")
+        tk.Radiobutton(
+            loc_frame,
+            text="全局",
+            variable=self.agents_location_var,
+            value="global",
+            bg=COLORS["card_bg"],
+            command=self.load_agents_md,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Radiobutton(
+            loc_frame,
+            text="项目",
+            variable=self.agents_location_var,
+            value="project",
+            bg=COLORS["card_bg"],
+            command=self.load_agents_md,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        # 路径显示
+        self.agents_path_label = tk.Label(
+            form,
+            text="",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+        )
+        self.agents_path_label.pack(anchor=tk.W, pady=(0, 8))
+
+        # 编辑器
+        self.agents_text = scrolledtext.ScrolledText(
+            form, height=15, width=45, font=FONTS["mono"], bd=1, relief=tk.SOLID
+        )
+        self.agents_text.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        # 按钮
+        btn_frame2 = tk.Frame(form, bg=COLORS["card_bg"])
+        btn_frame2.pack(fill=tk.X)
+        ModernButton(
+            btn_frame2, "保存 AGENTS.md", self.save_agents_md, "success", 130, 36
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ModernButton(
+            btn_frame2, "重新加载", self.load_agents_md, "secondary", 90, 36
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ModernButton(
+            btn_frame2, "使用模板", self.use_template, "secondary", 90, 36
+        ).pack(side=tk.LEFT)
+
+        # 初始加载
+        self.load_agents_md()
+
+    def refresh_list(self):
+        """刷新Instructions列表"""
+        self.instructions_listbox.delete(0, tk.END)
+        instructions = self.app.opencode_config.get("instructions", [])
+        for path in instructions:
+            self.instructions_listbox.insert(tk.END, path)
+
+    def add_instruction(self):
+        path = self.instruction_path_var.get().strip()
+        if not path:
+            messagebox.showwarning("提示", "请输入文件路径")
+            return
+        instructions = self.app.opencode_config.setdefault("instructions", [])
+        if path not in instructions:
+            instructions.append(path)
+            self.refresh_list()
+            self.instruction_path_var.set("")
+
+    def delete_instruction(self):
+        selection = self.instructions_listbox.curselection()
+        if not selection:
+            return
+        idx = selection[0]
+        instructions = self.app.opencode_config.get("instructions", [])
+        if idx < len(instructions):
+            del instructions[idx]
+            self.refresh_list()
+
+    def save_instructions(self):
+        self.app.save_configs_silent()
+        messagebox.showinfo("成功", "Instructions 配置已保存")
+
+    def get_agents_path(self):
+        """获取AGENTS.md路径"""
+        if self.agents_location_var.get() == "global":
+            return Path.home() / ".config" / "opencode" / "AGENTS.md"
+        else:
+            return Path.cwd() / "AGENTS.md"
+
+    def load_agents_md(self):
+        """加载AGENTS.md内容"""
+        path = self.get_agents_path()
+        self.agents_path_label.config(text=f"路径: {path}")
+
+        self.agents_text.delete("1.0", tk.END)
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                self.agents_text.insert("1.0", content)
+            except Exception as e:
+                self.agents_text.insert("1.0", f"# 读取失败: {e}")
+        else:
+            self.agents_text.insert(
+                "1.0", '# AGENTS.md 文件不存在\n# 点击"使用模板"创建新文件'
+            )
+
+    def save_agents_md(self):
+        """保存AGENTS.md"""
+        path = self.get_agents_path()
+        content = self.agents_text.get("1.0", tk.END).strip()
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            messagebox.showinfo("成功", f"AGENTS.md 已保存:\n{path}")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存失败: {e}")
+
+    def use_template(self):
+        """使用模板"""
+        template = """# Project Rules
+
+This is a project-specific rules file for OpenCode.
+
+## Project Structure
+- `src/` - Source code
+- `tests/` - Test files
+- `docs/` - Documentation
+
+## Code Standards
+- Use TypeScript with strict mode enabled
+- Follow existing code patterns
+- Write tests for new features
+
+## Conventions
+- Use meaningful variable names
+- Add comments for complex logic
+- Keep functions small and focused
+
+## External File Loading
+When you encounter a file reference (e.g., @rules/general.md), use your Read tool to load it.
+"""
+        self.agents_text.delete("1.0", tk.END)
+        self.agents_text.insert("1.0", template)
+
+
 # ==================== MCP 服务器配置选项卡 ====================
 class MCPTab(tk.Frame):
     def __init__(self, parent, app):
@@ -3506,7 +5358,7 @@ class HelpTab(tk.Frame):
         self.setup_ui()
 
     def setup_ui(self):
-        notebook = ttk.Notebook(self)
+        notebook = ttk.Notebook(self, style="Modern.TNotebook")
         notebook.pack(fill=tk.BOTH, expand=True)
 
         # 配置优先级说明
@@ -3609,6 +5461,145 @@ class HelpTab(tk.Frame):
         usage_text.insert("1.0", usage_content)
         usage_text.config(state=tk.DISABLED)
 
+        # Oh My OpenCode 说明 (新增)
+        omo_frame = tk.Frame(notebook, bg=COLORS["card_bg"])
+        notebook.add(omo_frame, text="  Oh My OpenCode  ")
+        omo_card = Card(omo_frame)
+        omo_card.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # 使用滚动文本框
+        omo_text = scrolledtext.ScrolledText(
+            omo_card.content,
+            wrap=tk.WORD,
+            font=FONTS["body"],
+            bd=0,
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+        )
+        omo_text.pack(fill=tk.BOTH, expand=True)
+        omo_content = """Oh My OpenCode 核心功能说明
+
+═══════════════════════════════════════════════════════════════
+🪄 魔法关键词: ultrawork (ulw)
+═══════════════════════════════════════════════════════════════
+
+只需在提示词中包含 "ultrawork" 或 "ulw"，即可激活所有高级功能：
+• 并行 Agent 编排
+• 后台任务执行
+• 深度探索模式
+• 持续执行直到完成
+
+示例: "ulw 帮我重构这个模块" → Agent 自动分析、并行搜索、持续工作
+
+═══════════════════════════════════════════════════════════════
+🤖 内置 Agent 团队
+═══════════════════════════════════════════════════════════════
+
+• Sisyphus (主Agent): Claude Opus 4.5 - 任务编排和执行
+• Oracle: GPT 5.2 - 架构设计、代码审查、策略规划
+• Librarian: 文档查找、开源实现搜索、代码库分析
+• Explore: 快速代码库探索和模式匹配
+• Frontend UI/UX Engineer: Gemini 3 Pro - 前端开发
+• Document Writer: 技术文档写作
+• Multimodal Looker: 视觉内容分析（PDF、图片等）
+
+═══════════════════════════════════════════════════════════════
+🔧 LSP 工具集 (代码智能)
+═══════════════════════════════════════════════════════════════
+
+• lsp_hover: 获取符号的类型信息、文档、签名
+• lsp_goto_definition: 跳转到符号定义位置
+• lsp_find_references: 查找工作区中的所有引用
+• lsp_document_symbols: 获取文件符号大纲
+• lsp_workspace_symbols: 按名称搜索项目中的符号
+• lsp_diagnostics: 构建前获取错误/警告
+• lsp_servers: 列出可用的 LSP 服务器
+• lsp_prepare_rename: 验证重命名操作
+• lsp_rename: 跨工作区重命名符号
+• lsp_code_actions: 获取可用的快速修复/重构
+• lsp_code_action_resolve: 应用代码操作
+
+═══════════════════════════════════════════════════════════════
+🔍 AST 工具 (语法树搜索)
+═══════════════════════════════════════════════════════════════
+
+• ast_grep_search: AST 感知的代码模式搜索（支持 25 种语言）
+• ast_grep_replace: AST 感知的代码替换
+
+═══════════════════════════════════════════════════════════════
+📚 会话管理工具
+═══════════════════════════════════════════════════════════════
+
+• session_list: 列出所有 OpenCode 会话（支持日期过滤）
+• session_read: 读取特定会话的消息和历史
+• session_search: 跨会话消息全文搜索
+• session_info: 获取会话的元数据和统计信息
+
+═══════════════════════════════════════════════════════════════
+📁 配置加载器 (Claude Code 兼容)
+═══════════════════════════════════════════════════════════════
+
+【命令加载器】从以下目录加载 Markdown 斜杠命令:
+• ~/.claude/commands/ (用户级)
+• ./.claude/commands/ (项目级)
+• ~/.config/opencode/command/ (OpenCode 全局)
+• ./.opencode/command/ (OpenCode 项目)
+
+【Skill 加载器】加载基于目录的 Skill (含 SKILL.md):
+• ~/.claude/skills/ (用户级)
+• ./.claude/skills/ (项目级)
+
+【Agent 加载器】从 Markdown 文件加载自定义 Agent:
+• ~/.claude/agents/*.md (用户级)
+• ./.claude/agents/*.md (项目级)
+
+【MCP 加载器】从 .mcp.json 加载 MCP 服务器配置:
+• ~/.claude/.mcp.json (用户级)
+• ./.mcp.json (项目级)
+• ./.claude/.mcp.json (本地)
+• 支持环境变量扩展 (${VAR} 语法)
+
+═══════════════════════════════════════════════════════════════
+⚙️ 兼容性开关
+═══════════════════════════════════════════════════════════════
+
+在 oh-my-opencode.json 中配置 claude_code 对象可禁用特定功能:
+
+{
+  "claude_code": {
+    "mcp": false,      // 禁用 Claude Code MCP 加载
+    "commands": false, // 禁用 Claude Code 命令加载
+    "skills": false,   // 禁用 Claude Code Skill 加载
+    "agents": false,   // 禁用 Claude Code Agent 加载
+    "hooks": false,    // 禁用 Claude Code Hooks
+    "plugins": false   // 禁用 Claude Code 插件
+  }
+}
+
+注意: 这些开关仅影响 Claude Code 兼容层，不影响 OpenCode 原生功能
+
+═══════════════════════════════════════════════════════════════
+🎯 其他核心功能
+═══════════════════════════════════════════════════════════════
+
+• Todo 持续执行器: 强制 Agent 完成所有 TODO 才能停止
+• 注释检查器: 防止 AI 添加过多注释，保持代码整洁
+• 思考模式: 自动检测需要深度思考的场景并切换模式
+• 上下文窗口监控: 70%+ 使用率时提醒 Agent 合理利用空间
+• 自动压缩: Claude 模型达到 token 限制时自动压缩会话
+• 会话恢复: 自动从会话错误中恢复
+• 后台通知: 后台 Agent 任务完成时发送通知
+
+═══════════════════════════════════════════════════════════════
+📖 更多信息
+═══════════════════════════════════════════════════════════════
+
+GitHub: https://github.com/code-yeongyu/oh-my-opencode
+Discord: https://discord.gg/PUwSMR9XNk
+"""
+        omo_text.insert("1.0", omo_content)
+        omo_text.config(state=tk.DISABLED)
+
         # 关于
         about_frame = tk.Frame(notebook, bg=COLORS["card_bg"])
         notebook.add(about_frame, text="  关于  ")
@@ -3627,7 +5618,7 @@ class HelpTab(tk.Frame):
         ).pack(pady=(20, 5))
         tk.Label(
             center_frame,
-            text="v0.6.1",
+            text=f"v{APP_VERSION}",
             font=FONTS["subtitle"],
             bg=COLORS["card_bg"],
             fg=COLORS["text_secondary"],
@@ -3656,6 +5647,31 @@ class HelpTab(tk.Frame):
         tk.Label(center_frame, text="", font=FONTS["body"], bg=COLORS["card_bg"]).pack(
             pady=10
         )
+
+        # GitHub 链接
+        github_label = tk.Label(
+            center_frame,
+            text=f"⭐ GitHub: {GITHUB_URL}",
+            font=FONTS["body"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["primary"],
+            cursor="hand2",
+        )
+        github_label.pack(pady=5)
+        github_label.bind("<Button-1>", lambda e: webbrowser.open(GITHUB_URL))
+
+        # 作者信息
+        author_label = tk.Label(
+            center_frame,
+            text=f"作者: {AUTHOR_NAME}",
+            font=FONTS["body"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
+            cursor="hand2",
+        )
+        author_label.pack(pady=5)
+        author_label.bind("<Button-1>", lambda e: webbrowser.open(AUTHOR_GITHUB))
+
         tk.Label(
             center_frame,
             text="开发日期: 2026-01-14",
@@ -3676,32 +5692,41 @@ class Sidebar(tk.Frame):
         self.setup_ui()
 
     def setup_ui(self):
-        # Logo
+        # Logo - 点击跳转到关于页面
         logo_frame = tk.Frame(self, bg=COLORS["sidebar_bg"])
-        logo_frame.pack(fill=tk.X, padx=16, pady=20)
-        tk.Label(
+        logo_frame.pack(fill=tk.X, padx=12, pady=(12, 8))
+
+        self.logo_label = tk.Label(
             logo_frame,
             text="OpenCode",
             font=FONTS["title"],
             bg=COLORS["sidebar_bg"],
             fg=COLORS["primary"],
-        ).pack(anchor=tk.W)
-        tk.Label(
+            cursor="hand2",
+        )
+        self.logo_label.pack(anchor=tk.W)
+        self.logo_label.bind("<Button-1>", lambda e: self.app.show_page("help"))
+        ToolTip(self.logo_label, "点击查看关于信息")
+
+        self.version_label = tk.Label(
             logo_frame,
-            text="配置管理器 v0.6.1",
+            text=f"配置管理器 v{APP_VERSION}",
             font=FONTS["small"],
             bg=COLORS["sidebar_bg"],
             fg=COLORS["text_secondary"],
-        ).pack(anchor=tk.W)
+            cursor="hand2",
+        )
+        self.version_label.pack(anchor=tk.W)
+        self.version_label.bind("<Button-1>", lambda e: self.app.show_page("help"))
 
         # 分隔线
         tk.Frame(self, height=1, bg=COLORS["border"]).pack(
-            fill=tk.X, padx=16, pady=(0, 16)
+            fill=tk.X, padx=12, pady=(4, 8)
         )
 
-        # OpenCode 分组 - 显示配置文件路径
+        # OpenCode 分组
         opencode_header = tk.Frame(self, bg=COLORS["sidebar_bg"])
-        opencode_header.pack(fill=tk.X, padx=16, pady=(0, 8))
+        opencode_header.pack(fill=tk.X, padx=12, pady=(0, 4))
         tk.Label(
             opencode_header,
             text="OpenCode",
@@ -3710,19 +5735,19 @@ class Sidebar(tk.Frame):
             fg=COLORS["text_secondary"],
         ).pack(anchor=tk.W)
         opencode_path = str(ConfigPaths.get_opencode_config())
+        opencode_filename = ConfigPaths.get_opencode_config().name
         self.opencode_path_label = tk.Label(
             opencode_header,
-            text=opencode_path[:40] + "..."
-            if len(opencode_path) > 40
-            else opencode_path,
+            text=f"📄 {opencode_filename}",
             font=("Consolas", 8),
             bg=COLORS["sidebar_bg"],
-            fg=COLORS["text_secondary"],
+            fg=COLORS["primary"],
             cursor="hand2",
         )
         self.opencode_path_label.pack(anchor=tk.W)
         ToolTip(
-            self.opencode_path_label, f"配置文件路径:\n{opencode_path}\n\n点击复制路径"
+            self.opencode_path_label,
+            f"配置文件完整路径:\n{opencode_path}\n\n点击复制完整路径",
         )
         self.opencode_path_label.bind(
             "<Button-1>", lambda e: self.copy_path(opencode_path)
@@ -3732,12 +5757,14 @@ class Sidebar(tk.Frame):
         self.add_nav_button("model", "Model 管理")
         self.add_nav_button("opencode_agent", "Agent 配置")
         self.add_nav_button("mcp", "MCP 服务器")
+        self.add_nav_button("skill", "Skill 管理")
+        self.add_nav_button("rules", "Rules 管理")
         self.add_nav_button("compaction", "上下文压缩")
         self.add_nav_button("permission", "权限管理")
 
-        # Oh My OpenCode 分组 - 显示配置文件路径
+        # Oh My OpenCode 分组
         ohmyopencode_header = tk.Frame(self, bg=COLORS["sidebar_bg"])
-        ohmyopencode_header.pack(fill=tk.X, padx=16, pady=(20, 8))
+        ohmyopencode_header.pack(fill=tk.X, padx=12, pady=(12, 4))
         tk.Label(
             ohmyopencode_header,
             text="Oh My OpenCode",
@@ -3746,20 +5773,19 @@ class Sidebar(tk.Frame):
             fg=COLORS["text_secondary"],
         ).pack(anchor=tk.W)
         ohmyopencode_path = str(ConfigPaths.get_ohmyopencode_config())
+        ohmyopencode_filename = ConfigPaths.get_ohmyopencode_config().name
         self.ohmyopencode_path_label = tk.Label(
             ohmyopencode_header,
-            text=ohmyopencode_path[:40] + "..."
-            if len(ohmyopencode_path) > 40
-            else ohmyopencode_path,
+            text=f"📄 {ohmyopencode_filename}",
             font=("Consolas", 8),
             bg=COLORS["sidebar_bg"],
-            fg=COLORS["text_secondary"],
+            fg=COLORS["primary"],
             cursor="hand2",
         )
         self.ohmyopencode_path_label.pack(anchor=tk.W)
         ToolTip(
             self.ohmyopencode_path_label,
-            f"配置文件路径:\n{ohmyopencode_path}\n\n点击复制路径",
+            f"配置文件完整路径:\n{ohmyopencode_path}\n\n点击复制完整路径",
         )
         self.ohmyopencode_path_label.bind(
             "<Button-1>", lambda e: self.copy_path(ohmyopencode_path)
@@ -3775,13 +5801,13 @@ class Sidebar(tk.Frame):
             font=FONTS["small"],
             bg=COLORS["sidebar_bg"],
             fg=COLORS["text_secondary"],
-        ).pack(anchor=tk.W, padx=16, pady=(20, 8))
+        ).pack(anchor=tk.W, padx=12, pady=(12, 4))
         self.add_nav_button("import", "外部导入")
         self.add_nav_button("help", "帮助说明")
 
         # 底部状态
         bottom_frame = tk.Frame(self, bg=COLORS["sidebar_bg"])
-        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=16, pady=16)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=12, pady=12)
         self.status_label = tk.Label(
             bottom_frame,
             text="就绪",
@@ -3806,8 +5832,8 @@ class Sidebar(tk.Frame):
             fg=COLORS["text"],
             cursor="hand2",
             anchor=tk.W,
-            padx=16,
-            pady=10,
+            padx=12,
+            pady=6,  # 减少垂直间距
         )
         btn.pack(fill=tk.X)
         btn.bind("<Enter>", lambda e, b=btn, k=key: self.on_hover(b, k, True))
@@ -3832,15 +5858,85 @@ class Sidebar(tk.Frame):
         self.active = key
         self.buttons[key].config(bg=COLORS["primary"], fg="#FFFFFF")
 
+    def refresh_theme(self):
+        """刷新侧边栏主题颜色"""
+        self.configure(bg=COLORS["sidebar_bg"])
+
+        # 刷新 logo
+        if hasattr(self, "logo_label"):
+            self.logo_label.configure(bg=COLORS["sidebar_bg"], fg=COLORS["primary"])
+        if hasattr(self, "version_label"):
+            self.version_label.configure(
+                bg=COLORS["sidebar_bg"], fg=COLORS["text_secondary"]
+            )
+
+        # 刷新路径标签
+        if hasattr(self, "opencode_path_label"):
+            self.opencode_path_label.configure(
+                bg=COLORS["sidebar_bg"], fg=COLORS["primary"]
+            )
+        if hasattr(self, "ohmyopencode_path_label"):
+            self.ohmyopencode_path_label.configure(
+                bg=COLORS["sidebar_bg"], fg=COLORS["primary"]
+            )
+
+        # 刷新状态标签
+        if hasattr(self, "status_label"):
+            self.status_label.configure(
+                bg=COLORS["sidebar_bg"], fg=COLORS["text_secondary"]
+            )
+
+        # 刷新所有导航按钮
+        for key, btn in self.buttons.items():
+            if key == self.active:
+                btn.configure(bg=COLORS["primary"], fg="#FFFFFF")
+            else:
+                btn.configure(bg=COLORS["sidebar_bg"], fg=COLORS["text"])
+
+        # 刷新所有子 Frame
+        for child in self.winfo_children():
+            if isinstance(child, tk.Frame):
+                child.configure(bg=COLORS["sidebar_bg"])
+                for subchild in child.winfo_children():
+                    if isinstance(subchild, tk.Label):
+                        # 保持特殊标签的颜色
+                        if subchild not in [
+                            self.logo_label,
+                            self.version_label,
+                            self.opencode_path_label,
+                            self.ohmyopencode_path_label,
+                            self.status_label,
+                        ]:
+                            subchild.configure(
+                                bg=COLORS["sidebar_bg"], fg=COLORS["text_secondary"]
+                            )
+
 
 # ==================== 主窗口 ====================
 class MainWindow:
+    # 可用主题列表
+    THEMES = {
+        "darkly": "深色 - Darkly",
+        "superhero": "深色 - Superhero",
+        "cyborg": "深色 - Cyborg",
+        "vapor": "深色 - Vapor",
+        "solar": "深色 - Solar",
+        "cosmo": "浅色 - Cosmo",
+        "flatly": "浅色 - Flatly",
+        "litera": "浅色 - Litera",
+        "minty": "浅色 - Minty",
+        "pulse": "浅色 - Pulse",
+    }
+
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("OpenCode 配置管理器 v0.6.1")
-        self.root.geometry("1200x750")
-        self.root.minsize(1000, 600)
-        self.root.configure(bg=COLORS["bg"])
+        # 使用 ttkbootstrap 窗口，默认深色主题
+        self.current_theme = "darkly"
+        self.root = ttk.Window(
+            title=f"OpenCode 配置管理器 v{APP_VERSION}",
+            themename=self.current_theme,
+            size=(1200, 750),
+            minsize=(1000, 600),
+        )
 
         # 设置窗口图标
         self.set_icon()
@@ -3851,10 +5947,27 @@ class MainWindow:
         self.backup_manager = BackupManager()
         self.pages = {}
         self.first_run_checked = False
+        self.version_checker = VersionChecker(callback=self.on_version_check_complete)
 
         self.setup_ui()
         self.load_configs()
         self.check_first_run()
+
+        # 启动版本检查
+        self.version_checker.check_update_async()
+
+    def on_version_check_complete(self, latest_version, release_url):
+        """版本检查完成回调"""
+        if VersionChecker.compare_versions(APP_VERSION, latest_version):
+            # 在主线程中更新 UI
+            self.root.after(
+                0, lambda: self.show_update_available(latest_version, release_url)
+            )
+
+    def show_update_available(self, version, url):
+        """显示有新版本可用"""
+        if hasattr(self, "update_badge"):
+            self.update_badge.show(version, url)
 
     def check_first_run(self):
         """首次运行检查，提示备份"""
@@ -3908,69 +6021,132 @@ class MainWindow:
             print(f"Failed to set icon: {e}")
 
     def setup_ui(self):
-        # 主容器
-        main_container = tk.Frame(self.root, bg=COLORS["bg"])
-        main_container.pack(fill=tk.BOTH, expand=True)
+        # 主容器 - 使用 ttk.Frame
+        self.main_container = ttk.Frame(self.root)
+        self.main_container.pack(fill=BOTH, expand=True)
 
         # 侧边栏
-        self.sidebar = Sidebar(main_container, self)
-        self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        self.sidebar = Sidebar(self.main_container, self)
+        self.sidebar.pack(side=LEFT, fill=Y)
 
         # 右侧内容区
-        right_container = tk.Frame(main_container, bg=COLORS["bg"])
-        right_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.right_container = ttk.Frame(self.main_container)
+        self.right_container.pack(side=RIGHT, fill=BOTH, expand=True)
 
         # 顶部工具栏
-        toolbar = tk.Frame(right_container, bg=COLORS["card_bg"], height=60)
-        toolbar.pack(fill=tk.X)
-        toolbar.pack_propagate(False)
+        self.toolbar = ttk.Frame(self.right_container, bootstyle="secondary")
+        self.toolbar.pack(fill=X, pady=(0, 1))
 
-        toolbar_inner = tk.Frame(toolbar, bg=COLORS["card_bg"])
-        toolbar_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
+        self.toolbar_inner = ttk.Frame(self.toolbar)
+        self.toolbar_inner.pack(fill=BOTH, expand=True, padx=20, pady=12)
 
-        ModernButton(
-            toolbar_inner, "保存全部", self.save_configs, "primary", 90, 36
-        ).pack(side=tk.LEFT, padx=(0, 8))
-        ModernButton(
-            toolbar_inner, "重新加载", self.load_configs, "secondary", 90, 36
-        ).pack(side=tk.LEFT, padx=(0, 8))
-        ModernButton(
-            toolbar_inner, "备份", self.backup_configs, "secondary", 70, 36
-        ).pack(side=tk.LEFT, padx=(0, 8))
-        ModernButton(
-            toolbar_inner, "恢复备份", self.show_restore_dialog, "secondary", 90, 36
-        ).pack(side=tk.LEFT)
+        # 左侧按钮组
+        left_buttons = ttk.Frame(self.toolbar_inner)
+        left_buttons.pack(side=LEFT)
 
-        self.modified_label = tk.Label(
-            toolbar_inner,
+        ttk.Button(
+            left_buttons,
+            text="保存全部",
+            command=self.save_configs,
+            bootstyle="success",
+        ).pack(side=LEFT, padx=(0, 8))
+        ttk.Button(
+            left_buttons, text="重新加载", command=self.load_configs, bootstyle="info"
+        ).pack(side=LEFT, padx=(0, 8))
+        ttk.Button(
+            left_buttons,
+            text="备份",
+            command=self.backup_configs,
+            bootstyle="secondary",
+        ).pack(side=LEFT, padx=(0, 8))
+        ttk.Button(
+            left_buttons,
+            text="恢复备份",
+            command=self.show_restore_dialog,
+            bootstyle="secondary",
+        ).pack(side=LEFT)
+
+        # 右侧信息区
+        self.right_info = ttk.Frame(self.toolbar_inner)
+        self.right_info.pack(side=RIGHT)
+
+        # 更新提示徽章
+        self.update_badge = UpdateBadge(self.right_info)
+        self.update_badge.pack(side=RIGHT, padx=(0, 12))
+
+        # GitHub 链接
+        github_btn = ttk.Button(
+            self.right_info,
+            text="⭐ GitHub",
+            command=lambda: webbrowser.open(GITHUB_URL),
+            bootstyle="link",
+        )
+        github_btn.pack(side=RIGHT, padx=(0, 8))
+        ToolTip(github_btn, f"访问项目主页\n{GITHUB_URL}")
+
+        # 作者信息
+        author_label = ttk.Label(
+            self.right_info,
+            text=f"by {AUTHOR_NAME}",
+            font=("Microsoft YaHei UI", 9),
+            cursor="hand2",
+        )
+        author_label.pack(side=RIGHT, padx=(0, 12))
+        author_label.bind("<Button-1>", lambda e: webbrowser.open(AUTHOR_GITHUB))
+        ToolTip(author_label, f"作者: {AUTHOR_NAME}\n点击访问 GitHub 主页")
+
+        # 主题切换下拉菜单
+        self.theme_var = tk.StringVar(value=self.current_theme)
+        theme_menu = ttk.Menubutton(
+            self.right_info,
+            text="🎨 主题",
+            bootstyle="outline",
+        )
+        theme_menu.pack(side=RIGHT, padx=(0, 12))
+
+        # 创建主题菜单
+        theme_dropdown = tk.Menu(theme_menu, tearoff=0)
+        for theme_name, theme_label in self.THEMES.items():
+            theme_dropdown.add_command(
+                label=theme_label, command=lambda t=theme_name: self.change_theme(t)
+            )
+        theme_menu["menu"] = theme_dropdown
+        ToolTip(theme_menu, "切换界面主题")
+
+        # 分隔符
+        ttk.Separator(self.right_info, orient=VERTICAL).pack(
+            side=RIGHT, fill=Y, padx=12
+        )
+
+        self.modified_label = ttk.Label(
+            self.right_info,
             text="",
-            font=FONTS["small"],
-            bg=COLORS["card_bg"],
-            fg=COLORS["warning"],
+            font=("Microsoft YaHei UI", 9),
+            bootstyle="warning",
         )
-        self.modified_label.pack(side=tk.RIGHT)
+        self.modified_label.pack(side=RIGHT, padx=(0, 8))
 
-        self.config_status = tk.Label(
-            toolbar_inner,
+        self.config_status = ttk.Label(
+            self.right_info,
             text="配置: 未加载",
-            font=FONTS["small"],
-            bg=COLORS["card_bg"],
-            fg=COLORS["text_secondary"],
+            font=("Microsoft YaHei UI", 9),
         )
-        self.config_status.pack(side=tk.RIGHT, padx=(0, 20))
+        self.config_status.pack(side=RIGHT, padx=(0, 12))
 
         # 分隔线
-        tk.Frame(right_container, height=1, bg=COLORS["border"]).pack(fill=tk.X)
+        ttk.Separator(self.right_container, orient=HORIZONTAL).pack(fill=X)
 
         # 内容区
-        self.content_frame = tk.Frame(right_container, bg=COLORS["bg"])
-        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        self.content_frame = ttk.Frame(self.right_container)
+        self.content_frame.pack(fill=BOTH, expand=True, padx=20, pady=20)
 
         # 创建页面
         self.pages["provider"] = ProviderTab(self.content_frame, self)
         self.pages["model"] = ModelTab(self.content_frame, self)
         self.pages["opencode_agent"] = OpenCodeAgentTab(self.content_frame, self)
         self.pages["mcp"] = MCPTab(self.content_frame, self)
+        self.pages["skill"] = SkillTab(self.content_frame, self)
+        self.pages["rules"] = RulesTab(self.content_frame, self)
         self.pages["compaction"] = CompactionTab(self.content_frame, self)
         self.pages["permission"] = PermissionTab(self.content_frame, self)
         self.pages["agent"] = AgentTab(self.content_frame, self)
@@ -3985,11 +6161,18 @@ class MainWindow:
         # 快捷键
         self.root.bind("<Control-s>", lambda e: self.save_configs())
 
+    def change_theme(self, theme_name):
+        """切换主题"""
+        self.current_theme = theme_name
+        self.root.style.theme_use(theme_name)
+
     def show_page(self, key):
         for page in self.pages.values():
             page.pack_forget()
         if key in self.pages:
-            self.pages[key].pack(fill=tk.BOTH, expand=True)
+            self.pages[key].pack(fill=BOTH, expand=True)
+        # 更新侧边栏选中状态
+        self.sidebar.set_active(key)
 
     def load_configs(self):
         opencode_path = ConfigPaths.get_opencode_config()
@@ -4011,6 +6194,8 @@ class MainWindow:
         self.pages["model"].refresh_providers()
         self.pages["opencode_agent"].refresh_list()
         self.pages["mcp"].refresh_list()
+        self.pages["skill"].refresh_list()
+        self.pages["rules"].refresh_list()
         self.pages["compaction"].refresh_list()
         self.pages["permission"].refresh_list()
         self.pages["agent"].refresh_models()

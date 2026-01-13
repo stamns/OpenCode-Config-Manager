@@ -1,5 +1,103 @@
 # Release Notes / 发布说明
 
+## v0.7.0 (2026-01-14)
+
+### 重大更新
+
+- **集成 ttkbootstrap 现代化 UI 框架**
+  - 基于 Bootstrap 风格的现代化界面
+  - 统一的组件样式和交互体验
+  - 更好的跨平台一致性
+
+- **10 种内置主题**
+  - 深色主题：Darkly、Superhero、Cyborg、Vapor、Solar
+  - 浅色主题：Cosmo、Flatly、Litera、Minty、Pulse
+  - 通过顶部工具栏「🎨 主题」菜单切换
+
+- **实时主题切换**
+  - 无需重启应用
+  - 所有组件自动适配新主题
+
+### 界面改进
+
+- 工具栏按钮使用 bootstyle 样式
+- 移除手动颜色配置，使用框架原生主题系统
+- 优化按钮、输入框、下拉菜单等组件样式
+
+### 注意事项
+
+- exe 文件体积增加至约 30MB（因包含 ttkbootstrap 依赖）
+- 从源码运行需要安装 ttkbootstrap：`pip install ttkbootstrap`
+
+---
+
+## v0.6.5 (2026-01-14)
+
+### 新功能
+
+- **实时主题切换**
+  - 深色/浅色模式无需重启即可切换
+  - 重构 ThemeManager 支持动态刷新
+
+- **优化主题配色**
+  - 采用现代 Fluent Design 风格
+  - 优化 ttk 样式配置，增强视觉一致性
+
+---
+
+## v0.6.4 (2026-01-14)
+
+### 改进
+
+- 优化深色/浅色主题配色方案
+- 新增 hover/press 状态颜色配置
+- 完善 setup_modern_styles 函数
+
+---
+
+## v0.6.3 (2026-01-14)
+
+### 新功能
+
+- **GitHub 版本检查**
+  - 自动检测 GitHub 最新版本
+  - 有新版本时显示更新提示徽章
+  - 点击可跳转到 Releases 页面
+
+- **顶部工具栏增强**
+  - 新增 GitHub 链接按钮
+  - 新增作者信息显示
+  - 新增主题切换按钮
+
+### 界面改进
+
+- 美化界面：统一输入框、下拉菜单、标签页样式
+- 新增 ModernCombobox、ModernCheckbutton 组件
+- 优化 Treeview、Notebook 等控件的现代化样式
+
+---
+
+## v0.6.2 (2026-01-14)
+
+### 新功能
+
+- **Skill 管理功能**
+  - 权限配置（allow/ask/deny）
+  - 创建 SKILL.md 文件
+
+- **Rules 管理功能**
+  - instructions 配置
+  - 编辑 AGENTS.md 文件
+
+### 改进
+
+- 优化 Options Tab，添加 Claude/Gemini thinking 快捷按钮
+- 扩展 TOOLTIPS 字典，添加详细的白话中文解释
+- 侧边栏文件路径只显示文件名，tooltip 显示完整路径
+- 修复 Gemini 模型 thinking 配置位置（从 variants 移到 options）
+
+---
+
 ## v0.6.1 (2026-01-14)
 
 ### 新功能

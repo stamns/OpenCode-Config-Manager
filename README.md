@@ -16,6 +16,13 @@
 
 ## 功能特性
 
+### 主题系统 (v0.7.0 新增)
+- **10 种内置主题**：深色/浅色各 5 种风格
+  - 深色：Darkly、Superhero、Cyborg、Vapor、Solar
+  - 浅色：Cosmo、Flatly、Litera、Minty、Pulse
+- **实时主题切换**：无需重启应用
+- 基于 ttkbootstrap 现代化 UI 框架
+
 ### Provider 管理
 - 添加/编辑/删除自定义 API 提供商
 - 支持多种 SDK：`@ai-sdk/anthropic`、`@ai-sdk/openai`、`@ai-sdk/google`、`@ai-sdk/azure`
@@ -77,7 +84,10 @@
 - **多版本备份管理**
 - 恢复备份对话框
 
-### 其他特性
+### 其他特性 (v0.6.3 新增)
+- **GitHub 版本检查**：自动检测最新版本
+- **更新提示徽章**：有新版本时显示
+- **顶部工具栏**：GitHub 链接和作者信息
 - 现代化 UI 设计，侧边栏导航
 - **全局 Tooltip 提示**：解释各参数含义（鼠标悬停显示）
 - **统一保存逻辑**：保存修改直接写入文件
@@ -93,7 +103,7 @@
 
 | 平台 | 文件 |
 |------|------|
-| Windows | `OpenCodeConfigManager.exe` |
+| Windows | `OpenCodeConfigManager_vX.X.X.exe` |
 | macOS | `OpenCodeConfigManager.app` |
 | Linux | `OpenCodeConfigManager` |
 
@@ -104,7 +114,10 @@
 git clone https://github.com/icysaintdx/OpenCode-Config-Manager.git
 cd OpenCode-Config-Manager
 
-# 运行（无需安装依赖，仅使用 Python 标准库）
+# 安装依赖
+pip install ttkbootstrap
+
+# 运行
 python opencode_config_manager.py
 ```
 
@@ -166,6 +179,9 @@ python opencode_config_manager.py
 ### Windows
 
 ```batch
+# 安装依赖
+pip install ttkbootstrap pyinstaller
+
 # 使用 spec 文件构建（推荐）
 pyinstaller OpenCodeConfigManager.spec --noconfirm
 
@@ -173,11 +189,14 @@ pyinstaller OpenCodeConfigManager.spec --noconfirm
 build_windows.bat
 ```
 
-输出：`dist/OpenCodeConfigManager.exe`
+输出：`dist/OpenCodeConfigManager_vX.X.X.exe`
 
 ### macOS / Linux
 
 ```bash
+# 安装依赖
+pip install ttkbootstrap pyinstaller
+
 # 添加执行权限
 chmod +x build_unix.sh
 
@@ -206,6 +225,31 @@ opencode-config-manager/
     ├── icon.ico                  # Windows 图标
     └── icon.png                  # 通用图标
 ```
+
+---
+
+## 更新日志
+
+### v0.7.0
+- 集成 ttkbootstrap 现代化 UI 框架
+- 支持 10 种内置主题（深色/浅色各 5 种）
+- 实时主题切换，无需重启应用
+
+### v0.6.3 - v0.6.5
+- 新增 GitHub 版本检查和更新提示
+- 优化主题配色（Fluent Design 风格）
+- 实现实时主题切换
+
+### v0.6.0 - v0.6.2
+- 新增 MCP 服务器配置管理
+- 新增 OpenCode Agent 配置
+- 新增 Skill/Rules 管理功能
+- 新增上下文压缩配置
+
+### v0.5.0
+- 完善模型预设配置
+- 备份恢复功能
+- 外部导入重构
 
 ---
 
