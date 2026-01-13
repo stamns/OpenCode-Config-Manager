@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v0.7.0
+OpenCode & Oh My OpenCode 配置管理器 v0.8.0
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
 
+更新日志 v0.8.0:
+- 回退到原生 tkinter，移除 ttkbootstrap 依赖
+- 保持 exe 体积约 11MB
+- 深色/浅色主题实时切换
+- 优化主题配色（VS Code / Fluent Design 风格）
+
 更新日志 v0.7.0:
-- 集成 ttkbootstrap 现代化 UI 框架
-- 支持 10 种内置主题（深色/浅色各 5 种）
-- 实时主题切换，无需重启应用
-- 工具栏按钮美化，使用 bootstyle 样式
-- 移除手动颜色配置，使用框架原生主题系统
+- 集成 ttkbootstrap 现代化 UI 框架（已回退）
 
 更新日志 v0.6.5:
 - 实现实时主题切换（深色/浅色模式无需重启）
@@ -67,10 +69,7 @@ OpenCode & Oh My OpenCode 配置管理器 v0.7.0
 """
 
 import tkinter as tk
-from tkinter import messagebox, scrolledtext
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
-from ttkbootstrap.scrolled import ScrolledFrame
+from tkinter import ttk, messagebox, scrolledtext
 import json
 from pathlib import Path
 from datetime import datetime
@@ -83,7 +82,7 @@ import re
 
 
 # ==================== 版本和项目信息 ====================
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -5914,29 +5913,18 @@ class Sidebar(tk.Frame):
 
 # ==================== 主窗口 ====================
 class MainWindow:
-    # 可用主题列表
-    THEMES = {
-        "darkly": "深色 - Darkly",
-        "superhero": "深色 - Superhero",
-        "cyborg": "深色 - Cyborg",
-        "vapor": "深色 - Vapor",
-        "solar": "深色 - Solar",
-        "cosmo": "浅色 - Cosmo",
-        "flatly": "浅色 - Flatly",
-        "litera": "浅色 - Litera",
-        "minty": "浅色 - Minty",
-        "pulse": "浅色 - Pulse",
-    }
-
     def __init__(self):
-        # 使用 ttkbootstrap 窗口，默认深色主题
-        self.current_theme = "darkly"
-        self.root = ttk.Window(
-            title=f"OpenCode 配置管理器 v{APP_VERSION}",
-            themename=self.current_theme,
-            size=(1200, 750),
-            minsize=(1000, 600),
-        )
+        self.root = tk.Tk()
+        self.root.title(f"OpenCode 配置管理器 v{APP_VERSION}")
+        self.root.geometry("1200x750")
+        self.root.minsize(1000, 600)
+
+        # 初始化主题管理器
+        self.theme_manager = ThemeManager.get_instance()
+        self.theme_manager.set_root(self.root)
+        self.theme_manager.register_callback(self.on_theme_change)
+
+        self.root.configure(bg=COLORS["bg"])
 
         # 设置窗口图标
         self.set_icon()
@@ -5949,6 +5937,9 @@ class MainWindow:
         self.first_run_checked = False
         self.version_checker = VersionChecker(callback=self.on_version_check_complete)
 
+        # 配置全局样式
+        setup_modern_styles()
+
         self.setup_ui()
         self.load_configs()
         self.check_first_run()
@@ -5959,7 +5950,6 @@ class MainWindow:
     def on_version_check_complete(self, latest_version, release_url):
         """版本检查完成回调"""
         if VersionChecker.compare_versions(APP_VERSION, latest_version):
-            # 在主线程中更新 UI
             self.root.after(
                 0, lambda: self.show_update_available(latest_version, release_url)
             )
@@ -5975,7 +5965,6 @@ class MainWindow:
             return
         self.first_run_checked = True
 
-        # 检查是否有配置文件但没有备份
         opencode_path = ConfigPaths.get_opencode_config()
         backups = self.backup_manager.list_backups()
 
@@ -5987,11 +5976,10 @@ class MainWindow:
                 self.backup_configs()
 
     def set_icon(self):
-        """设置窗口图标（支持 PyInstaller 打包后的资源路径）"""
+        """设置窗口图标"""
         import sys
 
         try:
-            # PyInstaller 打包后的资源路径
             if getattr(sys, "frozen", False):
                 base_path = Path(sys._MEIPASS)
             else:
@@ -6000,7 +5988,6 @@ class MainWindow:
             icon_paths = [
                 base_path / "assets" / "icon.ico",
                 Path(__file__).parent / "assets" / "icon.ico",
-                Path.home() / ".config" / "opencode" / "icon.ico",
                 Path("assets/icon.ico"),
             ]
             for icon_path in icon_paths:
@@ -6021,124 +6008,123 @@ class MainWindow:
             print(f"Failed to set icon: {e}")
 
     def setup_ui(self):
-        # 主容器 - 使用 ttk.Frame
-        self.main_container = ttk.Frame(self.root)
-        self.main_container.pack(fill=BOTH, expand=True)
+        # 主容器
+        self.main_container = tk.Frame(self.root, bg=COLORS["bg"])
+        self.main_container.pack(fill=tk.BOTH, expand=True)
 
         # 侧边栏
         self.sidebar = Sidebar(self.main_container, self)
-        self.sidebar.pack(side=LEFT, fill=Y)
+        self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
 
         # 右侧内容区
-        self.right_container = ttk.Frame(self.main_container)
-        self.right_container.pack(side=RIGHT, fill=BOTH, expand=True)
+        self.right_container = tk.Frame(self.main_container, bg=COLORS["bg"])
+        self.right_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         # 顶部工具栏
-        self.toolbar = ttk.Frame(self.right_container, bootstyle="secondary")
-        self.toolbar.pack(fill=X, pady=(0, 1))
+        self.toolbar = tk.Frame(self.right_container, bg=COLORS["card_bg"], height=60)
+        self.toolbar.pack(fill=tk.X)
+        self.toolbar.pack_propagate(False)
 
-        self.toolbar_inner = ttk.Frame(self.toolbar)
-        self.toolbar_inner.pack(fill=BOTH, expand=True, padx=20, pady=12)
+        self.toolbar_inner = tk.Frame(self.toolbar, bg=COLORS["card_bg"])
+        self.toolbar_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
 
         # 左侧按钮组
-        left_buttons = ttk.Frame(self.toolbar_inner)
-        left_buttons.pack(side=LEFT)
+        left_buttons = tk.Frame(self.toolbar_inner, bg=COLORS["card_bg"])
+        left_buttons.pack(side=tk.LEFT)
 
-        ttk.Button(
-            left_buttons,
-            text="保存全部",
-            command=self.save_configs,
-            bootstyle="success",
-        ).pack(side=LEFT, padx=(0, 8))
-        ttk.Button(
-            left_buttons, text="重新加载", command=self.load_configs, bootstyle="info"
-        ).pack(side=LEFT, padx=(0, 8))
-        ttk.Button(
-            left_buttons,
-            text="备份",
-            command=self.backup_configs,
-            bootstyle="secondary",
-        ).pack(side=LEFT, padx=(0, 8))
-        ttk.Button(
-            left_buttons,
-            text="恢复备份",
-            command=self.show_restore_dialog,
-            bootstyle="secondary",
-        ).pack(side=LEFT)
+        ModernButton(
+            left_buttons, "保存全部", self.save_configs, "primary", 90, 36
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ModernButton(
+            left_buttons, "重新加载", self.load_configs, "secondary", 90, 36
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ModernButton(
+            left_buttons, "备份", self.backup_configs, "secondary", 70, 36
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ModernButton(
+            left_buttons, "恢复备份", self.show_restore_dialog, "secondary", 90, 36
+        ).pack(side=tk.LEFT)
 
         # 右侧信息区
-        self.right_info = ttk.Frame(self.toolbar_inner)
-        self.right_info.pack(side=RIGHT)
+        self.right_info = tk.Frame(self.toolbar_inner, bg=COLORS["card_bg"])
+        self.right_info.pack(side=tk.RIGHT)
 
         # 更新提示徽章
         self.update_badge = UpdateBadge(self.right_info)
-        self.update_badge.pack(side=RIGHT, padx=(0, 12))
+        self.update_badge.pack(side=tk.RIGHT, padx=(0, 12))
 
         # GitHub 链接
-        github_btn = ttk.Button(
+        github_btn = tk.Label(
             self.right_info,
             text="⭐ GitHub",
-            command=lambda: webbrowser.open(GITHUB_URL),
-            bootstyle="link",
+            font=("Microsoft YaHei UI", 9),
+            bg=COLORS["card_bg"],
+            fg=COLORS["primary"],
+            cursor="hand2",
         )
-        github_btn.pack(side=RIGHT, padx=(0, 8))
+        github_btn.pack(side=tk.RIGHT, padx=(0, 8))
+        github_btn.bind("<Button-1>", lambda e: webbrowser.open(GITHUB_URL))
         ToolTip(github_btn, f"访问项目主页\n{GITHUB_URL}")
 
         # 作者信息
-        author_label = ttk.Label(
+        author_label = tk.Label(
             self.right_info,
             text=f"by {AUTHOR_NAME}",
             font=("Microsoft YaHei UI", 9),
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_muted"],
             cursor="hand2",
         )
-        author_label.pack(side=RIGHT, padx=(0, 12))
+        author_label.pack(side=tk.RIGHT, padx=(0, 12))
         author_label.bind("<Button-1>", lambda e: webbrowser.open(AUTHOR_GITHUB))
         ToolTip(author_label, f"作者: {AUTHOR_NAME}\n点击访问 GitHub 主页")
 
-        # 主题切换下拉菜单
-        self.theme_var = tk.StringVar(value=self.current_theme)
-        theme_menu = ttk.Menubutton(
+        # 主题切换按钮
+        self.theme_btn = tk.Label(
             self.right_info,
-            text="🎨 主题",
-            bootstyle="outline",
+            text="🌙" if self.theme_manager.is_dark() else "☀️",
+            font=("Segoe UI Emoji", 14),
+            bg=COLORS["card_bg"],
+            fg=COLORS["text"],
+            cursor="hand2",
         )
-        theme_menu.pack(side=RIGHT, padx=(0, 12))
-
-        # 创建主题菜单
-        theme_dropdown = tk.Menu(theme_menu, tearoff=0)
-        for theme_name, theme_label in self.THEMES.items():
-            theme_dropdown.add_command(
-                label=theme_label, command=lambda t=theme_name: self.change_theme(t)
-            )
-        theme_menu["menu"] = theme_dropdown
-        ToolTip(theme_menu, "切换界面主题")
+        self.theme_btn.pack(side=tk.RIGHT, padx=(0, 12))
+        self.theme_btn.bind("<Button-1>", lambda e: self.toggle_theme())
+        ToolTip(self.theme_btn, "切换深色/浅色模式")
 
         # 分隔符
-        ttk.Separator(self.right_info, orient=VERTICAL).pack(
-            side=RIGHT, fill=Y, padx=12
-        )
+        tk.Label(
+            self.right_info,
+            text="|",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["border"],
+        ).pack(side=tk.RIGHT, padx=(0, 12))
 
-        self.modified_label = ttk.Label(
+        self.modified_label = tk.Label(
             self.right_info,
             text="",
-            font=("Microsoft YaHei UI", 9),
-            bootstyle="warning",
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["warning"],
         )
-        self.modified_label.pack(side=RIGHT, padx=(0, 8))
+        self.modified_label.pack(side=tk.RIGHT, padx=(0, 8))
 
-        self.config_status = ttk.Label(
+        self.config_status = tk.Label(
             self.right_info,
             text="配置: 未加载",
-            font=("Microsoft YaHei UI", 9),
+            font=FONTS["small"],
+            bg=COLORS["card_bg"],
+            fg=COLORS["text_secondary"],
         )
-        self.config_status.pack(side=RIGHT, padx=(0, 12))
+        self.config_status.pack(side=tk.RIGHT, padx=(0, 12))
 
         # 分隔线
-        ttk.Separator(self.right_container, orient=HORIZONTAL).pack(fill=X)
+        tk.Frame(self.right_container, height=1, bg=COLORS["border"]).pack(fill=tk.X)
 
         # 内容区
-        self.content_frame = ttk.Frame(self.right_container)
-        self.content_frame.pack(fill=BOTH, expand=True, padx=20, pady=20)
+        self.content_frame = tk.Frame(self.right_container, bg=COLORS["bg"])
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # 创建页面
         self.pages["provider"] = ProviderTab(self.content_frame, self)
@@ -6161,17 +6147,53 @@ class MainWindow:
         # 快捷键
         self.root.bind("<Control-s>", lambda e: self.save_configs())
 
-    def change_theme(self, theme_name):
+    def toggle_theme(self):
         """切换主题"""
-        self.current_theme = theme_name
-        self.root.style.theme_use(theme_name)
+        self.theme_manager.toggle_theme()
+        self.theme_btn.config(text="🌙" if self.theme_manager.is_dark() else "☀️")
+
+    def on_theme_change(self):
+        """主题变更回调 - 刷新所有组件颜色"""
+        # 刷新主窗口
+        self.root.configure(bg=COLORS["bg"])
+        self.main_container.configure(bg=COLORS["bg"])
+        self.right_container.configure(bg=COLORS["bg"])
+        self.content_frame.configure(bg=COLORS["bg"])
+
+        # 刷新工具栏
+        self.toolbar.configure(bg=COLORS["card_bg"])
+        self.toolbar_inner.configure(bg=COLORS["card_bg"])
+        self.right_info.configure(bg=COLORS["card_bg"])
+
+        # 刷新主题按钮
+        self.theme_btn.configure(bg=COLORS["card_bg"], fg=COLORS["text"])
+
+        # 刷新状态标签
+        self.modified_label.configure(bg=COLORS["card_bg"], fg=COLORS["warning"])
+        self.config_status.configure(bg=COLORS["card_bg"], fg=COLORS["text_secondary"])
+
+        # 刷新侧边栏
+        if hasattr(self, "sidebar"):
+            self.sidebar.refresh_theme()
+
+        # 重新配置 ttk 样式
+        setup_modern_styles()
+
+        # 刷新所有页面
+        for page in self.pages.values():
+            if hasattr(page, "refresh_theme"):
+                page.refresh_theme()
+            elif hasattr(page, "configure"):
+                try:
+                    page.configure(bg=COLORS["bg"])
+                except:
+                    pass
 
     def show_page(self, key):
         for page in self.pages.values():
             page.pack_forget()
         if key in self.pages:
-            self.pages[key].pack(fill=BOTH, expand=True)
-        # 更新侧边栏选中状态
+            self.pages[key].pack(fill=tk.BOTH, expand=True)
         self.sidebar.set_active(key)
 
     def load_configs(self):
