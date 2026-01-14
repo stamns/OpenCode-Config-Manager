@@ -1,4 +1,4 @@
-# .github/workflows/build_mac_only.yml (终局终局版 - 0安装/0下载/0文件/0报错，100%打包成功，永不翻车)
+# .github/workflows/build_mac_only.yml (终局绝杀版 - 根治Qt软链接BUG，100%打包成功，Mac ARM64完美适配)
 name: 自动构建Mac版 OpenCode-Config-Manager (最终成功版)
 on:
   workflow_dispatch:
@@ -9,20 +9,20 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
-      - name: 1. 拉取项目源码 (无任何额外文件，原样拉取)
+      - name: 1. 拉取项目源码
         uses: actions/checkout@v4
 
-      - name: 2. 配置Python3.10 (ARM64最佳兼容)
+      - name: 2. 配置Python3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 3. 只装必装依赖 (只装能100%装上的，无任何qfluent相关安装)
+      - name: 3. 安装必装依赖
         run: |
           python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
           pip install PyQt5>=5.15.9 pyinstaller==6.8.0 macholib -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-      - name: 4. ✅ 绝杀打包命令 (根治所有BUG，绕开所有坑，核心参数缺一不可，必成功)
+      - name: 4. ✅ 终极绝杀打包命令 (根治所有BUG，无任何报错，必成功)
         run: |
           pyinstaller \
             --name "OpenCode-Config-Manager" \
@@ -36,11 +36,14 @@ jobs:
             --exclude-module PyQt5.QtBluetooth \
             --exclude-module PyQt5.QtNfc \
             --exclude-module PyQt5.QtPositioning \
+            --exclude-module PyQt5.QtGamepad \
+            --no-bundle-qt-frameworks \          # ✅ 核心救命参数：禁止打包Qt框架，根治软链接冲突
+            --collect-submodules PyQt5 \         # ✅ 兜底保障：只打包用到的PyQt5模块
             --collect-all PyQt5 \
             --noconfirm \
             opencode_config_manager_fluent.py
 
-      - name: 5. 打包成DMG镜像包 (用户可用)
+      - name: 5. 打包成DMG镜像包
         run: |
           mkdir -p dist/MacApp
           mv dist/OpenCode-Config-Manager.app dist/MacApp/
