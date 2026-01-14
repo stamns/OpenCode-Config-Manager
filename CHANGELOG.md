@@ -4,6 +4,29 @@
 
 ---
 
+## [v1.0.1] - 2026-01-14 12:00
+**版本代号**: JSONC 支持版
+
+### 🆕 新增功能
+- **JSONC 格式支持**：配置文件支持带注释的 JSON 格式
+  - 支持 `//` 单行注释
+  - 支持 `/* */` 多行注释
+  - 自动检测并解析 JSONC 文件
+- **双扩展名检测**：自动检测 `.jsonc` 和 `.json` 配置文件
+  - 优先加载 `.jsonc` 文件
+  - 兼容现有 `.json` 配置
+
+### 🔧 优化改进
+- `ConfigPaths` 类重构，支持灵活的配置文件路径检测
+- `ConfigManager.strip_jsonc_comments()` 方法：安全移除 JSONC 注释
+- `build_unix.sh` 更新为 Fluent 版本构建脚本
+
+### 📁 文件变更
+- 更新：`opencode_config_manager_fluent_v1.0.0.py`
+- 更新：`build_unix.sh` (Linux/macOS 构建脚本)
+
+---
+
 ## [v1.0.0] - 2026-01-14 08:00
 **版本代号**: Fluent Design 全面重构版
 

@@ -1243,27 +1243,46 @@ TOOLTIPS = {
 
 # ==================== 核心服务类 ====================
 class ConfigPaths:
-    """配置文件路径管理"""
+    """配置文件路径管理 - 支持 .json 和 .jsonc 扩展名"""
 
     @staticmethod
     def get_user_home() -> Path:
         return Path.home()
 
     @classmethod
+    def _get_config_path(cls, base_dir: Path, base_name: str) -> Path:
+        """获取配置文件路径，优先检测 .jsonc，其次 .json"""
+        jsonc_path = base_dir / f"{base_name}.jsonc"
+        json_path = base_dir / f"{base_name}.json"
+
+        # 优先返回存在的 .jsonc 文件
+        if jsonc_path.exists():
+            return jsonc_path
+        # 其次返回存在的 .json 文件
+        if json_path.exists():
+            return json_path
+        # 都不存在时，默认返回 .json 路径（用于创建新文件）
+        return json_path
+
+    @classmethod
     def get_opencode_config(cls) -> Path:
-        return cls.get_user_home() / ".config" / "opencode" / "opencode.json"
+        base_dir = cls.get_user_home() / ".config" / "opencode"
+        return cls._get_config_path(base_dir, "opencode")
 
     @classmethod
     def get_ohmyopencode_config(cls) -> Path:
-        return cls.get_user_home() / ".config" / "opencode" / "oh-my-opencode.json"
+        base_dir = cls.get_user_home() / ".config" / "opencode"
+        return cls._get_config_path(base_dir, "oh-my-opencode")
 
     @classmethod
     def get_claude_settings(cls) -> Path:
-        return cls.get_user_home() / ".claude" / "settings.json"
+        base_dir = cls.get_user_home() / ".claude"
+        return cls._get_config_path(base_dir, "settings")
 
     @classmethod
     def get_claude_providers(cls) -> Path:
-        return cls.get_user_home() / ".claude" / "providers.json"
+        base_dir = cls.get_user_home() / ".claude"
+        return cls._get_config_path(base_dir, "providers")
 
     @classmethod
     def get_backup_dir(cls) -> Path:
@@ -1271,20 +1290,91 @@ class ConfigPaths:
 
 
 class ConfigManager:
-    """配置文件读写管理"""
+    """配置文件读写管理 - 支持 JSON 和 JSONC (带注释的JSON)"""
+
+    @staticmethod
+    def strip_jsonc_comments(content: str) -> str:
+        """移除 JSONC 中的注释，支持 // 单行注释和 /* */ 多行注释"""
+        result = []
+        i = 0
+        in_string = False
+        escape_next = False
+
+        while i < len(content):
+            char = content[i]
+
+            # 处理字符串内的转义
+            if escape_next:
+                result.append(char)
+                escape_next = False
+                i += 1
+                continue
+
+            # 检测转义字符
+            if char == "\\" and in_string:
+                result.append(char)
+                escape_next = True
+                i += 1
+                continue
+
+            # 检测字符串边界
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                result.append(char)
+                i += 1
+                continue
+
+            # 不在字符串内时处理注释
+            if not in_string:
+                # 检测单行注释 //
+                if char == "/" and i + 1 < len(content) and content[i + 1] == "/":
+                    # 跳过到行尾
+                    while i < len(content) and content[i] != "\n":
+                        i += 1
+                    continue
+
+                # 检测多行注释 /* */
+                if char == "/" and i + 1 < len(content) and content[i + 1] == "*":
+                    i += 2  # 跳过 /*
+                    # 查找 */
+                    while i < len(content):
+                        if (
+                            content[i] == "*"
+                            and i + 1 < len(content)
+                            and content[i + 1] == "/"
+                        ):
+                            i += 2  # 跳过 */
+                            break
+                        i += 1
+                    continue
+
+            result.append(char)
+            i += 1
+
+        return "".join(result)
 
     @staticmethod
     def load_json(path: Path) -> Optional[Dict]:
+        """加载 JSON/JSONC 文件"""
         try:
             if path.exists():
                 with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    content = f.read()
+
+                # 尝试直接解析 JSON
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    # 如果失败，尝试移除注释后再解析 (JSONC)
+                    stripped_content = ConfigManager.strip_jsonc_comments(content)
+                    return json.loads(stripped_content)
         except Exception as e:
             print(f"Load failed {path}: {e}")
         return None
 
     @staticmethod
     def save_json(path: Path, data: Dict) -> bool:
+        """保存为标准 JSON 格式（不保留注释）"""
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
