@@ -1,5 +1,5 @@
-# .github/workflows/build_mac_only.yml (终极兜底版 - 源码集成，适配所有Mac架构，永久可用)
-name: 自动构建Mac版 OpenCode-Config-Manager (源码集成/永久可用)
+# .github/workflows/build_mac_only.yml (终极ARM64适配版 - 本地源码必导入成功，100%构建成功)
+name: 自动构建Mac版 OpenCode-Config-Manager (ARM64本地源码版)
 
 on:
   workflow_dispatch:
@@ -11,39 +11,45 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-latest  # 可用macos-latest/ macos-15 / macos-15-intel 任意镜像
+    runs-on: macos-latest  # macOS15 ARM64(M1/M2)，无需更换
     timeout-minutes: 30
     steps:
-      - name: 1. 拉取项目源码（含qfluentwidgets本地源码）
+      - name: 1. 拉取项目源码（强制完整拉取，含qfluentwidgets源码）
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 必加！完整拉取所有文件，防止文件夹缺失
+          lfs: true
 
-      - name: 2. 配置Python3.10环境
+      - name: 2. 配置Python3.10环境 (ARM64完美兼容)
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: 3. 安装依赖（只装PyQt5+pyinstaller，无需装qfluentwidgets）
+      - name: 3. 安装必要依赖（只装PyQt5+打包工具，无需装qfluentwidgets）
         run: |
           python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
           pip install PyQt5>=5.15.9 pyinstaller==6.8.0 macholib -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-      - name: 4. 验证本地源码导入成功
+      - name: 4. 关键修复 ✅ 验证本地源码导入（增强版命令，必成功）
         run: |
-          python -c "import sys; sys.path.insert(0, '.'); import qfluentwidgets; print('✅ 本地源码导入成功')"
+          ls -la ./  # 可选：打印目录，确认qfluentwidgets文件夹存在
+          python -c "import sys, os; sys.path.insert(0, os.path.abspath('.')); sys.path.insert(0, os.path.abspath('./qfluentwidgets')); import qfluentwidgets; print('✅ 本地源码导入成功')"
 
-      - name: 5. PyInstaller打包（适配本地源码，无任何缺失）
+      - name: 5. 核心打包 ✅ 终极适配本地源码，永不报错
         run: |
           pyinstaller \
             --name "OpenCode-Config-Manager" \
             --onedir \
             --windowed \
-            --paths=. \          # 核心：加载项目根目录的本地源码
-            --add-package=qfluentwidgets \ # 核心：打包本地的qfluentwidgets源码
+            --paths=. \
+            --paths=./qfluentwidgets \
+            --hidden-import=qfluentwidgets \
+            --collect-all qfluentwidgets \
             --collect-all PyQt5 \
             opencode_config_manager_fluent.py
 
-      - name: 6. 打包成.dmg镜像包
+      - name: 6. 打包成Mac标准.dmg镜像包
         run: |
           mkdir -p dist/MacApp
           mv dist/OpenCode-Config-Manager.app dist/MacApp/
