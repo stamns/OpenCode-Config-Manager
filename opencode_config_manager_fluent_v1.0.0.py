@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v1.0.2 (QFluentWidgets 版本)
+OpenCode & Oh My OpenCode 配置管理器 v1.0.3 (QFluentWidgets 版本)
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
 
 基于 PyQt5 + QFluentWidgets 重写，提供现代化 Fluent Design 界面
+
+v1.0.3 更新：
+- 跨平台路径支持 (Windows/Linux/macOS 统一)
+- 自动日志记录功能 (~/.config/opencode/logs/occm.log)
+- 完善构建脚本 (build_unix.sh + build_windows.bat)
+- Linux 无头服务器自动使用 xvfb
 
 v1.0.2 更新：
 - 首页配置文件路径支持手动选择
@@ -98,7 +104,7 @@ from qfluentwidgets import (
 )
 
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1253,7 +1259,16 @@ TOOLTIPS = {
 
 # ==================== 核心服务类 ====================
 class ConfigPaths:
-    """配置文件路径管理 - 支持 .json 和 .jsonc 扩展名，支持自定义路径"""
+    """
+    配置文件路径管理 - 跨平台支持 (Windows/Linux/macOS)
+
+    默认路径：
+    - Windows: C:/Users/<user>/.config/opencode/
+    - Linux: /home/<user>/.config/opencode/
+    - macOS: /Users/<user>/.config/opencode/
+
+    支持 .json 和 .jsonc 扩展名，支持自定义路径
+    """
 
     # 自定义路径存储（None 表示使用默认路径）
     _custom_opencode_path: Optional[Path] = None
@@ -1261,7 +1276,27 @@ class ConfigPaths:
 
     @staticmethod
     def get_user_home() -> Path:
+        """获取用户主目录（跨平台）"""
         return Path.home()
+
+    @staticmethod
+    def get_platform() -> str:
+        """获取当前平台: windows, linux, macos"""
+        import platform
+
+        system = platform.system().lower()
+        if system == "darwin":
+            return "macos"
+        return system
+
+    @classmethod
+    def get_config_base_dir(cls) -> Path:
+        """
+        获取配置文件基础目录（跨平台）
+
+        所有平台统一使用 ~/.config/opencode/
+        """
+        return cls.get_user_home() / ".config" / "opencode"
 
     @classmethod
     def _get_config_path(cls, base_dir: Path, base_name: str) -> Path:
@@ -1283,8 +1318,7 @@ class ConfigPaths:
         """获取 OpenCode 配置路径（优先使用自定义路径）"""
         if cls._custom_opencode_path is not None:
             return cls._custom_opencode_path
-        base_dir = cls.get_user_home() / ".config" / "opencode"
-        return cls._get_config_path(base_dir, "opencode")
+        return cls._get_config_path(cls.get_config_base_dir(), "opencode")
 
     @classmethod
     def set_opencode_config(cls, path: Optional[Path]) -> None:
@@ -1296,8 +1330,7 @@ class ConfigPaths:
         """获取 Oh My OpenCode 配置路径（优先使用自定义路径）"""
         if cls._custom_ohmyopencode_path is not None:
             return cls._custom_ohmyopencode_path
-        base_dir = cls.get_user_home() / ".config" / "opencode"
-        return cls._get_config_path(base_dir, "oh-my-opencode")
+        return cls._get_config_path(cls.get_config_base_dir(), "oh-my-opencode")
 
     @classmethod
     def set_ohmyopencode_config(cls, path: Optional[Path]) -> None:
@@ -1323,17 +1356,100 @@ class ConfigPaths:
 
     @classmethod
     def get_claude_settings(cls) -> Path:
+        """获取 Claude Code 设置路径"""
         base_dir = cls.get_user_home() / ".claude"
         return cls._get_config_path(base_dir, "settings")
 
     @classmethod
     def get_claude_providers(cls) -> Path:
+        """获取 Claude Code providers 路径"""
         base_dir = cls.get_user_home() / ".claude"
         return cls._get_config_path(base_dir, "providers")
 
     @classmethod
     def get_backup_dir(cls) -> Path:
-        return cls.get_user_home() / ".config" / "opencode" / "backups"
+        """获取备份目录"""
+        return cls.get_config_base_dir() / "backups"
+
+    @classmethod
+    def get_log_dir(cls) -> Path:
+        """获取日志目录"""
+        return cls.get_config_base_dir() / "logs"
+
+
+# ==================== 日志管理器 ====================
+class AppLogger:
+    """
+    应用日志管理器 - 自动记录操作日志
+
+    日志文件位置：~/.config/opencode/logs/occm.log
+    日志格式：[时间] [级别] 消息
+    """
+
+    _instance: Optional["AppLogger"] = None
+    _logger: Optional[Any] = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._init_logger()
+        return cls._instance
+
+    def _init_logger(self):
+        """初始化日志器"""
+        import logging
+        from logging.handlers import RotatingFileHandler
+
+        # 创建日志目录
+        log_dir = ConfigPaths.get_log_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "occm.log"
+
+        # 配置日志器
+        self._logger = logging.getLogger("OCCM")
+        self._logger.setLevel(logging.INFO)
+
+        # 避免重复添加 handler
+        if not self._logger.handlers:
+            # 文件处理器（轮转，最大 5MB，保留 3 个备份）
+            file_handler = RotatingFileHandler(
+                log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+            )
+            file_handler.setLevel(logging.INFO)
+
+            # 日志格式
+            formatter = logging.Formatter(
+                "[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+            )
+            file_handler.setFormatter(formatter)
+
+            self._logger.addHandler(file_handler)
+
+    def info(self, message: str):
+        """记录信息日志"""
+        if self._logger:
+            self._logger.info(message)
+
+    def warning(self, message: str):
+        """记录警告日志"""
+        if self._logger:
+            self._logger.warning(message)
+
+    def error(self, message: str):
+        """记录错误日志"""
+        if self._logger:
+            self._logger.error(message)
+
+    def debug(self, message: str):
+        """记录调试日志"""
+        if self._logger:
+            self._logger.debug(message)
+
+
+# 全局日志实例
+def get_logger() -> AppLogger:
+    """获取全局日志实例"""
+    return AppLogger()
 
 
 class ConfigManager:

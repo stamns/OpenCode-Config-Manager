@@ -4,6 +4,35 @@
 
 ---
 
+## [v1.0.3] - 2026-01-14 13:00
+**版本代号**: 跨平台增强版
+
+### 🆕 新增功能
+- **跨平台路径支持**：
+  - Windows/Linux/macOS 统一使用 `~/.config/opencode/` 目录
+  - `ConfigPaths.get_platform()` 获取当前平台
+  - `ConfigPaths.get_config_base_dir()` 获取配置基础目录
+- **自动日志记录**：
+  - 日志文件位置：`~/.config/opencode/logs/occm.log`
+  - 自动轮转（最大 5MB，保留 3 个备份）
+  - `AppLogger` 单例类，支持 info/warning/error/debug 级别
+- **完善构建脚本**：
+  - `build_unix.sh`：Linux + macOS 统一构建脚本
+  - `build_windows.bat`：Windows 构建脚本
+  - Linux 无头服务器自动检测并使用 xvfb
+
+### 🔧 优化改进
+- 构建脚本自动检测 Python 版本
+- 构建脚本自动安装缺失依赖
+- 构建完成后显示文件大小
+
+### 📁 文件变更
+- 更新：`opencode_config_manager_fluent_v1.0.0.py`
+- 更新：`build_unix.sh`
+- 新增：`build_windows.bat`
+
+---
+
 ## [v1.0.2] - 2026-01-14 12:30
 **版本代号**: 自定义路径版
 
