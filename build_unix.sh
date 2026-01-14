@@ -3,7 +3,7 @@ set -e
 
 echo "========================================"
 echo "  OpenCode Config Manager - Unix Build"
-echo "  v1.0.0 Fluent (PyQt5 + QFluentWidgets)"
+echo "  v1.0.1 Fluent (PyQt5 + QFluentWidgets)"
 echo "========================================"
 echo ""
 
@@ -54,7 +54,7 @@ echo "[INFO] Collecting qfluentwidgets resources..."
 # Build
 echo "[INFO] Building executable..."
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 MAIN_SCRIPT="opencode_config_manager_fluent_v1.0.0.py"
 
 if [ "${PLATFORM}" = "macos" ]; then

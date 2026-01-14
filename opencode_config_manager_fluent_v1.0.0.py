@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v1.0.0 (QFluentWidgets 版本)
+OpenCode & Oh My OpenCode 配置管理器 v1.0.1 (QFluentWidgets 版本)
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
 
 基于 PyQt5 + QFluentWidgets 重写，提供现代化 Fluent Design 界面
+
+v1.0.1 更新：
+- 支持 JSONC 格式配置文件（带注释的 JSON）
+- 支持 // 单行注释和 /* */ 多行注释
+- 自动检测 .jsonc 和 .json 双扩展名
 """
 
 import sys
@@ -88,7 +93,7 @@ from qfluentwidgets import (
 )
 
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
