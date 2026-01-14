@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v1.0.3 (QFluentWidgets 版本)
+OpenCode & Oh My OpenCode 配置管理器 v1.0.4 (QFluentWidgets 版本)
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
 
 基于 PyQt5 + QFluentWidgets 重写，提供现代化 Fluent Design 界面
+
+v1.0.4 更新：
+- 备份目录支持手动选择和重置
+- 文件重命名为 opencode_config_manager_fluent.py
 
 v1.0.3 更新：
 - 跨平台路径支持 (Windows/Linux/macOS 统一)
@@ -103,7 +107,7 @@ from qfluentwidgets import (
 )
 
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1272,6 +1276,7 @@ class ConfigPaths:
     # 自定义路径存储（None 表示使用默认路径）
     _custom_opencode_path: Optional[Path] = None
     _custom_ohmyopencode_path: Optional[Path] = None
+    _custom_backup_path: Optional[Path] = None
 
     @staticmethod
     def get_user_home() -> Path:
@@ -1343,6 +1348,8 @@ class ConfigPaths:
             return cls._custom_opencode_path is not None
         elif config_type == "ohmyopencode":
             return cls._custom_ohmyopencode_path is not None
+        elif config_type == "backup":
+            return cls._custom_backup_path is not None
         return False
 
     @classmethod
@@ -1352,6 +1359,8 @@ class ConfigPaths:
             cls._custom_opencode_path = None
         elif config_type == "ohmyopencode":
             cls._custom_ohmyopencode_path = None
+        elif config_type == "backup":
+            cls._custom_backup_path = None
 
     @classmethod
     def get_claude_settings(cls) -> Path:
@@ -1367,8 +1376,15 @@ class ConfigPaths:
 
     @classmethod
     def get_backup_dir(cls) -> Path:
-        """获取备份目录"""
+        """获取备份目录（优先使用自定义路径）"""
+        if cls._custom_backup_path is not None:
+            return cls._custom_backup_path
         return cls.get_config_base_dir() / "backups"
+
+    @classmethod
+    def set_backup_dir(cls, path: Optional[Path]) -> None:
+        """设置自定义备份目录"""
+        cls._custom_backup_path = path
 
 
 class ConfigManager:
@@ -2069,14 +2085,30 @@ class HomePage(BasePage):
         # 备份目录路径
         backup_layout = QHBoxLayout()
         backup_layout.addWidget(BodyLabel("备份目录:", paths_card))
-        backup_path = str(ConfigPaths.get_backup_dir())
-        backup_path_label = CaptionLabel(backup_path, paths_card)
-        backup_path_label.setToolTip(backup_path)
-        backup_layout.addWidget(backup_path_label, 1)
+        self.backup_path_label = CaptionLabel(
+            str(ConfigPaths.get_backup_dir()), paths_card
+        )
+        self.backup_path_label.setToolTip(str(ConfigPaths.get_backup_dir()))
+        backup_layout.addWidget(self.backup_path_label, 1)
+
         backup_copy_btn = ToolButton(FIF.COPY, paths_card)
         backup_copy_btn.setToolTip("复制路径")
-        backup_copy_btn.clicked.connect(lambda: self._copy_to_clipboard(backup_path))
+        backup_copy_btn.clicked.connect(
+            lambda: self._copy_to_clipboard(self.backup_path_label.text())
+        )
         backup_layout.addWidget(backup_copy_btn)
+
+        backup_browse_btn = ToolButton(FIF.FOLDER, paths_card)
+        backup_browse_btn.setToolTip("选择备份目录")
+        backup_browse_btn.clicked.connect(self._browse_backup_dir)
+        backup_layout.addWidget(backup_browse_btn)
+
+        self.backup_reset_btn = ToolButton(FIF.SYNC, paths_card)
+        self.backup_reset_btn.setToolTip("重置为默认路径")
+        self.backup_reset_btn.clicked.connect(self._reset_backup_dir)
+        self.backup_reset_btn.setVisible(ConfigPaths.is_custom_path("backup"))
+        backup_layout.addWidget(self.backup_reset_btn)
+
         paths_layout.addLayout(backup_layout)
 
         # ===== 统计信息卡片 =====
@@ -2207,6 +2239,33 @@ class HomePage(BasePage):
 
         self._load_stats()
         self.show_success("成功", "已重置为默认配置路径")
+
+    def _browse_backup_dir(self):
+        """浏览并选择备份目录"""
+        start_path = str(ConfigPaths.get_backup_dir())
+        dir_path = QFileDialog.getExistingDirectory(self, "选择备份目录", start_path)
+
+        if dir_path:
+            path = Path(dir_path)
+            ConfigPaths.set_backup_dir(path)
+            self.backup_path_label.setText(str(path))
+            self.backup_path_label.setToolTip(str(path))
+            self.backup_reset_btn.setVisible(True)
+            # 更新备份管理器的目录
+            self.main_window.backup_manager.backup_dir = path
+            path.mkdir(parents=True, exist_ok=True)
+            self.show_success("成功", f"已切换到自定义备份目录: {path.name}")
+
+    def _reset_backup_dir(self):
+        """重置为默认备份目录"""
+        ConfigPaths.reset_to_default("backup")
+        default_path = ConfigPaths.get_backup_dir()
+        self.backup_path_label.setText(str(default_path))
+        self.backup_path_label.setToolTip(str(default_path))
+        self.backup_reset_btn.setVisible(False)
+        # 更新备份管理器的目录
+        self.main_window.backup_manager.backup_dir = default_path
+        self.show_success("成功", "已重置为默认备份目录")
 
     def _update_path_labels(self):
         """更新路径标签显示"""
