@@ -69,8 +69,9 @@ jobs:
 
       - name: Unsigned Sign (免证书，解决运行弹窗)
         run: |
-          xattr -cr dist/OpenCode-Config-Manager/OpenCode-Config-Manager.app
-          codesign --force --deep --sign - dist/OpenCode-Config-Manager/OpenCode-Config-Manager.app
+          # ✅ 核心修改：路径改为 dist/OpenCode-Config-Manager.app （根目录下直接是app文件）
+          xattr -cr dist/OpenCode-Config-Manager.app
+          codesign --force --deep --sign - dist/OpenCode-Config-Manager.app
         shell: /bin/bash -e {0}
           
       - name: Create DMG Installer
