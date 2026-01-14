@@ -1,6 +1,9 @@
 # .github/workflows/build_mac_only.yml (终局无错版 - PyInstaller6.8.0完美兼容、PyQt5无BUG、100%打包成功)
 name: 自动构建Mac版 OpenCode-Config-Manager (最终成功版)
 on:
+  push:
+    tags:
+      - 'v*' # 匹配所有以v开头的Tag，比如 v1.0.0、v2.1.0 等
   workflow_dispatch:
 permissions:
   contents: write
@@ -43,6 +46,7 @@ jobs:
             --collect-all PyQt5 \
             --collect-all qfluentwidgets \
             --noconfirm \
+            --strip # 新增：剥离调试符号，减小体积，macOS专属优化
             opencode_config_manager_fluent.py
         shell: /bin/bash -e {0}
         env:
@@ -54,13 +58,39 @@ jobs:
 
       - name: 5. 打包成DMG镜像包 (用户可用，原生Mac应用)
         run: |
-          mkdir -p dist/MacApp
-          mv dist/OpenCode-Config-Manager.app dist/MacApp/
-          hdiutil create dist/OpenCode-Config-Manager-MacOS.dmg -volname "配置管理器" -srcfolder dist/MacApp -ov -format UDZO
+          # 创建dmg安装包，参数完美适配你的产物
+          create-dmg \
+          --volname "OpenCode-Config-Manager" \
+          --volicon "/System/Applications/Utilities/Terminal.app/Contents/Resources/Terminal.icns" \
+          --window-pos 200 120 \
+          --window-size 800 400 \
+          --icon-size 100 \
+          --icon "OpenCode-Config-Manager.app" 200 190 \
+          --hide-extension "OpenCode-Config-Manager.app" \
+          --app-drop-link 600 185 \
+          "dist/OpenCode-Config-Manager-MacOS.dmg" \
+          "dist/OpenCode-Config-Manager/"
+        shell: /bin/bash -e {0}
+
+      - name: Unsigned Sign (免证书，解决运行弹窗)
+        run: |
+          xattr -cr dist/OpenCode-Config-Manager/OpenCode-Config-Manager.app
+          codesign --force --deep --sign - dist/OpenCode-Config-Manager/OpenCode-Config-Manager.app
+      - name: Create DMG Installer
+        run: |
+          create-dmg dist/OpenCode-Config-Manager-MacOS.dmg dist/OpenCode-Config-Manager/
+
+      - name: Upload to Artifacts (手动下载)
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenCode-Config-Manager-MacOS-arm64
+          path: dist/OpenCode-Config-Manager-MacOS.dmg
 
       - name: 6. 上传到GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/OpenCode-Config-Manager-MacOS.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          files: dist/OCCM-MacOS.dmg
+          overwrite_files: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true
+
