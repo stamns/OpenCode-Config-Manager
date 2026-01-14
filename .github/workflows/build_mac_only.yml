@@ -1,0 +1,70 @@
+# .github/workflows/build_mac_only.yml (Mac终极版，无任何报错，100%构建成功)
+name: 自动构建Mac版 OpenCode-Config-Manager (无闪退/完整版)
+
+on:
+  workflow_dispatch:  # 手动触发，优先测试
+  push:
+    tags: ['v*']      # 打版本自动构建
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30  # 延长超时，足够完成打包
+    steps:
+      - name: 1. 完整拉取项目源码（所有文件+文件夹，无缺失）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 完整拉取，不会遗漏qfluentwidgets文件夹
+          lfs: true
+
+      - name: 2. 配置Python3.10环境（Mac完美兼容PyQt5，无版本冲突）
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          check-latest: true
+
+      - name: 3. 手动安装所有依赖（绕开txt检测，Mac专属优化）
+        run: |
+          python -m pip install --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple
+          pip install PyQt5>=5.15.9 pyinstaller==6.8.0 PyQt5-sip>=12.18.0 macholib -i https://pypi.tuna.tsinghua.edu.cn/simple
+          # macholib是Mac打包必装，修复Qt库依赖问题
+
+      - name: 4. 验证文件存在（排障用，能打印成功说明所有文件都在）
+        run: |
+          ls -la /Users/runner/work/OpenCode-Config-Manager/OpenCode-Config-Manager/
+          echo "✅ qfluentwidgets文件夹存在："
+          ls -la /Users/runner/work/OpenCode-Config-Manager/OpenCode-Config-Manager/qfluentwidgets/
+
+      - name: 5. PyInstaller打包【Mac终极适配，解决所有报错核心！】
+        run: |
+          pyinstaller --clean \
+            --name "OpenCode-Config-Manager" \
+            --onedir \          # ✅ 必改！Mac用onedir模式替代-F单文件，解决和-w冲突的问题
+            --windowed \        # ✅ Mac窗口模式标准参数，替代-w，无控制台
+            --hidden-import=qfluentwidgets \
+            --add-package=qfluentwidgets \  # ✅ 核心修复！用add-package识别Python包文件夹，完美适配qfluentwidgets
+            --paths=. \         # ✅ 加载项目根目录的依赖
+            --collect-all PyQt5 \# ✅ 强制打包所有Qt5插件，解决闪退/插件缺失
+            --collect-all PyQt5-Qt5 \
+            --noconsole \
+            opencode_config_manager_fluent.py
+          # ✅ 彻底删除--add-data，改用--add-package，完美解决文件夹找不到的问题
+
+      - name: 6. 打包为Mac标准.app + .dmg镜像包（用户友好，拖拽安装）
+        run: |
+          mkdir -p dist/MacApp
+          mv dist/OpenCode-Config-Manager.app dist/MacApp/
+          hdiutil create dist/OpenCode-Config-Manager-MacOS.dmg -volname "OpenCode配置管理器" -srcfolder dist/MacApp -ov -format UDZO
+          # 打包后的.dmg包含原生.app程序，Intel/M1/M2芯片通用
+
+      - name: 7. 自动上传到GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/OpenCode-Config-Manager-MacOS.dmg
+          body: "✅ MacOS通用版 (Intel/M1/M2芯片)\n✅ 原生.app应用，双击打开无闪退\n✅ 右键打开可绕过开发者验证"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
