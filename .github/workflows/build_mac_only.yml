@@ -63,13 +63,6 @@ jobs:
           # 你的原命令完全不变，直接复用，参数完美适配
           create-dmg \
             --volname "OpenCode-Config-Manager" \
-            --volicon "/System/Applications/Utilities/Terminal.app/Contents/Resources/Terminal.icns" \
-            --window-pos 200 120 \
-            --window-size 800 400 \
-            --icon-size 100 \
-            --icon "OpenCode-Config-Manager.app" 200 190 \
-            --hide-extension "OpenCode-Config-Manager.app" \
-            --app-drop-link 600 185 \
             "dist/OpenCode-Config-Manager-MacOS.dmg" \
             "dist/OpenCode-Config-Manager/"
         shell: /bin/bash -e {0}
