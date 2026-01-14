@@ -46,7 +46,7 @@ jobs:
             --collect-all PyQt5 \
             --collect-all qfluentwidgets \
             --noconfirm \
-            --strip # 新增：剥离调试符号，减小体积，macOS专属优化
+            --strip \
             opencode_config_manager_fluent.py
         shell: /bin/bash -e {0}
         env:
