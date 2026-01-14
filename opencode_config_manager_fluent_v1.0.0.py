@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v1.0.1 (QFluentWidgets 版本)
+OpenCode & Oh My OpenCode 配置管理器 v1.0.2 (QFluentWidgets 版本)
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
 
 基于 PyQt5 + QFluentWidgets 重写，提供现代化 Fluent Design 界面
+
+v1.0.2 更新：
+- 首页配置文件路径支持手动选择
+- 支持切换到任意 JSON/JSONC 配置文件
+- 支持重置为默认路径
 
 v1.0.1 更新：
 - 支持 JSONC 格式配置文件（带注释的 JSON）
@@ -93,7 +98,7 @@ from qfluentwidgets import (
 )
 
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1248,7 +1253,11 @@ TOOLTIPS = {
 
 # ==================== 核心服务类 ====================
 class ConfigPaths:
-    """配置文件路径管理 - 支持 .json 和 .jsonc 扩展名"""
+    """配置文件路径管理 - 支持 .json 和 .jsonc 扩展名，支持自定义路径"""
+
+    # 自定义路径存储（None 表示使用默认路径）
+    _custom_opencode_path: Optional[Path] = None
+    _custom_ohmyopencode_path: Optional[Path] = None
 
     @staticmethod
     def get_user_home() -> Path:
@@ -1271,13 +1280,46 @@ class ConfigPaths:
 
     @classmethod
     def get_opencode_config(cls) -> Path:
+        """获取 OpenCode 配置路径（优先使用自定义路径）"""
+        if cls._custom_opencode_path is not None:
+            return cls._custom_opencode_path
         base_dir = cls.get_user_home() / ".config" / "opencode"
         return cls._get_config_path(base_dir, "opencode")
 
     @classmethod
+    def set_opencode_config(cls, path: Optional[Path]) -> None:
+        """设置自定义 OpenCode 配置路径"""
+        cls._custom_opencode_path = path
+
+    @classmethod
     def get_ohmyopencode_config(cls) -> Path:
+        """获取 Oh My OpenCode 配置路径（优先使用自定义路径）"""
+        if cls._custom_ohmyopencode_path is not None:
+            return cls._custom_ohmyopencode_path
         base_dir = cls.get_user_home() / ".config" / "opencode"
         return cls._get_config_path(base_dir, "oh-my-opencode")
+
+    @classmethod
+    def set_ohmyopencode_config(cls, path: Optional[Path]) -> None:
+        """设置自定义 Oh My OpenCode 配置路径"""
+        cls._custom_ohmyopencode_path = path
+
+    @classmethod
+    def is_custom_path(cls, config_type: str) -> bool:
+        """检查是否使用自定义路径"""
+        if config_type == "opencode":
+            return cls._custom_opencode_path is not None
+        elif config_type == "ohmyopencode":
+            return cls._custom_ohmyopencode_path is not None
+        return False
+
+    @classmethod
+    def reset_to_default(cls, config_type: str) -> None:
+        """重置为默认路径"""
+        if config_type == "opencode":
+            cls._custom_opencode_path = None
+        elif config_type == "ohmyopencode":
+            cls._custom_ohmyopencode_path = None
 
     @classmethod
     def get_claude_settings(cls) -> Path:
@@ -1378,8 +1420,38 @@ class ConfigManager:
         return None
 
     @staticmethod
-    def save_json(path: Path, data: Dict) -> bool:
-        """保存为标准 JSON 格式（不保留注释）"""
+    def is_jsonc_file(path: Path) -> bool:
+        """检查文件是否为 JSONC 格式（包含注释）"""
+        try:
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                # 尝试直接解析，如果失败说明可能有注释
+                try:
+                    json.loads(content)
+                    return False  # 标准 JSON
+                except json.JSONDecodeError:
+                    return True  # 可能是 JSONC
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def save_json(path: Path, data: Dict, warn_jsonc: bool = False) -> bool:
+        """
+        保存为标准 JSON 格式
+
+        注意：如果原文件是 JSONC 格式（带注释），保存后注释会丢失。
+        建议在保存前备份原文件。
+
+        Args:
+            path: 保存路径
+            data: 要保存的数据
+            warn_jsonc: 是否返回 JSONC 警告信息（用于 UI 提示）
+
+        Returns:
+            bool: 保存是否成功
+        """
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
@@ -1899,47 +1971,77 @@ class HomePage(BasePage):
         paths_card = self.add_card("配置文件路径")
         paths_layout = paths_card.layout()
 
-        opencode_path = str(ConfigPaths.get_opencode_config())
-        ohmy_path = str(ConfigPaths.get_ohmyopencode_config())
-        backup_path = str(ConfigPaths.get_backup_dir())
-
         # OpenCode 配置路径
         oc_layout = QHBoxLayout()
         oc_layout.addWidget(BodyLabel("OpenCode:", paths_card))
-        oc_path_label = CaptionLabel(opencode_path, paths_card)
-        oc_path_label.setToolTip(opencode_path)
-        oc_layout.addWidget(oc_path_label)
+        self.oc_path_label = CaptionLabel(
+            str(ConfigPaths.get_opencode_config()), paths_card
+        )
+        self.oc_path_label.setToolTip(str(ConfigPaths.get_opencode_config()))
+        oc_layout.addWidget(self.oc_path_label, 1)
+
         oc_copy_btn = ToolButton(FIF.COPY, paths_card)
         oc_copy_btn.setToolTip("复制路径")
-        oc_copy_btn.clicked.connect(lambda: self._copy_to_clipboard(opencode_path))
+        oc_copy_btn.clicked.connect(
+            lambda: self._copy_to_clipboard(self.oc_path_label.text())
+        )
         oc_layout.addWidget(oc_copy_btn)
-        oc_layout.addStretch()
+
+        oc_browse_btn = ToolButton(FIF.FOLDER, paths_card)
+        oc_browse_btn.setToolTip("选择配置文件")
+        oc_browse_btn.clicked.connect(lambda: self._browse_config("opencode"))
+        oc_layout.addWidget(oc_browse_btn)
+
+        self.oc_reset_btn = ToolButton(FIF.SYNC, paths_card)
+        self.oc_reset_btn.setToolTip("重置为默认路径")
+        self.oc_reset_btn.clicked.connect(lambda: self._reset_config_path("opencode"))
+        self.oc_reset_btn.setVisible(ConfigPaths.is_custom_path("opencode"))
+        oc_layout.addWidget(self.oc_reset_btn)
+
         paths_layout.addLayout(oc_layout)
 
         # Oh My OpenCode 配置路径
         ohmy_layout = QHBoxLayout()
         ohmy_layout.addWidget(BodyLabel("Oh My OpenCode:", paths_card))
-        ohmy_path_label = CaptionLabel(ohmy_path, paths_card)
-        ohmy_path_label.setToolTip(ohmy_path)
-        ohmy_layout.addWidget(ohmy_path_label)
+        self.ohmy_path_label = CaptionLabel(
+            str(ConfigPaths.get_ohmyopencode_config()), paths_card
+        )
+        self.ohmy_path_label.setToolTip(str(ConfigPaths.get_ohmyopencode_config()))
+        ohmy_layout.addWidget(self.ohmy_path_label, 1)
+
         ohmy_copy_btn = ToolButton(FIF.COPY, paths_card)
         ohmy_copy_btn.setToolTip("复制路径")
-        ohmy_copy_btn.clicked.connect(lambda: self._copy_to_clipboard(ohmy_path))
+        ohmy_copy_btn.clicked.connect(
+            lambda: self._copy_to_clipboard(self.ohmy_path_label.text())
+        )
         ohmy_layout.addWidget(ohmy_copy_btn)
-        ohmy_layout.addStretch()
+
+        ohmy_browse_btn = ToolButton(FIF.FOLDER, paths_card)
+        ohmy_browse_btn.setToolTip("选择配置文件")
+        ohmy_browse_btn.clicked.connect(lambda: self._browse_config("ohmyopencode"))
+        ohmy_layout.addWidget(ohmy_browse_btn)
+
+        self.ohmy_reset_btn = ToolButton(FIF.SYNC, paths_card)
+        self.ohmy_reset_btn.setToolTip("重置为默认路径")
+        self.ohmy_reset_btn.clicked.connect(
+            lambda: self._reset_config_path("ohmyopencode")
+        )
+        self.ohmy_reset_btn.setVisible(ConfigPaths.is_custom_path("ohmyopencode"))
+        ohmy_layout.addWidget(self.ohmy_reset_btn)
+
         paths_layout.addLayout(ohmy_layout)
 
         # 备份目录路径
         backup_layout = QHBoxLayout()
         backup_layout.addWidget(BodyLabel("备份目录:", paths_card))
+        backup_path = str(ConfigPaths.get_backup_dir())
         backup_path_label = CaptionLabel(backup_path, paths_card)
         backup_path_label.setToolTip(backup_path)
-        backup_layout.addWidget(backup_path_label)
+        backup_layout.addWidget(backup_path_label, 1)
         backup_copy_btn = ToolButton(FIF.COPY, paths_card)
         backup_copy_btn.setToolTip("复制路径")
         backup_copy_btn.clicked.connect(lambda: self._copy_to_clipboard(backup_path))
         backup_layout.addWidget(backup_copy_btn)
-        backup_layout.addStretch()
         paths_layout.addLayout(backup_layout)
 
         # ===== 统计信息卡片 =====
@@ -1998,6 +2100,91 @@ class HomePage(BasePage):
         clipboard = QApplication.clipboard()
         clipboard.setText(text)
         self.show_success("成功", "路径已复制到剪贴板")
+
+    def _browse_config(self, config_type: str):
+        """浏览并选择配置文件"""
+        title = (
+            "选择 OpenCode 配置文件"
+            if config_type == "opencode"
+            else "选择 Oh My OpenCode 配置文件"
+        )
+        file_filter = "JSON/JSONC 文件 (*.json *.jsonc);;所有文件 (*)"
+
+        # 获取当前路径作为起始目录
+        if config_type == "opencode":
+            start_path = str(ConfigPaths.get_opencode_config().parent)
+        else:
+            start_path = str(ConfigPaths.get_ohmyopencode_config().parent)
+
+        file_path, _ = QFileDialog.getOpenFileName(self, title, start_path, file_filter)
+
+        if file_path:
+            path = Path(file_path)
+            # 验证文件是否为有效的 JSON/JSONC
+            config_data = ConfigManager.load_json(path)
+            if config_data is None:
+                self.show_error(
+                    "错误", "无法解析配置文件，请确保是有效的 JSON/JSONC 格式"
+                )
+                return
+
+            # 设置自定义路径
+            if config_type == "opencode":
+                ConfigPaths.set_opencode_config(path)
+                self.oc_path_label.setText(str(path))
+                self.oc_path_label.setToolTip(str(path))
+                self.oc_reset_btn.setVisible(True)
+                # 重新加载配置
+                self.main_window.opencode_config = config_data
+            else:
+                ConfigPaths.set_ohmyopencode_config(path)
+                self.ohmy_path_label.setText(str(path))
+                self.ohmy_path_label.setToolTip(str(path))
+                self.ohmy_reset_btn.setVisible(True)
+                # 重新加载配置
+                self.main_window.ohmyopencode_config = config_data
+
+            self._load_stats()
+            self.show_success("成功", f"已切换到自定义配置文件: {path.name}")
+
+    def _reset_config_path(self, config_type: str):
+        """重置为默认配置路径"""
+        ConfigPaths.reset_to_default(config_type)
+
+        if config_type == "opencode":
+            default_path = ConfigPaths.get_opencode_config()
+            self.oc_path_label.setText(str(default_path))
+            self.oc_path_label.setToolTip(str(default_path))
+            self.oc_reset_btn.setVisible(False)
+            # 重新加载默认配置
+            self.main_window.opencode_config = (
+                ConfigManager.load_json(default_path) or {}
+            )
+        else:
+            default_path = ConfigPaths.get_ohmyopencode_config()
+            self.ohmy_path_label.setText(str(default_path))
+            self.ohmy_path_label.setToolTip(str(default_path))
+            self.ohmy_reset_btn.setVisible(False)
+            # 重新加载默认配置
+            self.main_window.ohmyopencode_config = (
+                ConfigManager.load_json(default_path) or {}
+            )
+
+        self._load_stats()
+        self.show_success("成功", "已重置为默认配置路径")
+
+    def _update_path_labels(self):
+        """更新路径标签显示"""
+        oc_path = str(ConfigPaths.get_opencode_config())
+        ohmy_path = str(ConfigPaths.get_ohmyopencode_config())
+
+        self.oc_path_label.setText(oc_path)
+        self.oc_path_label.setToolTip(oc_path)
+        self.oc_reset_btn.setVisible(ConfigPaths.is_custom_path("opencode"))
+
+        self.ohmy_path_label.setText(ohmy_path)
+        self.ohmy_path_label.setToolTip(ohmy_path)
+        self.ohmy_reset_btn.setVisible(ConfigPaths.is_custom_path("ohmyopencode"))
 
     def _load_stats(self):
         """加载统计信息"""

@@ -4,6 +4,32 @@
 
 ---
 
+## [v1.0.2] - 2026-01-14 12:30
+**版本代号**: 自定义路径版
+
+### 🆕 新增功能
+- **首页配置路径手动选择**：
+  - 点击文件夹图标可选择任意 JSON/JSONC 配置文件
+  - 支持切换到项目级配置或其他自定义配置
+  - 点击重置按钮可恢复默认路径
+- **ConfigPaths 类增强**：
+  - `set_opencode_config()` / `set_ohmyopencode_config()` 设置自定义路径
+  - `is_custom_path()` 检查是否使用自定义路径
+  - `reset_to_default()` 重置为默认路径
+- **ConfigManager 增强**：
+  - `is_jsonc_file()` 检测文件是否为 JSONC 格式
+
+### 🔧 优化改进
+- 配置路径标签动态更新
+- 选择配置文件时自动验证 JSON/JSONC 格式
+- 切换配置后自动重新加载并更新统计信息
+
+### 📁 文件变更
+- 更新：`opencode_config_manager_fluent_v1.0.0.py`
+- 更新：`build_unix.sh`
+
+---
+
 ## [v1.0.1] - 2026-01-14 12:00
 **版本代号**: JSONC 支持版
 
