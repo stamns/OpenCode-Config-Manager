@@ -1,4 +1,4 @@
-# OpenCode Config Manager
+# OCCM  <OpenCode Config Manager>
 
 <p align="center">
   <strong>可视化管理 OpenCode 和 Oh My OpenCode 配置文件的 GUI 工具</strong>
