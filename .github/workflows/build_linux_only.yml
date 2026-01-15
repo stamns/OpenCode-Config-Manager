@@ -1,4 +1,4 @@
-# build_linux_only.yml 完整修复版 (有手动按钮+Tag自动触发，最优)
+# build_linux_only.yml 完整修复版 (有手动按钮+Tag自动触发，最优，只加了权限配置)
 name: Linux构建完整修复版 (有手动按钮+Tag自动触发，最优)
 
 # ========== 核心修复：增加 workflow_dispatch 即可出现手动按钮 ==========
@@ -7,6 +7,10 @@ on:
     tags:
       - 'v*'  # 推送v开头的Tag自动触发（比如v1.0.5）
   workflow_dispatch: # 手动触发开关 ✅ 加这行就有 Run workflow 按钮了！
+
+# ✅✅✅ 唯一新增的3行【顶级配置】 - 按钮显示的关键！和name/on/jobs同级
+permissions:
+  contents: write
 
 jobs:
   build-linux:
