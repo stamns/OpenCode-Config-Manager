@@ -1,4 +1,14 @@
-  # ========== Linux 构建 (x64，完整无错版，无需修改) ==========
+# build_linux_only.yml 完整修复版 (有手动按钮+Tag自动触发，最优)
+name: Build Linux Version Only
+
+# ========== 核心修复：增加 workflow_dispatch 即可出现手动按钮 ==========
+on:
+  push:
+    tags:
+      - 'v*'  # 推送v开头的Tag自动触发（比如v1.0.5）
+  workflow_dispatch: # 手动触发开关 ✅ 加这行就有 Run workflow 按钮了！
+
+jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -8,7 +18,7 @@
         with:
           python-version: '3.10'
           architecture: x64
-      - name: 安装Linux系统依赖 (PyQt5图形界面必装，缺一不可)
+      - name: 安装Linux系统依赖（PyQt5图形界面必装，缺一不可）
         run: |
           sudo apt update && sudo apt install -y \
             python3-pyqt5 \
@@ -17,10 +27,9 @@
             libgl1-mesa-glx \
             libglib2.0-0
       - name: 安装Python项目依赖
-        run: pip3 install --upgrade pip && pip3 install -r requirements.txt --only-binary :all:
-      - name: Linux PyInstaller打包 (和macOS参数完全一致)
+        run: pip3 install --upgrade pip && pip3 install -r requirements.txt pyinstaller --only-binary :all:
+      - name: Linux PyInstaller打包（复用你的macOS参数，完美适配）
         run: |
-          python3 -m pip install pyinstaller
           pyinstaller \
             --name "OpenCode-Config-Manager" \
             --onedir \
@@ -38,30 +47,20 @@
             --collect-all qfluentwidgets \
             --noconfirm \
             opencode_config_manager_fluent.py
-      - name: Linux打包为tar.gz (系统原生，Linux标准分发格式)
+      - name: Linux打包为tar.gz压缩包（系统原生，最优分发格式）
         run: |
           cd dist
           rm -f OpenCode-Config-Manager-Linux-x64.tar.gz
           tar -zcvf OpenCode-Config-Manager-Linux-x64.tar.gz OpenCode-Config-Manager/
-      - name: Upload Linux Artifact
+      - name: 上传Linux产物到Artifacts（手动/自动构建都能下载）
         uses: actions/upload-artifact@v4
         with:
-          name: OpenCode-Config-Manager-Linux-x64
+          name: Linux-x64-Build
           path: dist/OpenCode-Config-Manager-Linux-x64.tar.gz
-
-  # ========== 发布步骤 (核心修改2：删掉写死的tag_name，自动发布到推送的Tag) ==========
-  release:
-    needs: [build-macos, build-linux] # 必须等mac和linux构建完成才执行
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4 # 下载构建好的产物
-      - name: Upload To Corresponding Tag Release (自动适配Tag，无需写死版本)
+      - name: 自动发布到对应Tag的Release页面（只有推送Tag才会执行，手动构建跳过）
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            OpenCode-Config-Manager-MacOS-arm64/OpenCode-Config-Manager-MacOS.dmg
-            OpenCode-Config-Manager-Linux-x64/OpenCode-Config-Manager-Linux-x64.tar.gz
-          overwrite_files: true # 覆盖同名产物（版本迭代时有用）
+          files: dist/OpenCode-Config-Manager-Linux-x64.tar.gz
+          overwrite_files: true
           token: ${{ secrets.GITHUB_TOKEN }}
-          generate_release_notes: true # 自动生成Release日志
-          # ✅ 核心：删掉了 tag_name: v1.0.0 这一行！！！自动匹配推送的Tag
+          generate_release_notes: true
