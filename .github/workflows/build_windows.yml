@@ -1,0 +1,96 @@
+# Windows 构建工作流 - 参考本地 spec 文件配置
+name: 构建 Windows 版本
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:  # 支持手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: 1. 拉取项目源码
+        uses: actions/checkout@v4
+
+      - name: 2. 配置 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 3. 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt5 PyQt-Fluent-Widgets pyinstaller
+
+      - name: 4. PyInstaller 打包 (参考本地 spec 配置)
+        run: |
+          pyinstaller `
+            --name "OpenCodeConfigManager_v1.0.8_windows" `
+            --onefile `
+            --windowed `
+            --noconsole `
+            --add-data "assets;assets" `
+            --hidden-import qfluentwidgets `
+            --hidden-import qfluentwidgets.widgets `
+            --hidden-import qfluentwidgets.components `
+            --hidden-import qfluentwidgets.common `
+            --hidden-import qfluentwidgets.window `
+            --collect-data qfluentwidgets `
+            --collect-submodules qfluentwidgets `
+            --exclude-module torch `
+            --exclude-module tensorflow `
+            --exclude-module scipy `
+            --exclude-module matplotlib `
+            --exclude-module pandas `
+            --exclude-module numpy `
+            --exclude-module PIL `
+            --exclude-module IPython `
+            --exclude-module jedi `
+            --exclude-module zmq `
+            --exclude-module lxml `
+            --exclude-module cryptography `
+            --exclude-module pyarrow `
+            --exclude-module numba `
+            --exclude-module llvmlite `
+            --exclude-module sqlalchemy `
+            --exclude-module openpyxl `
+            --exclude-module pytest `
+            --exclude-module pygments `
+            --exclude-module psutil `
+            --icon "assets/icon.ico" `
+            --noconfirm `
+            opencode_config_manager_fluent.py
+
+      - name: 5. 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist/*.exe
+
+  # 发布到 Release (仅在推送 tag 时执行)
+  release:
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: 下载 Windows 构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: ./dist
+
+      - name: 发布到 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./dist/*.exe
+          overwrite_files: true
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
