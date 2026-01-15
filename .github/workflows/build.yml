@@ -112,7 +112,6 @@ jobs:
             python3-pyqt5 \
             libxcb-xinerama0 \
             libxcb-cursor0 \
-            libgl1-mesa-glx:i386 \
             libgl1 \
             libglib2.0-0 \
             libxcb-randr0 \
