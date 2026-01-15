@@ -126,13 +126,16 @@ jobs:
             libxkbcommon-x11-0 \
             python3-dev \
             build-essential \
-            pyqt5-dev-tools
+            pyqt5-dev-tools \
+            git
 
       - name: 4. 安装Python项目依赖+PyInstaller (清华源提速，无冲突)
         run: |
           python3 -m pip install --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple
-          python3 -m pip install -r requirements.txt pyinstaller PyQt5==5.15.10 qfluentwidgets==1.10.4 --force-reinstall --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
-
+          # 核心：删掉 -r requirements.txt，手动安装所有需要的包，不读任何文件，无版本冲突
+          python3 -m pip install pyinstaller PyQt5==5.15.10 --force-reinstall --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+          # 绝杀：从GitHub源码安装qfluentwidgets，彻底跳过PyPI，无任何版本匹配问题
+          python3 -m pip install git+https://github.com/zhiyiYo/PyQt-Fluent-Widgets.git --no-cache-dir
       - name: 5. Linux PyInstaller打包 (完全复用你的Mac打包参数，一模一样)
         run: |
           python3 -m pip install pyinstaller
