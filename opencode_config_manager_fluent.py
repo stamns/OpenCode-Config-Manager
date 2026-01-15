@@ -1633,6 +1633,308 @@ class BackupManager:
             return False
 
 
+class ConfigValidator:
+    """配置文件验证器 - 检查 OpenCode 配置格式是否正确"""
+
+    # Provider 必需字段
+    PROVIDER_REQUIRED_FIELDS = ["npm", "options"]
+    # Provider options 必需字段
+    PROVIDER_OPTIONS_REQUIRED = ["baseURL", "apiKey"]
+    # Model 推荐字段
+    MODEL_RECOMMENDED_FIELDS = ["name", "limit"]
+    # 有效的 npm 包
+    VALID_NPM_PACKAGES = [
+        "@ai-sdk/anthropic",
+        "@ai-sdk/openai",
+        "@ai-sdk/google",
+        "@ai-sdk/azure",
+        "@ai-sdk/amazon-bedrock",
+        "@ai-sdk/google-vertex",
+        "@ai-sdk/mistral",
+        "@ai-sdk/xai",
+        "@ai-sdk/togetherai",
+        "@ai-sdk/cohere",
+        "@ai-sdk/deepseek",
+    ]
+
+    @staticmethod
+    def validate_opencode_config(config: Dict) -> List[Dict]:
+        """
+        验证 OpenCode 配置文件
+        返回问题列表: [{"level": "error/warning", "path": "provider.xxx", "message": "..."}]
+        """
+        issues = []
+        if not config:
+            issues.append(
+                {"level": "error", "path": "root", "message": "配置文件为空或无法解析"}
+            )
+            return issues
+
+        # 验证 provider 部分
+        providers = config.get("provider", {})
+        if not isinstance(providers, dict):
+            issues.append(
+                {
+                    "level": "error",
+                    "path": "provider",
+                    "message": "provider 必须是对象类型",
+                }
+            )
+            return issues
+
+        for provider_name, provider_data in providers.items():
+            provider_path = f"provider.{provider_name}"
+
+            # 检查 provider 值是否为字典
+            if not isinstance(provider_data, dict):
+                issues.append(
+                    {
+                        "level": "error",
+                        "path": provider_path,
+                        "message": f"Provider '{provider_name}' 的值必须是对象，当前是 {type(provider_data).__name__}",
+                    }
+                )
+                continue
+
+            # 检查必需字段
+            for field in ConfigValidator.PROVIDER_REQUIRED_FIELDS:
+                if field not in provider_data:
+                    issues.append(
+                        {
+                            "level": "error",
+                            "path": f"{provider_path}.{field}",
+                            "message": f"Provider '{provider_name}' 缺少必需字段 '{field}'",
+                        }
+                    )
+
+            # 检查 npm 包是否有效
+            npm = provider_data.get("npm", "")
+            if npm and npm not in ConfigValidator.VALID_NPM_PACKAGES:
+                issues.append(
+                    {
+                        "level": "warning",
+                        "path": f"{provider_path}.npm",
+                        "message": f"Provider '{provider_name}' 的 npm 包 '{npm}' 不在已知列表中",
+                    }
+                )
+
+            # 检查 options
+            options = provider_data.get("options", {})
+            if not isinstance(options, dict):
+                issues.append(
+                    {
+                        "level": "error",
+                        "path": f"{provider_path}.options",
+                        "message": f"Provider '{provider_name}' 的 options 必须是对象",
+                    }
+                )
+            else:
+                for opt_field in ConfigValidator.PROVIDER_OPTIONS_REQUIRED:
+                    if opt_field not in options:
+                        issues.append(
+                            {
+                                "level": "warning",
+                                "path": f"{provider_path}.options.{opt_field}",
+                                "message": f"Provider '{provider_name}' 的 options 缺少 '{opt_field}'",
+                            }
+                        )
+
+            # 检查 models
+            models = provider_data.get("models", {})
+            if not isinstance(models, dict):
+                issues.append(
+                    {
+                        "level": "error",
+                        "path": f"{provider_path}.models",
+                        "message": f"Provider '{provider_name}' 的 models 必须是对象",
+                    }
+                )
+            else:
+                for model_id, model_data in models.items():
+                    model_path = f"{provider_path}.models.{model_id}"
+                    if not isinstance(model_data, dict):
+                        issues.append(
+                            {
+                                "level": "error",
+                                "path": model_path,
+                                "message": f"Model '{model_id}' 的值必须是对象",
+                            }
+                        )
+                        continue
+
+                    # 检查 limit 字段
+                    limit = model_data.get("limit", {})
+                    if not isinstance(limit, dict):
+                        issues.append(
+                            {
+                                "level": "warning",
+                                "path": f"{model_path}.limit",
+                                "message": f"Model '{model_id}' 的 limit 应该是对象",
+                            }
+                        )
+                    elif limit:
+                        context = limit.get("context")
+                        output = limit.get("output")
+                        if context is not None and not isinstance(context, int):
+                            issues.append(
+                                {
+                                    "level": "warning",
+                                    "path": f"{model_path}.limit.context",
+                                    "message": f"Model '{model_id}' 的 context 应该是整数",
+                                }
+                            )
+                        if output is not None and not isinstance(output, int):
+                            issues.append(
+                                {
+                                    "level": "warning",
+                                    "path": f"{model_path}.limit.output",
+                                    "message": f"Model '{model_id}' 的 output 应该是整数",
+                                }
+                            )
+
+        # 验证 mcp 部分
+        mcp = config.get("mcp", {})
+        if mcp and not isinstance(mcp, dict):
+            issues.append(
+                {"level": "error", "path": "mcp", "message": "mcp 必须是对象类型"}
+            )
+        elif isinstance(mcp, dict):
+            for mcp_name, mcp_data in mcp.items():
+                mcp_path = f"mcp.{mcp_name}"
+                if not isinstance(mcp_data, dict):
+                    issues.append(
+                        {
+                            "level": "error",
+                            "path": mcp_path,
+                            "message": f"MCP '{mcp_name}' 的值必须是对象",
+                        }
+                    )
+                    continue
+
+                mcp_type = mcp_data.get("type")
+                if mcp_type == "local" and "command" not in mcp_data:
+                    issues.append(
+                        {
+                            "level": "warning",
+                            "path": f"{mcp_path}.command",
+                            "message": f"Local MCP '{mcp_name}' 缺少 command 字段",
+                        }
+                    )
+                elif mcp_type == "remote" and "url" not in mcp_data:
+                    issues.append(
+                        {
+                            "level": "warning",
+                            "path": f"{mcp_path}.url",
+                            "message": f"Remote MCP '{mcp_name}' 缺少 url 字段",
+                        }
+                    )
+
+        # 验证 agent 部分
+        agent = config.get("agent", {})
+        if agent and not isinstance(agent, dict):
+            issues.append(
+                {"level": "error", "path": "agent", "message": "agent 必须是对象类型"}
+            )
+
+        return issues
+
+    @staticmethod
+    def fix_provider_structure(config: Dict) -> Tuple[Dict, List[str]]:
+        """
+        修复 Provider 结构问题
+        返回: (修复后的配置, 修复日志列表)
+        """
+        fixes = []
+        if not config:
+            return config, fixes
+
+        providers = config.get("provider", {})
+        if not isinstance(providers, dict):
+            return config, fixes
+
+        fixed_providers = {}
+        for provider_name, provider_data in providers.items():
+            if not isinstance(provider_data, dict):
+                fixes.append(f"跳过无效 Provider '{provider_name}' (值不是对象)")
+                continue
+
+            # 确保必需字段存在
+            fixed_provider = dict(provider_data)
+
+            # 确保 npm 字段存在
+            if "npm" not in fixed_provider:
+                fixed_provider["npm"] = "@ai-sdk/openai"
+                fixes.append(f"Provider '{provider_name}': 添加默认 npm 字段")
+
+            # 确保 options 字段存在且为对象
+            if "options" not in fixed_provider or not isinstance(
+                fixed_provider.get("options"), dict
+            ):
+                fixed_provider["options"] = fixed_provider.get("options", {})
+                if not isinstance(fixed_provider["options"], dict):
+                    fixed_provider["options"] = {}
+                fixes.append(f"Provider '{provider_name}': 修复 options 字段")
+
+            # 确保 options 中有 baseURL 和 apiKey
+            if "baseURL" not in fixed_provider["options"]:
+                fixed_provider["options"]["baseURL"] = ""
+                fixes.append(f"Provider '{provider_name}': 添加空 baseURL")
+            if "apiKey" not in fixed_provider["options"]:
+                fixed_provider["options"]["apiKey"] = ""
+                fixes.append(f"Provider '{provider_name}': 添加空 apiKey")
+
+            # 确保 models 字段存在且为对象
+            if "models" not in fixed_provider:
+                fixed_provider["models"] = {}
+                fixes.append(f"Provider '{provider_name}': 添加空 models 字段")
+            elif not isinstance(fixed_provider.get("models"), dict):
+                fixed_provider["models"] = {}
+                fixes.append(f"Provider '{provider_name}': 修复 models 字段为对象")
+
+            # 规范化字段顺序: npm, name, options, models
+            ordered_provider = {}
+            if "npm" in fixed_provider:
+                ordered_provider["npm"] = fixed_provider["npm"]
+            if "name" in fixed_provider:
+                ordered_provider["name"] = fixed_provider["name"]
+            if "options" in fixed_provider:
+                ordered_provider["options"] = fixed_provider["options"]
+            if "models" in fixed_provider:
+                ordered_provider["models"] = fixed_provider["models"]
+            # 保留其他字段
+            for k, v in fixed_provider.items():
+                if k not in ordered_provider:
+                    ordered_provider[k] = v
+
+            fixed_providers[provider_name] = ordered_provider
+
+        config["provider"] = fixed_providers
+        return config, fixes
+
+    @staticmethod
+    def get_issues_summary(issues: List[Dict]) -> str:
+        """生成问题摘要"""
+        errors = [i for i in issues if i["level"] == "error"]
+        warnings = [i for i in issues if i["level"] == "warning"]
+
+        lines = []
+        if errors:
+            lines.append(f"❌ {len(errors)} 个错误:")
+            for e in errors[:5]:  # 最多显示5个
+                lines.append(f"  • {e['message']}")
+            if len(errors) > 5:
+                lines.append(f"  ... 还有 {len(errors) - 5} 个错误")
+
+        if warnings:
+            lines.append(f"⚠️ {len(warnings)} 个警告:")
+            for w in warnings[:5]:
+                lines.append(f"  • {w['message']}")
+            if len(warnings) > 5:
+                lines.append(f"  ... 还有 {len(warnings) - 5} 个警告")
+
+        return "\n".join(lines) if lines else "✅ 配置格式正确"
+
+
 class ModelRegistry:
     """模型注册表 - 管理所有已配置的模型"""
 
@@ -1645,6 +1947,8 @@ class ModelRegistry:
         self.models = {}
         providers = self.config.get("provider", {})
         for provider_name, provider_data in providers.items():
+            if not isinstance(provider_data, dict):
+                continue
             models = provider_data.get("models", {})
             for model_id in models.keys():
                 full_ref = f"{provider_name}/{model_id}"
@@ -2417,7 +2721,8 @@ class HomePage(BasePage):
         # Model 数量
         model_count = 0
         for provider_data in providers.values():
-            model_count += len(provider_data.get("models", {}))
+            if isinstance(provider_data, dict):
+                model_count += len(provider_data.get("models", {}))
         self.model_count_label.setText(str(model_count))
 
         # MCP 数量 - MCP 配置直接在 mcp 下，不是 mcp.servers
@@ -2530,6 +2835,8 @@ class ProviderPage(BasePage):
         providers = config.get("provider", {})
 
         for name, data in providers.items():
+            if not isinstance(data, dict):
+                continue
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(name))
@@ -2822,6 +3129,8 @@ class ModelPage(BasePage):
 
         config = self.main_window.opencode_config or {}
         provider = config.get("provider", {}).get(provider_name, {})
+        if not isinstance(provider, dict):
+            return
         models = provider.get("models", {})
 
         for model_id, data in models.items():
@@ -3007,6 +3316,7 @@ class ModelDialog(BaseDialog):
         self.context_spin = SpinBox(self)
         self.context_spin.setRange(0, 10000000)
         self.context_spin.setValue(200000)
+        self.context_spin.setMinimumWidth(120)
         self.context_spin.setToolTip(get_tooltip("model_context"))
         limit_layout.addWidget(self.context_spin)
         limit_layout.addSpacing(20)
@@ -3014,6 +3324,7 @@ class ModelDialog(BaseDialog):
         self.output_spin = SpinBox(self)
         self.output_spin.setRange(0, 1000000)
         self.output_spin.setValue(16000)
+        self.output_spin.setMinimumWidth(100)
         self.output_spin.setToolTip(get_tooltip("model_output"))
         limit_layout.addWidget(self.output_spin)
         basic_layout.addLayout(limit_layout)
@@ -3436,6 +3747,8 @@ class ModelDialog(BaseDialog):
         """加载模型数据"""
         config = self.main_window.opencode_config or {}
         provider = config.get("provider", {}).get(self.provider_name, {})
+        if not isinstance(provider, dict):
+            return
         model = provider.get("models", {}).get(self.model_id, {})
 
         self.id_edit.setText(self.model_id)
@@ -4930,6 +5243,9 @@ class MainWindow(FluentWindow):
         # 备份管理器
         self.backup_manager = BackupManager()
 
+        # 启动时验证配置
+        self._validate_config_on_startup()
+
         # 版本检查器
         self.version_checker = VersionChecker(callback=self._on_version_check)
         self.latest_version = None
@@ -5154,6 +5470,106 @@ class MainWindow(FluentWindow):
             self.themeListener.terminate()
             self.themeListener.deleteLater()
         super().closeEvent(e)
+
+    def _validate_config_on_startup(self):
+        """启动时验证配置文件"""
+        issues = ConfigValidator.validate_opencode_config(self.opencode_config)
+        errors = [i for i in issues if i["level"] == "error"]
+        warnings = [i for i in issues if i["level"] == "warning"]
+
+        if not errors and not warnings:
+            return  # 配置正常，无需提示
+
+        # 延迟显示对话框，等窗口完全初始化
+        QTimer.singleShot(500, lambda: self._show_validation_dialog(issues))
+
+    def _show_validation_dialog(self, issues: List[Dict]):
+        """显示配置验证结果对话框"""
+        errors = [i for i in issues if i["level"] == "error"]
+        warnings = [i for i in issues if i["level"] == "warning"]
+
+        # 构建消息
+        msg_lines = ["检测到配置文件存在以下问题：\n"]
+
+        if errors:
+            msg_lines.append(f"❌ {len(errors)} 个错误:")
+            for e in errors[:8]:
+                msg_lines.append(f"  • {e['message']}")
+            if len(errors) > 8:
+                msg_lines.append(f"  ... 还有 {len(errors) - 8} 个错误")
+            msg_lines.append("")
+
+        if warnings:
+            msg_lines.append(f"⚠️ {len(warnings)} 个警告:")
+            for w in warnings[:8]:
+                msg_lines.append(f"  • {w['message']}")
+            if len(warnings) > 8:
+                msg_lines.append(f"  ... 还有 {len(warnings) - 8} 个警告")
+
+        msg_lines.append("\n是否尝试自动修复？（会先备份原配置）")
+
+        # 创建对话框
+        dialog = FluentMessageBox("配置格式检查", "\n".join(msg_lines), self)
+
+        if dialog.exec_():
+            # 用户点击确认，执行修复
+            self._fix_config()
+        else:
+            # 用户取消，显示警告
+            InfoBar.warning(
+                title="配置问题未修复",
+                content="部分功能可能无法正常工作，建议手动检查配置文件",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=8000,
+                parent=self,
+            )
+
+    def _fix_config(self):
+        """修复配置文件"""
+        # 先备份
+        self.backup_manager.backup(ConfigPaths.get_opencode_config(), tag="before-fix")
+
+        # 执行修复
+        fixed_config, fixes = ConfigValidator.fix_provider_structure(
+            self.opencode_config
+        )
+
+        if fixes:
+            self.opencode_config = fixed_config
+            self.save_opencode_config()
+
+            # 显示修复结果
+            fix_msg = f"已完成 {len(fixes)} 项修复：\n" + "\n".join(
+                f"• {f}" for f in fixes[:10]
+            )
+            if len(fixes) > 10:
+                fix_msg += f"\n... 还有 {len(fixes) - 10} 项"
+
+            InfoBar.success(
+                title="配置已修复",
+                content=fix_msg,
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=10000,
+                parent=self,
+            )
+
+            # 刷新首页统计
+            if hasattr(self, "home_page"):
+                self.home_page._load_stats()
+        else:
+            InfoBar.info(
+                title="无需修复",
+                content="配置结构已经正确",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+                parent=self,
+            )
 
 
 # ==================== Oh My Agent 页面 ====================

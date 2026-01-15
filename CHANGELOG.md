@@ -4,6 +4,40 @@
 
 ---
 
+## [v1.0.7] - 2026-01-15 17:50
+**版本代号**: 配置验证修复版
+
+### 🆕 新增功能
+- **配置格式验证器 (ConfigValidator)**：
+  - 启动时自动检查配置文件格式是否符合 OpenCode 规范
+  - 验证 Provider 必需字段（npm, options, baseURL, apiKey）
+  - 验证 Model 结构和 limit 字段类型
+  - 验证 MCP 配置（local/remote 类型对应字段）
+  - 显示错误和警告列表，帮助用户定位问题
+
+- **配置自动修复功能**：
+  - 检测到问题时弹窗提示用户是否修复
+  - 修复前自动备份原配置（标签: `before-fix`）
+  - 自动补全缺失的必需字段（npm, options, models）
+  - 规范化字段顺序（npm → name → options → models）
+
+### 🐛 Bug 修复
+- **防御性类型检查**：修复配置异常时 `'str' object has no attribute 'get'` 崩溃
+  - `_load_stats()` - 统计时检查 provider_data 类型
+  - `ModelRegistry.refresh()` - 刷新模型列表时检查类型
+  - `ProviderPage._load_data()` - 加载 Provider 时检查类型
+  - `ModelPage._load_models()` - 加载模型时检查类型
+  - `ModelDialog._load_model_data()` - 加载模型数据时检查类型
+
+### 🔧 优化改进
+- **SpinBox 显示优化**：设置最小宽度，改善 Win10 上的显示问题
+
+### 📁 文件变更
+- 更新：`opencode_config_manager_fluent.py`
+- 新增：`OpenCodeConfigManager_v1.0.7.spec`
+
+---
+
 ## [v1.0.6] - 2026-01-15 15:00
 **版本代号**: MCP 类型修复版
 
