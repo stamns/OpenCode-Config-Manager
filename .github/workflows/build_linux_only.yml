@@ -1,4 +1,3 @@
-# build_linux_only.yml 完整修复版 (有手动按钮+Tag自动触发，最优，只加了权限配置)
 name: Linux构建完整修复版 (有手动按钮+Tag自动触发，最优)
 
 # ========== 核心修复：增加 workflow_dispatch 即可出现手动按钮 ==========
