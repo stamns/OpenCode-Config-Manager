@@ -1,7 +1,4 @@
-name: Build Linux Version Only
-on: [push, workflow_dispatch]
-
-jobs:
+  # ========== Linux 构建 (x64，完整无错版，无需修改) ==========
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -10,17 +7,61 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: 安装Linux系统依赖（必加，PyQt5运行核心依赖）
-        run: sudo apt update && sudo apt install -y python3-pyqt5 libxcb-xinerama0 libxcb-cursor0 libgl1-mesa-glx libglib2.0-0
-      - name: 安装Python依赖
-        run: pip3 install -r requirements.txt pyinstaller --only-binary :all:
-      - name: PyInstaller打包
+          architecture: x64
+      - name: 安装Linux系统依赖 (PyQt5图形界面必装，缺一不可)
         run: |
-          pyinstaller --name "OpenCode-Config-Manager" --onedir --windowed --noconfirm opencode_config_manager_fluent.py
-      - name: 打包为tar.gz
-        run: cd dist && tar -zcvf OpenCode-Config-Manager-Linux-x64.tar.gz OpenCode-Config-Manager/
-      - name: 上传产物
+          sudo apt update && sudo apt install -y \
+            python3-pyqt5 \
+            libxcb-xinerama0 \
+            libxcb-cursor0 \
+            libgl1-mesa-glx \
+            libglib2.0-0
+      - name: 安装Python项目依赖
+        run: pip3 install --upgrade pip && pip3 install -r requirements.txt --only-binary :all:
+      - name: Linux PyInstaller打包 (和macOS参数完全一致)
+        run: |
+          python3 -m pip install pyinstaller
+          pyinstaller \
+            --name "OpenCode-Config-Manager" \
+            --onedir \
+            --windowed \
+            --noconsole \
+            --hidden-import=qfluentwidgets \
+            --hidden-import=qfluentwidgets.widgets \
+            --hidden-import=qfluentwidgets.components \
+            --hidden-import=qfluentwidgets.common \
+            --exclude-module PyQt5.QtBluetooth \
+            --exclude-module PyQt5.QtNfc \
+            --exclude-module PyQt5.QtPositioning \
+            --exclude-module PyQt5.QtGamepad \
+            --collect-all PyQt5 \
+            --collect-all qfluentwidgets \
+            --noconfirm \
+            opencode_config_manager_fluent.py
+      - name: Linux打包为tar.gz (系统原生，Linux标准分发格式)
+        run: |
+          cd dist
+          rm -f OpenCode-Config-Manager-Linux-x64.tar.gz
+          tar -zcvf OpenCode-Config-Manager-Linux-x64.tar.gz OpenCode-Config-Manager/
+      - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Linux-Build
-          path: dist/*.tar.gz
+          name: OpenCode-Config-Manager-Linux-x64
+          path: dist/OpenCode-Config-Manager-Linux-x64.tar.gz
+
+  # ========== 发布步骤 (核心修改2：删掉写死的tag_name，自动发布到推送的Tag) ==========
+  release:
+    needs: [build-macos, build-linux] # 必须等mac和linux构建完成才执行
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4 # 下载构建好的产物
+      - name: Upload To Corresponding Tag Release (自动适配Tag，无需写死版本)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            OpenCode-Config-Manager-MacOS-arm64/OpenCode-Config-Manager-MacOS.dmg
+            OpenCode-Config-Manager-Linux-x64/OpenCode-Config-Manager-Linux-x64.tar.gz
+          overwrite_files: true # 覆盖同名产物（版本迭代时有用）
+          token: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true # 自动生成Release日志
+          # ✅ 核心：删掉了 tag_name: v1.0.0 这一行！！！自动匹配推送的Tag
