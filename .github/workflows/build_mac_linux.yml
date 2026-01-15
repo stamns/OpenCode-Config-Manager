@@ -1,37 +1,124 @@
-# .github/workflows/build_mac_only.yml (终局无BUG封神版 - 解决所有报错，Mac+Linux双构建+完美发布)
-name: 自动构建Mac+Linux版 OpenCode-Config-Manager (最终稳定版)
-# 触发规则：推送任何代码/推送任何Tag 都触发构建，发布由job的if条件控制
+# 统一构建工作流 - Windows + macOS + Linux 三平台自动构建发布
+# 触发：推送 main 分支 / 推送 Tag / 手动触发
+# 发布：仅在推送 Tag 时自动发布到 GitHub Release，使用 RELEASE.md 作为发布说明
+
+name: 🚀 自动构建发布 (Windows + macOS + Linux)
+
 on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
-  workflow_dispatch: # 支持手动点击运行
+  workflow_dispatch:
 
 permissions:
-  contents: write # 发布Release必须的权限，必须保留
+  contents: write
 
 jobs:
-  # ========== 任务1：构建Mac版本 (完全未修改，你的原版稳定代码) ==========
+  # ==================== Windows 构建 ====================
+  build-windows:
+    name: 🪟 Windows 构建
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: 1. 拉取项目源码
+        uses: actions/checkout@v4
+
+      - name: 2. 配置 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ======== pip 缓存优化（提速 50%+）========
+      - name: 缓存 Python 依赖包
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: 3. 安装依赖
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install PyQt5 PyQt-Fluent-Widgets pyinstaller
+
+      - name: 4. PyInstaller 打包
+        run: |
+          pyinstaller `
+            --name "OpenCodeConfigManager_windows" `
+            --onefile `
+            --windowed `
+            --noconsole `
+            --add-data "assets;assets" `
+            --hidden-import qfluentwidgets `
+            --hidden-import qfluentwidgets.widgets `
+            --hidden-import qfluentwidgets.components `
+            --hidden-import qfluentwidgets.common `
+            --hidden-import qfluentwidgets.window `
+            --collect-data qfluentwidgets `
+            --collect-submodules qfluentwidgets `
+            --exclude-module torch `
+            --exclude-module tensorflow `
+            --exclude-module scipy `
+            --exclude-module matplotlib `
+            --exclude-module pandas `
+            --exclude-module numpy `
+            --exclude-module PIL `
+            --exclude-module IPython `
+            --exclude-module jedi `
+            --exclude-module zmq `
+            --exclude-module lxml `
+            --exclude-module cryptography `
+            --exclude-module pyarrow `
+            --exclude-module numba `
+            --exclude-module llvmlite `
+            --exclude-module sqlalchemy `
+            --exclude-module openpyxl `
+            --exclude-module pytest `
+            --exclude-module pygments `
+            --exclude-module psutil `
+            --icon "assets/icon.ico" `
+            --noconfirm `
+            --clean `
+            opencode_config_manager_fluent.py
+
+      - name: 5. 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist/*.exe
+
+  # ==================== macOS 构建 ====================
   build-macos:
+    name: 🍎 macOS 构建
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
       - name: 1. 拉取项目源码
         uses: actions/checkout@v4
 
-      - name: 2. 配置Python3.10 (ARM64兼容)
+      - name: 2. 配置 Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 3. 安装PyQt5依赖
-        run: |
-          python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
-          python3 -m pip install PyQt5-qt5 PyQt5-sip PyQt5 --force-reinstall -i https://pypi.tuna.tsinghua.edu.cn/simple
+      # ======== pip 缓存优化（提速 50%+）========
+      - name: 缓存 Python 依赖包
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-      - name: Build App with PyInstaller
+      - name: 3. 安装 PyQt5 依赖
         run: |
-          python3 -m pip install pyinstaller
+          python -m pip install --upgrade pip
+          python3 -m pip install PyQt5-qt5 PyQt5-sip PyQt5 --force-reinstall
+          python3 -m pip install pyinstaller qfluentwidgets
+
+      - name: 4. PyInstaller 打包
+        run: |
           pyinstaller \
             --name "OpenCode-Config-Manager" \
             --onedir \
@@ -50,15 +137,8 @@ jobs:
             --noconfirm \
             --strip \
             opencode_config_manager_fluent.py
-        shell: /bin/bash -e {0}
-        env:
-          pythonLocation: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
-          PKG_CONFIG_PATH: /Users/runner/hostedtoolcache/Python/3.10.11/arm64/lib/pkgconfig
-          Python_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
-          Python2_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
-          Python3_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
 
-      - name: 打包成DMG镜像包
+      - name: 5. 打包成 DMG 镜像
         run: |
           brew install create-dmg || true
           rm -f dist/OpenCode-Config-Manager-MacOS.dmg
@@ -66,35 +146,43 @@ jobs:
             --volname "OpenCode-Config-Manager" \
             "dist/OpenCode-Config-Manager-MacOS.dmg" \
             "dist/OpenCode-Config-Manager/"
-        shell: /bin/bash -e {0}
 
-      - name: 免证书签名
+      - name: 6. 免证书签名
         run: |
-          xattr -cr dist/OpenCode-Config-Manager.app
-          codesign --force --deep --sign - dist/OpenCode-Config-Manager.app
-        shell: /bin/bash -e {0}
-          
-      - name: 上传Mac产物到临时存储
+          xattr -cr dist/OpenCode-Config-Manager.app || true
+          codesign --force --deep --sign - dist/OpenCode-Config-Manager.app || true
+
+      - name: 7. 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: mac-build
+          name: macos-build
           path: dist/OpenCode-Config-Manager-MacOS.dmg
 
-  # ========== 任务2：构建Linux版本 (所有历史修复保留，qfluentwidgets安装正常) ==========
+  # ==================== Linux 构建 ====================
   build-linux:
+    name: 🐧 Linux 构建
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - name: 1. 拉取项目源码
         uses: actions/checkout@v4
 
-      - name: 2. 配置Python3.10 (x64兼容)
+      - name: 2. 配置 Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           architecture: x64
 
-      - name: 3. 安装系统依赖+编译依赖+git
+      # ======== pip 缓存优化（提速 50%+）========
+      - name: 缓存 Python 依赖包
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: 3. 安装系统依赖
         run: |
           sudo apt update -y && sudo apt install -y \
             python3-pyqt5 \
@@ -108,15 +196,14 @@ jobs:
             pyqt5-dev-tools \
             git
 
-      - name: 4. 从GitHub安装qfluentwidgets (永不失败)
+      - name: 4. 安装 Python 依赖
         run: |
-          python3 -m pip install --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple
-          python3 -m pip install pyinstaller PyQt5==5.15.10 --force-reinstall --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install pyinstaller PyQt5==5.15.10 --force-reinstall --no-cache-dir
           python3 -m pip install git+https://github.com/zhiyiYo/PyQt-Fluent-Widgets.git --no-cache-dir
 
-      - name: 5. PyInstaller打包
+      - name: 5. PyInstaller 打包
         run: |
-          python3 -m pip install pyinstaller
           pyinstaller \
             --name "OpenCode-Config-Manager" \
             --onedir \
@@ -135,47 +222,57 @@ jobs:
             --noconfirm \
             --strip \
             opencode_config_manager_fluent.py
-        shell: /bin/bash -e {0}
 
-      - name: 6. 打包成tar.gz压缩包
+      - name: 6. 打包成 tar.gz
         run: |
           cd dist
           rm -f OpenCode-Config-Manager-Linux-x64.tar.gz
           tar -zcvf OpenCode-Config-Manager-Linux-x64.tar.gz OpenCode-Config-Manager/
-        shell: /bin/bash -e {0}
 
-      - name: 上传Linux产物到临时存储
+      - name: 7. 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
           path: dist/OpenCode-Config-Manager-Linux-x64.tar.gz
 
-  # ========== 任务3：统一发布 (✅ 终极修复核心：if写在job根级别！！！) ==========
+  # ==================== 统一发布 ====================
   release:
-    needs: [build-macos, build-linux] # 依赖两个构建任务完成
+    name: 📦 发布到 GitHub Release
+    needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') # ✅✅✅ 正确位置：job根级别，无Tag直接跳过整个任务，根治报错
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - name: 下载Mac构建产物
+      - name: 拉取项目源码（获取 RELEASE.md）
+        uses: actions/checkout@v4
+
+      - name: 下载 Windows 构建产物
         uses: actions/download-artifact@v4
         with:
-          name: mac-build
+          name: windows-build
           path: ./dist
 
-      - name: 下载Linux构建产物
+      - name: 下载 macOS 构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-build
+          path: ./dist
+
+      - name: 下载 Linux 构建产物
         uses: actions/download-artifact@v4
         with:
           name: linux-build
           path: ./dist
 
-      - name: 发布到GitHub Release (✅ 标准语法，无任何错误)
+      - name: 发布到 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            ./dist/*.exe
             ./dist/OpenCode-Config-Manager-MacOS.dmg
             ./dist/OpenCode-Config-Manager-Linux-x64.tar.gz
           overwrite_files: true
-          generate_release_notes: true
+          body_path: ./RELEASE.md
+          generate_release_notes: false
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

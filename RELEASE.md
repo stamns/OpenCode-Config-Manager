@@ -1,5 +1,289 @@
 # Release Notes / 发布说明
 
+## v1.0.8 (2026-01-15)
+
+### 版本代号: 版本检查修复版
+
+### Bug 修复
+
+- **版本检查线程安全问题**
+  - 修复版本检查回调在子线程调用导致程序卡死的问题
+  - 使用 `pyqtSignal` 从子线程安全地通知主线程更新 UI
+  - `VersionChecker` 改为继承 `QObject`，支持信号槽机制
+
+- **PyInstaller 打包资源路径问题**
+  - 新增 `get_resource_path()` 函数，正确处理打包后的资源路径
+  - 修复打包后 logo/icon 图片加载失败导致的 temp 目录错误
+  - 兼容开发环境和 PyInstaller 打包环境
+
+### 优化改进
+
+- **APP_VERSION 同步更新**：版本号从 1.0.5 更新到 1.0.8
+
+### 文件变更
+
+- 更新：`opencode_config_manager_fluent.py`
+- 新增：`OpenCodeConfigManager_v1.0.8.spec`
+
+---
+
+## v1.0.7 (2026-01-15)
+
+### 版本代号: 配置验证修复版
+
+### 新增功能
+
+- **配置格式验证器 (ConfigValidator)**
+  - 启动时自动检查配置文件格式是否符合 OpenCode 规范
+  - 验证 Provider 必需字段（npm, options, baseURL, apiKey）
+  - 验证 Model 结构和 limit 字段类型
+  - 验证 MCP 配置（local/remote 类型对应字段）
+  - 显示错误和警告列表，帮助用户定位问题
+
+- **配置自动修复功能**
+  - 检测到问题时弹窗提示用户是否修复
+  - 修复前自动备份原配置（标签: `before-fix`）
+  - 自动补全缺失的必需字段（npm, options, models）
+  - 规范化字段顺序（npm → name → options → models）
+
+### Bug 修复
+
+- **防御性类型检查**：修复配置异常时 `'str' object has no attribute 'get'` 崩溃
+  - `_load_stats()` - 统计时检查 provider_data 类型
+  - `ModelRegistry.refresh()` - 刷新模型列表时检查类型
+  - `ProviderPage._load_data()` - 加载 Provider 时检查类型
+  - `ModelPage._load_models()` - 加载模型时检查类型
+  - `ModelDialog._load_model_data()` - 加载模型数据时检查类型
+
+### 优化改进
+
+- **SpinBox 显示优化**：设置最小宽度，改善 Win10 上的显示问题
+
+### 文件变更
+
+- 更新：`opencode_config_manager_fluent.py`
+- 新增：`OpenCodeConfigManager_v1.0.7.spec`
+
+---
+
+## v1.0.6 (2026-01-15)
+
+### 版本代号: MCP 类型修复版
+
+### Bug 修复
+
+- **MCP 服务器 type 字段缺失**：修复添加/编辑 MCP 服务器时未写入 `type` 字段的问题
+  - Local MCP 现在正确写入 `"type": "local"`
+  - Remote MCP 现在正确写入 `"type": "remote"`
+
+### 优化改进
+
+- **GitHub Actions 构建配置更新**
+  - macOS 构建从 `macos-latest` 切换到 `macos-15-intel`（Intel 架构，PyQt5 有预编译 wheel）
+  - 解决 ARM64 macOS 上 PyQt5 编译失败的问题
+
+### 文件变更
+
+- 更新：`opencode_config_manager_fluent.py`
+- 更新：`.github/workflows/build.yml`
+- 更新：`.github/workflows/build_all.yml`
+- 新增：`OpenCodeConfigManager_v1.0.6.spec`
+
+---
+
+## v1.0.5 (2026-01-14)
+
+### 版本代号: UI 优化增强版
+
+### 新增功能
+
+- **JSONC 注释丢失警告**
+  - 保存 JSONC 文件时自动检测是否包含注释
+  - 首次保存时显示黄色警告 InfoBar 提示注释将丢失
+  - 保存前自动创建备份（标签: `jsonc-auto`）
+  - `has_jsonc_comments()` 方法精确检测 `//` 和 `/* */` 注释
+
+### Bug 修复
+
+- **预设模型 Variants 配置修复**：移除 Claude 系列预设中多余的 `variants` 内容，现在预设模型只在 `options` 中设置 thinking
+
+### 优化改进
+
+- **Options Tab 布局重构**
+  - 使用 `QScrollArea` 包裹内容，解决垂直空间不足问题
+  - 键值输入改为单行紧凑布局（键: [输入框] 值: [输入框]）
+  - 表头高度优化为 32px，数据行高度 28px
+  - 按钮高度统一为 32px
+- **外部导入列表列宽调整**
+  - 第一列（来源）：固定 180px
+  - 第二列（配置路径）：自动填充剩余空间
+  - 第三列（状态）：固定 100px
+- **深色主题对比度增强**
+  - 滚动区域和内容容器设置透明背景
+  - 卡片内边距优化（8,6,8,6）
+
+### 文件变更
+
+- 更新：`opencode_config_manager_fluent.py`
+- 新增：`OpenCodeConfigManager_v1.0.5.spec`
+
+---
+
+## v1.0.4 (2026-01-14)
+
+### 版本代号: 备份目录自定义版
+
+### 新增功能
+
+- **备份目录手动选择**
+  - 首页新增备份目录浏览和重置按钮
+  - `ConfigPaths.set_backup_dir()` 设置自定义备份路径
+  - `ConfigPaths.get_backup_dir()` 支持自定义路径优先
+  - `ConfigPaths.is_custom_path("backup")` 检测是否使用自定义路径
+
+### 优化改进
+
+- 文件重命名：`opencode_config_manager_fluent_v1.0.0.py` → `opencode_config_manager_fluent.py`
+- 构建脚本同步更新文件名引用
+
+### 文件变更
+
+- 重命名：`opencode_config_manager_fluent.py` (原 `opencode_config_manager_fluent_v1.0.0.py`)
+- 更新：`build_windows.bat`
+- 更新：`build_unix.sh`
+
+---
+
+## v1.0.3 (2026-01-14)
+
+### 版本代号: 跨平台增强版
+
+### 新增功能
+
+- **跨平台路径支持**
+  - Windows/Linux/macOS 统一使用 `~/.config/opencode/` 目录
+  - `ConfigPaths.get_platform()` 获取当前平台
+  - `ConfigPaths.get_config_base_dir()` 获取配置基础目录
+- **完善构建脚本**
+  - `build_unix.sh`：Linux + macOS 统一构建脚本
+  - `build_windows.bat`：Windows 构建脚本
+  - Linux 无头服务器自动检测并使用 xvfb
+
+### 优化改进
+
+- 构建脚本自动检测 Python 版本
+- 构建脚本自动安装缺失依赖
+- 构建完成后显示文件大小
+
+### 文件变更
+
+- 更新：`opencode_config_manager_fluent_v1.0.0.py`
+- 更新：`build_unix.sh`
+- 新增：`build_windows.bat`
+
+---
+
+## v1.0.2 (2026-01-14)
+
+### 版本代号: 自定义路径版
+
+### 新增功能
+
+- **首页配置路径手动选择**
+  - 点击文件夹图标可选择任意 JSON/JSONC 配置文件
+  - 支持切换到项目级配置或其他自定义配置
+  - 点击重置按钮可恢复默认路径
+- **ConfigPaths 类增强**
+  - `set_opencode_config()` / `set_ohmyopencode_config()` 设置自定义路径
+  - `is_custom_path()` 检查是否使用自定义路径
+  - `reset_to_default()` 重置为默认路径
+- **ConfigManager 增强**
+  - `is_jsonc_file()` 检测文件是否为 JSONC 格式
+
+### 优化改进
+
+- 配置路径标签动态更新
+- 选择配置文件时自动验证 JSON/JSONC 格式
+- 切换配置后自动重新加载并更新统计信息
+
+### 文件变更
+
+- 更新：`opencode_config_manager_fluent_v1.0.0.py`
+- 更新：`build_unix.sh`
+
+---
+
+## v1.0.1 (2026-01-14)
+
+### 版本代号: JSONC 支持版
+
+### 新增功能
+
+- **JSONC 格式支持**：配置文件支持带注释的 JSON 格式
+  - 支持 `//` 单行注释
+  - 支持 `/* */` 多行注释
+  - 自动检测并解析 JSONC 文件
+- **双扩展名检测**：自动检测 `.jsonc` 和 `.json` 配置文件
+  - 优先加载 `.jsonc` 文件
+  - 兼容现有 `.json` 配置
+
+### 优化改进
+
+- `ConfigPaths` 类重构，支持灵活的配置文件路径检测
+- `ConfigManager.strip_jsonc_comments()` 方法：安全移除 JSONC 注释
+- `build_unix.sh` 更新为 Fluent 版本构建脚本
+
+### 文件变更
+
+- 更新：`opencode_config_manager_fluent_v1.0.0.py`
+- 更新：`build_unix.sh` (Linux/macOS 构建脚本)
+
+---
+
+## v1.0.0 (2026-01-14)
+
+### 版本代号: Fluent Design 全面重构版
+
+### 重大更新 - UI 框架全面重构
+
+- **全新 UI 框架**：从 ttkbootstrap 迁移至 PyQt5 + QFluentWidgets
+- **Fluent Design 风格**：采用微软 Fluent Design 设计语言
+- **深浅色主题**
+  - 默认跟随系统主题自动切换
+  - 支持手动切换深色/浅色模式
+  - 使用 SystemThemeListener 实时监听系统主题变化
+- **现代化卡片布局**：所有页面采用 SimpleCardWidget 卡片式设计
+- **侧边栏导航**：FluentWindow 原生导航栏，图标 + 文字
+
+### 新增功能
+
+- **首页 Logo 展示**：显示 OCCM 品牌 Logo
+- **主题切换按钮**：导航栏底部一键切换深浅色
+- **窗口图标**：任务栏和标题栏显示自定义图标
+
+### 技术栈变更
+
+- **移除依赖**：ttkbootstrap
+- **新增依赖**：
+  - PyQt5 >= 5.15.0
+  - PyQt5-Fluent-Widgets >= 1.5.0
+
+### 优化改进
+
+- 所有对话框统一深色主题基类 (BaseDialog)
+- 列表组件列宽优化，信息展示更清晰
+- Tooltip 提示系统完整保留
+- 配置保存逻辑优化
+
+### 文件变更
+
+- 新增：`opencode_config_manager_fluent_v1.0.0.py` (Fluent 版本主程序)
+- 新增：`assets/logo1.png` (首页 Logo)
+- 新增：`assets/logo.png`, `assets/logo.ico` (品牌资源)
+- 保留：`opencode_config_manager_v0.7.0.py` (ttkbootstrap 版本，兼容旧系统)
+
+---
+
 ## v0.7.0 (2026-01-14)
 
 ### 重大更新
@@ -53,6 +337,7 @@
 - 新增 hover/press 状态颜色配置
 - 完善 setup_modern_styles 函数
 - 在模型管理 variants、agent管理中的模式、权限管理各个工具添加tooltip说明解释，解释其作用和使用方法
+
 ---
 
 ## v0.6.3 (2026-01-14)
@@ -75,44 +360,22 @@
 - 新增 ModernCombobox、ModernCheckbutton 组件
 - 优化 Treeview、Notebook 等控件的现代化样式
 
-v0.6.3 更新内容
-1. 修复 Bug
-SkillTab.refresh_list 报错: 修复了 permission.skill 可能是字符串而非字典导致的 AttributeError: 'str' object has no attribute 'items' 错误
-2. 新增顶部工具栏功能
-GitHub 链接: ⭐ GitHub 按钮，点击跳转项目主页
-作者信息: by IcySaint，点击跳转作者 GitHub
-版本同步检查: 自动检测 GitHub 最新 release，有新版本时显示绿色徽章
-3. 新增 "Oh My OpenCode" 帮助说明 Tab
+### Bug 修复
+
+- 修复 SkillTab.refresh_list 报错: 修复了 permission.skill 可能是字符串而非字典导致的 AttributeError
+
+### 新增 "Oh My OpenCode" 帮助说明 Tab
+
 包含以下关键信息：
+- 🪄 魔法关键词 ultrawork/ulw
+- 🤖 内置 Agent 团队
+- 🔧 LSP 工具集
+- 🔍 AST 工具
+- 📚 会话管理工具
+- 📁 配置加载器
+- ⚙️ 兼容性开关
+- 🎯 其他核心功能
 
-内容	说明
-🪄 魔法关键词 ultrawork/ulw	只需在提示词中包含即可激活所有高级功能
-🤖 内置 Agent 团队	Sisyphus、Oracle、Librarian、Explore、Frontend UI/UX Engineer 等
-🔧 LSP 工具集	lsp_hover、lsp_goto_definition、lsp_find_references 等 11 个工具
-🔍 AST 工具	ast_grep_search、ast_grep_replace
-📚 会话管理工具	session_list、session_read、session_search、session_info
-📁 配置加载器	命令加载器、Skill 加载器、Agent 加载器、MCP 加载器的路径说明
-⚙️ 兼容性开关	claude_code 配置对象说明（mcp、commands、skills、agents、hooks、plugins）
-🎯 其他核心功能	Todo 持续执行器、注释检查器、思考模式、上下文窗口监控等
-4. 界面美化
-新增 ModernCombobox、ModernCheckbutton 组件
-优化 ModernEntry 支持占位符
-统一 Treeview、Notebook、Scrollbar 样式
-新增配色：text_muted、primary_light、success_light 等
-5. 关于兼容性开关的说明
-根据 Oh My OpenCode 文档，兼容性开关用于禁用 Claude Code 兼容层的特定功能，而不是影响 OpenCode 原生功能：
-
-{
-  "claude_code": {
-    "mcp": false,      // 禁用从 ~/.claude/.mcp.json 等加载 MCP
-    "commands": false, // 禁用从 ~/.claude/commands/ 加载命令
-    "skills": false,   // 禁用从 ~/.claude/skills/ 加载 Skill
-    "agents": false,   // 禁用从 ~/.claude/agents/ 加载 Agent
-    "hooks": false,    // 禁用 Claude Code Hooks
-    "plugins": false   // 禁用 Claude Code 插件
-  }
-}
-这些开关默认都是 true（启用），只有当用户想要禁用某些 Claude Code 兼容功能时才需要设置为 false。这不会影响 OpenCode 的内置功能。
 ---
 
 ## v0.6.2 (2026-01-14)
@@ -195,8 +458,8 @@ GitHub 链接: ⭐ GitHub 按钮，点击跳转项目主页
   - 更新所有模型的 options/variants 配置
 
 - **完善 Tooltip 提示**
-  - 新增 MCP 相关提示（type、command、url、headers、environment、timeout、oauth）
-  - 新增 OpenCode Agent 相关提示（mode、temperature、maxSteps、tools、permission、hidden）
+  - 新增 MCP 相关提示
+  - 新增 OpenCode Agent 相关提示
   - 新增 Options/Variants 详细说明
   - 新增各厂商 thinking 模式参数说明
 
@@ -349,11 +612,11 @@ GitHub 链接: ⭐ GitHub 按钮，点击跳转项目主页
 
 ## 下载
 
-| 平台 | 下载链接 | 大小 |
+| 平台 | 下载链接 | 说明 |
 |------|---------|------|
-| Windows | [OpenCodeConfigManager.exe](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/download/v0.5.0/OpenCodeConfigManager.exe) | ~15 MB |
-| macOS | [OpenCodeConfigManager.app.zip](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/download/v0.5.0/OpenCodeConfigManager.app.zip) | ~20 MB |
-| Linux | [OpenCodeConfigManager](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/download/v0.5.0/OpenCodeConfigManager) | ~15 MB |
+| Windows | [Releases](https://github.com/icysaintdx/OpenCode-Config-Manager/releases) | Fluent 版本 (推荐) |
+| macOS | [Releases](https://github.com/icysaintdx/OpenCode-Config-Manager/releases) | DMG 镜像包 |
+| Linux | [Releases](https://github.com/icysaintdx/OpenCode-Config-Manager/releases) | tar.gz 压缩包 |
 
 ---
 
@@ -371,20 +634,20 @@ GitHub 链接: ⭐ GitHub 按钮，点击跳转项目主页
 
 ### Windows
 
-1. 下载 `OpenCodeConfigManager.exe`
+1. 下载 `OpenCodeConfigManager_vX.Y.Z.exe`
 2. 双击运行即可
 
 ### macOS
 
-1. 下载 `OpenCodeConfigManager.app.zip`
-2. 解压后将 `.app` 拖入「应用程序」文件夹
+1. 下载 `OpenCode-Config-Manager-MacOS.dmg`
+2. 打开 DMG，将应用拖入「应用程序」文件夹
 3. 首次运行可能需要在「系统偏好设置 > 安全性与隐私」中允许
 
 ### Linux
 
-1. 下载 `OpenCodeConfigManager`
-2. 添加执行权限：`chmod +x OpenCodeConfigManager`
-3. 运行：`./OpenCodeConfigManager`
+1. 下载 `OpenCode-Config-Manager-Linux-x64.tar.gz`
+2. 解压：`tar -xzf OpenCode-Config-Manager-Linux-x64.tar.gz`
+3. 运行：`./OpenCode-Config-Manager/OpenCode-Config-Manager`
 
 ---
 
