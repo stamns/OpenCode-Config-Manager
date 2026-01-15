@@ -112,7 +112,7 @@ from qfluentwidgets import (
 )
 
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1331,6 +1331,45 @@ class ConfigPaths:
             return json_path
         # 都不存在时，默认返回 .json 路径（用于创建新文件）
         return json_path
+
+    @classmethod
+    def check_config_conflict(cls, base_name: str) -> Optional[Tuple[Path, Path]]:
+        """
+        检查是否同时存在 .json 和 .jsonc 配置文件
+
+        Args:
+            base_name: 配置文件基础名称（如 "opencode" 或 "oh-my-opencode"）
+
+        Returns:
+            如果存在冲突，返回 (json_path, jsonc_path)；否则返回 None
+        """
+        base_dir = cls.get_config_base_dir()
+        jsonc_path = base_dir / f"{base_name}.jsonc"
+        json_path = base_dir / f"{base_name}.json"
+
+        if jsonc_path.exists() and json_path.exists():
+            return (json_path, jsonc_path)
+        return None
+
+    @classmethod
+    def get_config_file_info(cls, path: Path) -> Dict:
+        """获取配置文件信息（大小、修改时间）"""
+        import os
+        from datetime import datetime
+
+        if not path.exists():
+            return {"exists": False}
+
+        stat = os.stat(path)
+        return {
+            "exists": True,
+            "size": stat.st_size,
+            "size_str": f"{stat.st_size:,} 字节",
+            "mtime": datetime.fromtimestamp(stat.st_mtime),
+            "mtime_str": datetime.fromtimestamp(stat.st_mtime).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+        }
 
     @classmethod
     def get_opencode_config(cls) -> Path:
@@ -5245,6 +5284,12 @@ class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
 
+        # 备份管理器（需要在冲突检测之前初始化）
+        self.backup_manager = BackupManager()
+
+        # 检测配置文件冲突（同时存在 .json 和 .jsonc）
+        self._check_config_conflicts()
+
         # 加载配置
         self.opencode_config = ConfigManager.load_json(
             ConfigPaths.get_opencode_config()
@@ -5257,9 +5302,6 @@ class MainWindow(FluentWindow):
             self.opencode_config = {}
         if self.ohmyopencode_config is None:
             self.ohmyopencode_config = {}
-
-        # 备份管理器
-        self.backup_manager = BackupManager()
 
         # 启动时验证配置
         self._validate_config_on_startup()
@@ -5490,6 +5532,89 @@ class MainWindow(FluentWindow):
             self.themeListener.terminate()
             self.themeListener.deleteLater()
         super().closeEvent(e)
+
+    def _check_config_conflicts(self):
+        """检测配置文件冲突（同时存在 .json 和 .jsonc）"""
+        conflicts = []
+
+        # 检查 opencode 配置
+        opencode_conflict = ConfigPaths.check_config_conflict("opencode")
+        if opencode_conflict:
+            conflicts.append(("OpenCode", "opencode", opencode_conflict))
+
+        # 检查 oh-my-opencode 配置
+        ohmy_conflict = ConfigPaths.check_config_conflict("oh-my-opencode")
+        if ohmy_conflict:
+            conflicts.append(("Oh My OpenCode", "oh-my-opencode", ohmy_conflict))
+
+        if not conflicts:
+            return
+
+        # 延迟显示对话框，等窗口完全初始化
+        # 使用 lambda 捕获 conflicts
+        QTimer.singleShot(200, lambda: self._show_conflict_dialog(conflicts))
+
+    def _show_conflict_dialog(self, conflicts: list):
+        """显示配置文件冲突对话框"""
+        for config_name, base_name, (json_path, jsonc_path) in conflicts:
+            json_info = ConfigPaths.get_config_file_info(json_path)
+            jsonc_info = ConfigPaths.get_config_file_info(jsonc_path)
+
+            msg = f"""检测到 {config_name} 同时存在两个配置文件：
+
+📄 {json_path.name}
+   大小: {json_info.get("size_str", "未知")}
+   修改时间: {json_info.get("mtime_str", "未知")}
+
+📄 {jsonc_path.name}
+   大小: {jsonc_info.get("size_str", "未知")}
+   修改时间: {jsonc_info.get("mtime_str", "未知")}
+
+⚠️ 当前程序会优先加载 .jsonc 文件。
+
+请选择要使用的配置文件：
+• 点击「确定」使用 .json 文件（删除 .jsonc）
+• 点击「取消」使用 .jsonc 文件（保持现状）"""
+
+            dialog = FluentMessageBox(f"{config_name} 配置文件冲突", msg, self)
+
+            if dialog.exec_():
+                # 用户选择使用 .json，删除 .jsonc
+                try:
+                    # 先备份 .jsonc
+                    self.backup_manager.backup(jsonc_path, tag="conflict-backup")
+                    # 删除 .jsonc
+                    jsonc_path.unlink()
+                    InfoBar.success(
+                        title="已切换配置",
+                        content=f"已删除 {jsonc_path.name}，将使用 {json_path.name}",
+                        orient=Qt.Orientation.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=5000,
+                        parent=self,
+                    )
+                except Exception as e:
+                    InfoBar.error(
+                        title="删除失败",
+                        content=f"无法删除 {jsonc_path.name}: {e}",
+                        orient=Qt.Orientation.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP_RIGHT,
+                        duration=5000,
+                        parent=self,
+                    )
+            else:
+                # 用户选择保持现状（使用 .jsonc）
+                InfoBar.info(
+                    title="保持现状",
+                    content=f"将继续使用 {jsonc_path.name}",
+                    orient=Qt.Orientation.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=3000,
+                    parent=self,
+                )
 
     def _validate_config_on_startup(self):
         """启动时验证配置文件"""
