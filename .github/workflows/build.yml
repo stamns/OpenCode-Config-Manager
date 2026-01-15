@@ -111,11 +111,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: 3. 安装 PyQt5 依赖
+      - name: 3. 安装 PyQt5 + qfluentwidgets 依赖
         run: |
-          python -m pip install --upgrade pip
-          python3 -m pip install PyQt5-qt5 PyQt5-sip PyQt5 --force-reinstall
-          python3 -m pip install pyinstaller qfluentwidgets
+          python -m pip install --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple
+          python3 -m pip install PyQt5-qt5 PyQt5-sip PyQt5 --force-reinstall -i https://pypi.tuna.tsinghua.edu.cn/simple
+          python3 -m pip install pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
+          # macOS ARM64 没有 qfluentwidgets 预编译包，从 GitHub 源码安装
+          python3 -m pip install git+https://github.com/zhiyiYo/PyQt-Fluent-Widgets.git --no-cache-dir
 
       - name: 4. PyInstaller 打包
         run: |
@@ -137,6 +139,13 @@ jobs:
             --noconfirm \
             --strip \
             opencode_config_manager_fluent.py
+        shell: /bin/bash -e {0}
+        env:
+          pythonLocation: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
+          PKG_CONFIG_PATH: /Users/runner/hostedtoolcache/Python/3.10.11/arm64/lib/pkgconfig
+          Python_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
+          Python2_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
+          Python3_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
 
       - name: 5. 打包成 DMG 镜像
         run: |
@@ -146,11 +155,13 @@ jobs:
             --volname "OpenCode-Config-Manager" \
             "dist/OpenCode-Config-Manager-MacOS.dmg" \
             "dist/OpenCode-Config-Manager/"
+        shell: /bin/bash -e {0}
 
       - name: 6. 免证书签名
         run: |
-          xattr -cr dist/OpenCode-Config-Manager.app || true
-          codesign --force --deep --sign - dist/OpenCode-Config-Manager.app || true
+          xattr -cr dist/OpenCode-Config-Manager.app
+          codesign --force --deep --sign - dist/OpenCode-Config-Manager.app
+        shell: /bin/bash -e {0}
 
       - name: 7. 上传构建产物
         uses: actions/upload-artifact@v4
@@ -198,8 +209,8 @@ jobs:
 
       - name: 4. 安装 Python 依赖
         run: |
-          python3 -m pip install --upgrade pip setuptools wheel
-          python3 -m pip install pyinstaller PyQt5==5.15.10 --force-reinstall --no-cache-dir
+          python3 -m pip install --upgrade pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple
+          python3 -m pip install pyinstaller PyQt5==5.15.10 --force-reinstall --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
           python3 -m pip install git+https://github.com/zhiyiYo/PyQt-Fluent-Widgets.git --no-cache-dir
 
       - name: 5. PyInstaller 打包
@@ -222,12 +233,14 @@ jobs:
             --noconfirm \
             --strip \
             opencode_config_manager_fluent.py
+        shell: /bin/bash -e {0}
 
       - name: 6. 打包成 tar.gz
         run: |
           cd dist
           rm -f OpenCode-Config-Manager-Linux-x64.tar.gz
           tar -zcvf OpenCode-Config-Manager-Linux-x64.tar.gz OpenCode-Config-Manager/
+        shell: /bin/bash -e {0}
 
       - name: 7. 上传构建产物
         uses: actions/upload-artifact@v4
