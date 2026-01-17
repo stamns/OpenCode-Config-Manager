@@ -39,12 +39,167 @@ import webbrowser
 import threading
 import urllib.request
 import urllib.error
+import hashlib
+import copy
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Deque
+from functools import partial
+from dataclasses import dataclass
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+import os
+import time
+import socket
+from urllib.parse import urlparse
 
-from PyQt5.QtCore import Qt, QUrl, pyqtSignal, QTimer, QObject
-from PyQt5.QtGui import QIcon, QDesktopServices, QFont, QPixmap
+
+def _resolve_env_value(value: str) -> str:
+    """解析 {env:VAR} 形式的环境变量引用"""
+    if not value:
+        return ""
+    match = re.match(r"^\{env:([A-Z0-9_]+)\}$", value.strip())
+    if not match:
+        return value
+    return os.environ.get(match.group(1), "")
+
+
+def _safe_base_url(value: str) -> str:
+    """规范化 baseURL 字符串"""
+    return (value or "").strip().rstrip("/")
+
+
+def _build_chat_url(base_url: str) -> str:
+    """根据 baseURL 生成 chat/completions 地址"""
+    value = (base_url or "").strip()
+    if not value:
+        return ""
+    if value.endswith("/v1") or value.endswith("/v1/"):
+        return value.rstrip("/") + "/chat/completions"
+    if value.endswith("/"):
+        return value + "v1/chat/completions"
+    return value + "/v1/chat/completions"
+
+
+def _extract_origin(base_url: str) -> str:
+    """从 baseURL 提取可用于 Ping 的源站"""
+    if not base_url:
+        return ""
+    parsed = urlparse(base_url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return base_url
+
+
+@dataclass
+class MonitorTarget:
+    provider_key: str
+    provider_name: str
+    base_url: str
+    api_key: str
+    model_id: str
+    model_name: str
+
+    @property
+    def target_id(self) -> str:
+        return f"{self.provider_key}/{self.model_id}"
+
+
+@dataclass
+class MonitorResult:
+    target_id: str
+    status: str
+    latency_ms: Optional[int]
+    ping_ms: Optional[int]
+    checked_at: datetime
+    message: str
+
+
+STATUS_LABELS = {
+    "operational": "正常",
+    "degraded": "延迟",
+    "failed": "异常",
+    "error": "错误",
+    "no_config": "未配置",
+}
+
+STATUS_COLORS = {
+    "operational": "#3CCB7F",
+    "degraded": "#F3B94E",
+    "failed": "#E05A5A",
+    "error": "#E05A5A",
+    "no_config": "#9AA4B2",
+}
+
+STATUS_BG_COLORS = {
+    "operational": "#1F3D2B",
+    "degraded": "#3E3320",
+    "failed": "#3B2323",
+    "error": "#3B2323",
+    "no_config": "#2A2F36",
+}
+
+
+def _format_latency(value: Optional[int]) -> str:
+    return f"{value} ms" if isinstance(value, int) else "—"
+
+
+def _calc_availability(history: Deque[MonitorResult]) -> Optional[float]:
+    if not history:
+        return None
+    total = len(history)
+    ok = sum(1 for item in history if item.status in ("operational", "degraded"))
+    if total == 0:
+        return None
+    return ok * 100.0 / total
+
+
+def _measure_ping(origin: str, timeout_sec: float = 3.0) -> Optional[int]:
+    if not origin:
+        return None
+    parsed = urlparse(origin)
+    host = parsed.hostname
+    if not host:
+        return None
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    start = time.time()
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout_sec)
+        sock.close()
+    except Exception:
+        return None
+    return int((time.time() - start) * 1000)
+
+
+def _safe_json_load(data: bytes) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(data.decode("utf-8"))
+    except Exception:
+        return None
+
+
+from PyQt5.QtCore import (
+    Qt,
+    QUrl,
+    pyqtSignal,
+    QTimer,
+    QObject,
+    QRegularExpression,
+    Qt as QtCore,
+)
+from PyQt5.QtGui import (
+    QIcon,
+    QDesktopServices,
+    QFont,
+    QPixmap,
+    QColor,
+    QPainter,
+    QPen,
+    QTextCharFormat,
+    QSyntaxHighlighter,
+    QTextCursor,
+    QFontMetrics,
+)
 from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
@@ -64,6 +219,9 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QDialog,
     QDialogButtonBox,
+    QTextEdit,
+    QListWidgetItem,
+    QGroupBox,
 )
 
 from qfluentwidgets import (
@@ -120,6 +278,11 @@ GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/late
 AUTHOR_NAME = "IcySaint"
 AUTHOR_GITHUB = "https://github.com/icysaintdx"
 
+# 监控页面配置
+MONITOR_POLL_INTERVAL_MS = 60000
+MONITOR_HISTORY_LIMIT = 60
+DEGRADED_THRESHOLD_MS = 6000
+
 # ==================== 版本检查配置 ====================
 STARTUP_VERSION_CHECK_ENABLED = True  # 启动时是否检查版本
 IMMEDIATE_VERSION_CHECK_MS = 5000  # 启动后首次检查延迟 (5秒)
@@ -128,12 +291,8 @@ UPDATE_INTERVAL_MS = 60 * 1000  # 定时检查间隔 (1分钟)
 
 def get_resource_path(relative_path: str) -> Path:
     """获取资源文件路径 - 兼容 PyInstaller 打包后的环境"""
-    try:
-        # PyInstaller 打包后，资源文件在临时目录
-        base_path = Path(sys._MEIPASS)
-    except AttributeError:
-        # 开发环境，使用脚本所在目录
-        base_path = Path(__file__).parent
+    base_path_value = getattr(sys, "_MEIPASS", None)
+    base_path = Path(base_path_value) if base_path_value else Path(__file__).parent
     return base_path / relative_path
 
 
@@ -207,6 +366,17 @@ SDK必须与模型厂商匹配，否则无法正常调用！""",
 • 支持环境变量引用: {env:ANTHROPIC_API_KEY}
 • 不要将密钥提交到代码仓库
 • 定期轮换密钥""",
+    "provider_model_list_url": """模型列表地址 (modelListUrl) ⓘ
+
+【作用】用于拉取 Provider 支持的模型列表
+
+【使用场景】
+• API 地址不支持标准 /v1/models 时，填写自定义模型列表接口
+• 私有部署或中转站需要自定义路径
+
+【格式示例】
+• https://api.example.com/v1/models
+• /custom/models""",
     "provider_timeout": """请求超时 (timeout) ⓘ
 
 【作用】API请求的最大等待时间
@@ -1146,6 +1316,116 @@ PRESET_SDKS = [
     "@ai-sdk/openai-compatible",
 ]
 
+# 模型配置包预设（用于批量添加时的可选模板）
+MODEL_PRESET_PACKS = {
+    "Claude 系列": {
+        "默认": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 200000, "output": 16000},
+            "options": {"thinking": {"type": "enabled", "budgetTokens": 16000}},
+            "variants": {},
+        },
+        "高思考": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 200000, "output": 16000},
+            "options": {"thinking": {"type": "enabled", "budgetTokens": 32000}},
+            "variants": {},
+        },
+        "最大思考": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 200000, "output": 16000},
+            "options": {"thinking": {"type": "enabled", "budgetTokens": 64000}},
+            "variants": {},
+        },
+        "轻量": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 200000, "output": 16000},
+            "options": {"thinking": {"type": "disabled"}},
+            "variants": {},
+        },
+    },
+    "OpenAI/Codex 系列": {
+        "基础": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 200000, "output": 16000},
+            "options": {},
+            "variants": {},
+        },
+        "fast": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 200000, "output": 16000},
+            "options": {"reasoningEffort": "low"},
+            "variants": {},
+        },
+        "high": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 200000, "output": 16000},
+            "options": {"reasoningEffort": "high"},
+            "variants": {},
+        },
+        "xhigh": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 200000, "output": 16000},
+            "options": {"reasoningEffort": "xhigh"},
+            "variants": {},
+        },
+    },
+    "Gemini 系列": {
+        "默认": {
+            "attachment": True,
+            "modalities": {"input": ["text", "image"], "output": ["text"]},
+            "limit": {"context": 1048576, "output": 8192},
+            "options": {"thinkingConfig": {"thinkingBudget": 8000}},
+            "variants": {},
+        },
+        "16k": {
+            "attachment": True,
+            "modalities": {"input": ["text", "image"], "output": ["text"]},
+            "limit": {"context": 1048576, "output": 8192},
+            "options": {"thinkingConfig": {"thinkingBudget": 16000}},
+            "variants": {},
+        },
+        "高": {
+            "attachment": True,
+            "modalities": {"input": ["text", "image"], "output": ["text"]},
+            "limit": {"context": 1048576, "output": 8192},
+            "options": {"thinkingConfig": {"thinkingBudget": 32000}},
+            "variants": {},
+        },
+    },
+    "其他模型": {
+        "基础": {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 64000, "output": 8192},
+            "options": {},
+            "variants": {},
+        }
+    },
+}
+
+MODEL_PRESET_DEFAULT = {
+    "Claude 系列": "默认",
+    "OpenAI/Codex 系列": "基础",
+    "Gemini 系列": "默认",
+    "其他模型": "基础",
+}
+
+MODEL_PRESET_CUSTOM = {
+    "Claude 系列": {},
+    "OpenAI/Codex 系列": {},
+    "Gemini 系列": {},
+    "其他模型": {},
+}
+
 # SDK与模型厂商的对应关系（用于提示）
 SDK_MODEL_COMPATIBILITY = {
     "@ai-sdk/anthropic": ["Claude 系列"],
@@ -1293,6 +1573,7 @@ class ConfigPaths:
     _custom_opencode_path: Optional[Path] = None
     _custom_ohmyopencode_path: Optional[Path] = None
     _custom_backup_path: Optional[Path] = None
+    _custom_import_paths: Optional[Dict[str, Path]] = None
 
     @staticmethod
     def get_user_home() -> Path:
@@ -1440,6 +1721,23 @@ class ConfigPaths:
     def set_backup_dir(cls, path: Optional[Path]) -> None:
         """设置自定义备份目录"""
         cls._custom_backup_path = path
+
+    @classmethod
+    def get_import_path(cls, source_type: str) -> Optional[Path]:
+        """获取自定义导入路径"""
+        if cls._custom_import_paths is None:
+            return None
+        return cls._custom_import_paths.get(source_type)
+
+    @classmethod
+    def set_import_path(cls, source_type: str, path: Optional[Path]) -> None:
+        """设置自定义导入路径"""
+        if cls._custom_import_paths is None:
+            cls._custom_import_paths = {}
+        if path is None:
+            cls._custom_import_paths.pop(source_type, None)
+            return
+        cls._custom_import_paths[source_type] = path
 
 
 class ConfigManager:
@@ -1597,6 +1895,10 @@ class ConfigManager:
         """
         jsonc_warning = False
         try:
+            # 保存前自动备份当前文件
+            if backup_manager and path.exists():
+                backup_manager.backup(path, tag="before-save")
+
             # 检测是否为 JSONC 文件（包含注释）
             if path.exists() and ConfigManager.has_jsonc_comments(path):
                 jsonc_warning = True
@@ -1632,6 +1934,34 @@ class BackupManager:
             return backup_path
         except Exception as e:
             print(f"Backup failed: {e}")
+            return None
+
+    def backup_data(
+        self, config_path: Path, data: Dict, tag: str = "memory"
+    ) -> Optional[Path]:
+        """备份当前内存态配置（不依赖磁盘内容）"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_name = f"{config_path.stem}.{timestamp}.{tag}.bak"
+            backup_path = self.backup_dir / backup_name
+            with open(backup_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            return backup_path
+        except Exception as e:
+            print(f"Backup data failed: {e}")
+            return None
+
+    @staticmethod
+    def file_hash(path: Path) -> Optional[str]:
+        """计算文件哈希，用于检测外部修改"""
+        try:
+            if not path.exists():
+                return None
+            with open(path, "rb") as f:
+                data = f.read()
+            return hashlib.md5(data).hexdigest()
+        except Exception as e:
+            print(f"Hash failed: {e}")
             return None
 
     def list_backups(self, config_name: Optional[str] = None) -> List[Dict]:
@@ -1687,12 +2017,23 @@ class BackupManager:
 class ConfigValidator:
     """配置文件验证器 - 检查 OpenCode 配置格式是否正确"""
 
+    @staticmethod
+    def _is_blank(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ""
+        return False
+
     # Provider 必需字段
     PROVIDER_REQUIRED_FIELDS = ["npm", "options"]
     # Provider options 必需字段
     PROVIDER_OPTIONS_REQUIRED = ["baseURL", "apiKey"]
     # Model 推荐字段
     MODEL_RECOMMENDED_FIELDS = ["name", "limit"]
+    # Oh My OpenCode 必需字段
+    OHMY_AGENT_REQUIRED_FIELDS = ["model"]
+    OHMY_CATEGORY_REQUIRED_FIELDS = ["model"]
     # 有效的 npm 包
     VALID_NPM_PACKAGES = [
         "@ai-sdk/anthropic",
@@ -1720,9 +2061,33 @@ class ConfigValidator:
                 {"level": "error", "path": "root", "message": "配置文件为空或无法解析"}
             )
             return issues
+        if not isinstance(config, dict):
+            issues.append(
+                {"level": "error", "path": "root", "message": "配置根必须是对象类型"}
+            )
+            return issues
+
+        # 验证 $schema
+        schema = config.get("$schema")
+        if schema != "https://opencode.ai/config.json":
+            issues.append(
+                {
+                    "level": "warning",
+                    "path": "$schema",
+                    "message": "建议设置 $schema 为 https://opencode.ai/config.json",
+                }
+            )
 
         # 验证 provider 部分
         providers = config.get("provider", {})
+        if not providers:
+            issues.append(
+                {
+                    "level": "warning",
+                    "path": "provider",
+                    "message": "未配置任何 Provider",
+                }
+            )
         if not isinstance(providers, dict):
             issues.append(
                 {
@@ -1757,6 +2122,14 @@ class ConfigValidator:
                             "message": f"Provider '{provider_name}' 缺少必需字段 '{field}'",
                         }
                     )
+                elif ConfigValidator._is_blank(provider_data.get(field)):
+                    issues.append(
+                        {
+                            "level": "error",
+                            "path": f"{provider_path}.{field}",
+                            "message": f"Provider '{provider_name}' 的 '{field}' 为空",
+                        }
+                    )
 
             # 检查 npm 包是否有效
             npm = provider_data.get("npm", "")
@@ -1789,6 +2162,14 @@ class ConfigValidator:
                                 "message": f"Provider '{provider_name}' 的 options 缺少 '{opt_field}'",
                             }
                         )
+                    elif ConfigValidator._is_blank(options.get(opt_field)):
+                        issues.append(
+                            {
+                                "level": "warning",
+                                "path": f"{provider_path}.options.{opt_field}",
+                                "message": f"Provider '{provider_name}' 的 options.{opt_field} 为空",
+                            }
+                        )
 
             # 检查 models
             models = provider_data.get("models", {})
@@ -1801,8 +2182,25 @@ class ConfigValidator:
                     }
                 )
             else:
+                if not models:
+                    issues.append(
+                        {
+                            "level": "warning",
+                            "path": f"{provider_path}.models",
+                            "message": f"Provider '{provider_name}' 没有配置任何模型",
+                        }
+                    )
                 for model_id, model_data in models.items():
                     model_path = f"{provider_path}.models.{model_id}"
+                    if ConfigValidator._is_blank(model_id):
+                        issues.append(
+                            {
+                                "level": "error",
+                                "path": model_path,
+                                "message": f"Provider '{provider_name}' 存在空模型ID",
+                            }
+                        )
+                        continue
                     if not isinstance(model_data, dict):
                         issues.append(
                             {
@@ -1886,6 +2284,166 @@ class ConfigValidator:
             issues.append(
                 {"level": "error", "path": "agent", "message": "agent 必须是对象类型"}
             )
+
+        return issues
+
+    @staticmethod
+    def validate_ohmyopencode_config(config: Dict) -> List[Dict]:
+        """
+        验证 Oh My OpenCode 配置文件
+        返回问题列表: [{"level": "error/warning", "path": "agents.xxx", "message": "..."}]
+        """
+        issues = []
+        if not config:
+            issues.append(
+                {"level": "error", "path": "root", "message": "配置文件为空或无法解析"}
+            )
+            return issues
+        if not isinstance(config, dict):
+            issues.append(
+                {"level": "error", "path": "root", "message": "配置根必须是对象类型"}
+            )
+            return issues
+
+        agents = config.get("agents", {})
+        if not agents:
+            issues.append(
+                {"level": "warning", "path": "agents", "message": "未配置任何 Agent"}
+            )
+        if agents and not isinstance(agents, dict):
+            issues.append(
+                {"level": "error", "path": "agents", "message": "agents 必须是对象类型"}
+            )
+            return issues
+
+        if isinstance(agents, dict):
+            for agent_name, agent_data in agents.items():
+                agent_path = f"agents.{agent_name}"
+                if ConfigValidator._is_blank(agent_name):
+                    issues.append(
+                        {
+                            "level": "error",
+                            "path": agent_path,
+                            "message": "Agent 名称为空",
+                        }
+                    )
+                    continue
+                if not isinstance(agent_data, dict):
+                    issues.append(
+                        {
+                            "level": "error",
+                            "path": agent_path,
+                            "message": f"Agent '{agent_name}' 的值必须是对象",
+                        }
+                    )
+                    continue
+                for field in ConfigValidator.OHMY_AGENT_REQUIRED_FIELDS:
+                    if field not in agent_data:
+                        issues.append(
+                            {
+                                "level": "error",
+                                "path": f"{agent_path}.{field}",
+                                "message": f"Agent '{agent_name}' 缺少必需字段 '{field}'",
+                            }
+                        )
+                    elif ConfigValidator._is_blank(agent_data.get(field)):
+                        issues.append(
+                            {
+                                "level": "error",
+                                "path": f"{agent_path}.{field}",
+                                "message": f"Agent '{agent_name}' 的 '{field}' 为空",
+                            }
+                        )
+                if "description" in agent_data and ConfigValidator._is_blank(
+                    agent_data.get("description")
+                ):
+                    issues.append(
+                        {
+                            "level": "warning",
+                            "path": f"{agent_path}.description",
+                            "message": f"Agent '{agent_name}' 的 description 为空",
+                        }
+                    )
+
+        categories = config.get("categories", {})
+        if not categories:
+            issues.append(
+                {
+                    "level": "warning",
+                    "path": "categories",
+                    "message": "未配置任何 Category",
+                }
+            )
+        if categories and not isinstance(categories, dict):
+            issues.append(
+                {
+                    "level": "error",
+                    "path": "categories",
+                    "message": "categories 必须是对象类型",
+                }
+            )
+            return issues
+
+        if isinstance(categories, dict):
+            for category_name, category_data in categories.items():
+                category_path = f"categories.{category_name}"
+                if ConfigValidator._is_blank(category_name):
+                    issues.append(
+                        {
+                            "level": "error",
+                            "path": category_path,
+                            "message": "Category 名称为空",
+                        }
+                    )
+                    continue
+                if not isinstance(category_data, dict):
+                    issues.append(
+                        {
+                            "level": "error",
+                            "path": category_path,
+                            "message": f"Category '{category_name}' 的值必须是对象",
+                        }
+                    )
+                    continue
+                for field in ConfigValidator.OHMY_CATEGORY_REQUIRED_FIELDS:
+                    if field not in category_data:
+                        issues.append(
+                            {
+                                "level": "error",
+                                "path": f"{category_path}.{field}",
+                                "message": f"Category '{category_name}' 缺少必需字段 '{field}'",
+                            }
+                        )
+                    elif ConfigValidator._is_blank(category_data.get(field)):
+                        issues.append(
+                            {
+                                "level": "error",
+                                "path": f"{category_path}.{field}",
+                                "message": f"Category '{category_name}' 的 '{field}' 为空",
+                            }
+                        )
+
+                temperature = category_data.get("temperature")
+                if temperature is not None and not isinstance(
+                    temperature, (int, float)
+                ):
+                    issues.append(
+                        {
+                            "level": "warning",
+                            "path": f"{category_path}.temperature",
+                            "message": f"Category '{category_name}' 的 temperature 应该是数字",
+                        }
+                    )
+                if "description" in category_data and ConfigValidator._is_blank(
+                    category_data.get("description")
+                ):
+                    issues.append(
+                        {
+                            "level": "warning",
+                            "path": f"{category_path}.description",
+                            "message": f"Category '{category_name}' 的 description 为空",
+                        }
+                    )
 
         return issues
 
@@ -2012,12 +2570,86 @@ class ModelRegistry:
 class ImportService:
     """外部配置导入服务 - 支持Claude Code、Codex、Gemini、cc-switch等配置格式"""
 
+    @staticmethod
+    def _first_existing_path(paths: List[Path]) -> Path:
+        for path in paths:
+            if path.exists():
+                return path
+        return paths[0]
+
+    @staticmethod
+    def _parse_toml_value(value: str):
+        lower_value = value.lower()
+        if lower_value in {"true", "false"}:
+            return lower_value == "true"
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
+            return value[1:-1]
+        try:
+            if "." in value:
+                return float(value)
+            return int(value)
+        except ValueError:
+            return value
+
+    def _parse_toml_string(self, content: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+        current_section: Dict[str, Any] = result
+        for line in content.split("\n"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1]
+                current_section = result
+                for part in section.split("."):
+                    current_section = current_section.setdefault(part, {})
+                continue
+            if "=" in line:
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = self._parse_toml_value(value.strip())
+                current_section[key] = value
+        return result
+
+    @staticmethod
+    def _normalize_base_url(base_url: str, require_v1: bool) -> str:
+        if not base_url:
+            return ""
+        trimmed = base_url.rstrip("/")
+        if require_v1 and not trimmed.endswith("/v1"):
+            trimmed = f"{trimmed}/v1"
+        return trimmed
+
+    @staticmethod
+    def _sanitize_provider_key(name: str) -> str:
+        cleaned = re.sub(r"[^a-z0-9-]+", "-", name.strip().lower())
+        return cleaned.strip("-") or "provider"
+
+    @staticmethod
+    def _unique_provider_key(base: str, used_keys: set) -> str:
+        candidate = base
+        index = 2
+        while candidate in used_keys:
+            candidate = f"{base}-{index}"
+            index += 1
+        used_keys.add(candidate)
+        return candidate
+
     def scan_external_configs(self) -> Dict:
         """扫描所有支持的外部配置文件"""
         results = {}
+        test_root = Path(__file__).parent / "test"
 
         # Claude Code配置
-        claude_settings = ConfigPaths.get_claude_settings()
+        claude_settings = ConfigPaths.get_import_path("claude")
+        if claude_settings is None:
+            claude_settings = ConfigPaths.get_claude_settings()
+            if not claude_settings.exists() and test_root.exists():
+                test_path = test_root / ".claude" / "settings.json"
+                if test_path.exists():
+                    claude_settings = test_path
         results["Claude Code Settings"] = {
             "path": str(claude_settings),
             "exists": claude_settings.exists(),
@@ -2027,7 +2659,13 @@ class ImportService:
             "type": "claude",
         }
 
-        claude_providers = ConfigPaths.get_claude_providers()
+        claude_providers = ConfigPaths.get_import_path("claude_providers")
+        if claude_providers is None:
+            claude_providers = ConfigPaths.get_claude_providers()
+            if not claude_providers.exists() and test_root.exists():
+                test_path = test_root / ".claude" / "providers.json"
+                if test_path.exists():
+                    claude_providers = test_path
         results["Claude Providers"] = {
             "path": str(claude_providers),
             "exists": claude_providers.exists(),
@@ -2038,7 +2676,13 @@ class ImportService:
         }
 
         # Codex配置 (TOML格式)
-        codex_config = Path.home() / ".codex" / "config.toml"
+        codex_config = ConfigPaths.get_import_path("codex")
+        if codex_config is None:
+            codex_config = Path.home() / ".codex" / "config.toml"
+            if not codex_config.exists() and test_root.exists():
+                test_path = test_root / ".codex" / "config.toml"
+                if test_path.exists():
+                    codex_config = test_path
         results["Codex Config"] = {
             "path": str(codex_config),
             "exists": codex_config.exists(),
@@ -2047,7 +2691,16 @@ class ImportService:
         }
 
         # Gemini配置
-        gemini_config = Path.home() / ".config" / "gemini" / "config.json"
+        gemini_dir = Path.home() / ".gemini"
+        gemini_config = ConfigPaths.get_import_path("gemini")
+        if gemini_config is None:
+            gemini_config = self._first_existing_path(
+                [gemini_dir / "config.json", gemini_dir / "settings.json"]
+            )
+            if not gemini_config.exists() and test_root.exists():
+                test_path = test_root / ".gemini" / "settings.json"
+                if test_path.exists():
+                    gemini_config = test_path
         results["Gemini Config"] = {
             "path": str(gemini_config),
             "exists": gemini_config.exists(),
@@ -2058,7 +2711,20 @@ class ImportService:
         }
 
         # cc-switch配置
-        ccswitch_config = Path.home() / ".cc-switch" / "config.json"
+        ccswitch_dir = Path.home() / ".cc-switch"
+        ccswitch_config = ConfigPaths.get_import_path("ccswitch")
+        if ccswitch_config is None:
+            ccswitch_config = self._first_existing_path(
+                [
+                    ccswitch_dir / "config.json.migrated",
+                    ccswitch_dir / "config.json.bak",
+                    ccswitch_dir / "config.json",
+                ]
+            )
+            if not ccswitch_config.exists() and test_root.exists():
+                test_path = test_root / ".cc-switch" / "config.json.migrated"
+                if test_path.exists():
+                    ccswitch_config = test_path
         results["CC-Switch Config"] = {
             "path": str(ccswitch_config),
             "exists": ccswitch_config.exists(),
@@ -2075,25 +2741,92 @@ class ImportService:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 content = f.read()
-            result = {}
-            current_section = result
-            for line in content.split("\n"):
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line.startswith("[") and line.endswith("]"):
-                    section = line[1:-1]
-                    result[section] = {}
-                    current_section = result[section]
-                elif "=" in line:
-                    key, value = line.split("=", 1)
-                    key = key.strip()
-                    value = value.strip().strip('"').strip("'")
-                    current_section[key] = value
-            return result
+            return self._parse_toml_string(content)
         except Exception as e:
             print(f"TOML parse failed: {e}")
             return None
+
+    @staticmethod
+    def _extract_from_env(env: Dict[str, Any]) -> Dict[str, str]:
+        if not isinstance(env, dict):
+            return {}
+        api_key = env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_TOKEN")
+        base_url = env.get("ANTHROPIC_BASE_URL") or ""
+        default_model = env.get("ANTHROPIC_MODEL")
+        return {
+            "api_key": api_key or "",
+            "base_url": base_url or "",
+            "default_model": default_model or "",
+        }
+
+    @staticmethod
+    def _extract_provider_items(source_data: Any) -> List[Dict[str, Any]]:
+        if isinstance(source_data, list):
+            return [item for item in source_data if isinstance(item, dict)]
+        if isinstance(source_data, dict):
+            if "providers" in source_data and isinstance(
+                source_data["providers"], dict
+            ):
+                items = []
+                for item in source_data["providers"].values():
+                    if isinstance(item, dict):
+                        items.append(item)
+                return items
+            return [source_data]
+        return []
+
+    @staticmethod
+    def _collect_model_ids(*values: Any) -> List[str]:
+        model_ids: List[str] = []
+
+        def add_value(value: Any) -> None:
+            if value is None:
+                return
+            if isinstance(value, str):
+                cleaned = value.strip()
+                if cleaned:
+                    model_ids.append(cleaned)
+                return
+            if isinstance(value, list):
+                for item in value:
+                    add_value(item)
+                return
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    key_upper = str(key).upper()
+                    if "MODEL" in key_upper:
+                        add_value(item)
+                for key in (
+                    "model",
+                    "default_model",
+                    "defaultModel",
+                    "model_id",
+                    "modelId",
+                    "id",
+                    "name",
+                ):
+                    if key in value:
+                        add_value(value.get(key))
+                if "models" in value:
+                    add_value(value.get("models"))
+
+        for value in values:
+            add_value(value)
+
+        seen = set()
+        deduped: List[str] = []
+        for item in model_ids:
+            lowered = item.lower()
+            if lowered in {"opus", "sonnet", "haiku"}:
+                continue
+            if re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", lowered
+            ):
+                continue
+            if item not in seen:
+                seen.add(item)
+                deduped.append(item)
+        return deduped
 
     def convert_to_opencode(
         self, source_type: str, source_data: Dict
@@ -2103,85 +2836,308 @@ class ImportService:
             return None
 
         result = {"provider": {}, "permission": {}}
+        used_keys: set = set()
+
+        def add_provider(
+            key: str,
+            display_name: str,
+            npm: str,
+            api_key: str,
+            base_url: str,
+            require_v1: bool = False,
+            model_ids: Optional[List[str]] = None,
+        ) -> None:
+            provider_key = self._unique_provider_key(key, used_keys)
+            normalized_url = self._normalize_base_url(base_url, require_v1)
+            models: Dict[str, Any] = {}
+            if model_ids:
+                for model_id in model_ids:
+                    if model_id and isinstance(model_id, str):
+                        models[model_id] = {"name": model_id}
+            result["provider"][provider_key] = {
+                "npm": npm,
+                "name": display_name,
+                "options": {
+                    "apiKey": api_key or "",
+                    "baseURL": normalized_url,
+                },
+                "models": models,
+            }
 
         if source_type == "claude":
-            if "apiKey" in source_data:
-                result["provider"]["anthropic"] = {
-                    "npm": "@ai-sdk/anthropic",
-                    "name": "Anthropic (Claude)",
-                    "options": {"apiKey": source_data["apiKey"]},
-                    "models": {},
-                }
+            env = source_data.get("env", source_data)
+            extracted = self._extract_from_env(env)
+            model_ids = self._collect_model_ids(
+                extracted.get("default_model"),
+                source_data.get("model"),
+                source_data.get("default_model"),
+                source_data.get("defaultModel"),
+            )
+            if extracted["api_key"] or extracted["base_url"] or model_ids:
+                add_provider(
+                    "anthropic",
+                    "Anthropic (Claude)",
+                    "@ai-sdk/anthropic",
+                    extracted["api_key"],
+                    extracted["base_url"],
+                    require_v1=False,
+                    model_ids=model_ids or None,
+                )
             if "permissions" in source_data:
                 for tool, perm in source_data.get("permissions", {}).items():
                     result["permission"][tool] = perm
 
         elif source_type == "claude_providers":
-            for provider_name, provider_data in source_data.items():
-                if isinstance(provider_data, dict):
-                    result["provider"][provider_name] = {
-                        "npm": "@ai-sdk/anthropic",
-                        "name": provider_data.get("name", provider_name),
-                        "options": {
-                            "baseURL": provider_data.get("baseUrl", ""),
-                            "apiKey": provider_data.get("apiKey", ""),
-                        },
-                        "models": {},
-                    }
+            for provider_data in self._extract_provider_items(source_data):
+                display_name = provider_data.get("name") or provider_data.get("id")
+                display_name = display_name or "Anthropic (Claude)"
+                provider_key = self._sanitize_provider_key(display_name)
+                api_key = provider_data.get("api_key") or provider_data.get(
+                    "auth_token"
+                )
+                base_url = provider_data.get("base_url") or ""
+                model_ids = self._collect_model_ids(
+                    provider_data.get("models"),
+                    provider_data.get("model"),
+                    provider_data.get("default_model"),
+                    provider_data.get("defaultModel"),
+                )
+                add_provider(
+                    provider_key,
+                    display_name,
+                    "@ai-sdk/anthropic",
+                    api_key or "",
+                    base_url,
+                    require_v1=False,
+                    model_ids=model_ids or None,
+                )
 
         elif source_type == "codex":
-            if "api" in source_data:
-                api_config = source_data["api"]
-                result["provider"]["openai"] = {
-                    "npm": "@ai-sdk/openai",
-                    "name": "OpenAI (Codex)",
-                    "options": {
-                        "baseURL": api_config.get("base_url", ""),
-                        "apiKey": api_config.get("api_key", ""),
-                    },
-                    "models": {},
-                }
+            model_providers = source_data.get("model_providers", {})
+            provider_name = source_data.get("model_provider")
+            provider_config = None
+            if provider_name and isinstance(model_providers, dict):
+                provider_config = model_providers.get(provider_name)
+            if provider_config is None and isinstance(model_providers, dict):
+                provider_name = next(iter(model_providers.keys()), None)
+                provider_config = (
+                    model_providers.get(provider_name) if provider_name else None
+                )
+            model_ids = self._collect_model_ids(
+                source_data.get("model"),
+                source_data.get("default_model"),
+                source_data.get("defaultModel"),
+                provider_config,
+            )
+            if isinstance(provider_config, dict):
+                display_name = provider_config.get("name") or provider_name or "Codex"
+                provider_key = self._sanitize_provider_key(
+                    provider_name or display_name
+                )
+                base_url = provider_config.get("base_url", "")
+                add_provider(
+                    provider_key,
+                    display_name,
+                    "@ai-sdk/openai",
+                    "",
+                    base_url,
+                    require_v1=True,
+                    model_ids=model_ids or None,
+                )
+            elif model_ids:
+                add_provider(
+                    "codex",
+                    "Codex",
+                    "@ai-sdk/openai",
+                    "",
+                    "",
+                    require_v1=True,
+                    model_ids=model_ids,
+                )
 
         elif source_type == "gemini":
-            if "apiKey" in source_data:
-                result["provider"]["google"] = {
-                    "npm": "@ai-sdk/google",
-                    "name": "Google (Gemini)",
-                    "options": {"apiKey": source_data["apiKey"]},
-                    "models": {},
-                }
+            env = source_data.get("env", source_data)
+            api_key = ""
+            if isinstance(env, dict):
+                api_key = env.get("GOOGLE_API_KEY") or env.get("GEMINI_API_KEY")
+            api_key = api_key or source_data.get("apiKey") or ""
+            base_url = source_data.get("baseURL") or source_data.get("base_url") or ""
+            if api_key or base_url:
+                add_provider(
+                    "google",
+                    "Google (Gemini)",
+                    "@ai-sdk/google",
+                    api_key,
+                    base_url,
+                    require_v1=False,
+                )
 
         elif source_type == "ccswitch":
-            for provider_name, provider_data in source_data.get(
-                "providers", {}
-            ).items():
-                if isinstance(provider_data, dict):
-                    sdk = "@ai-sdk/openai"
-                    if (
-                        "anthropic" in provider_name.lower()
-                        or "claude" in provider_name.lower()
-                    ):
-                        sdk = "@ai-sdk/anthropic"
-                    elif (
-                        "google" in provider_name.lower()
-                        or "gemini" in provider_name.lower()
-                    ):
-                        sdk = "@ai-sdk/google"
-                    result["provider"][provider_name] = {
-                        "npm": sdk,
-                        "name": provider_data.get("name", provider_name),
-                        "options": {
-                            "baseURL": provider_data.get(
-                                "baseUrl", provider_data.get("base_url", "")
-                            ),
-                            "apiKey": provider_data.get(
-                                "apiKey", provider_data.get("api_key", "")
-                            ),
-                        },
-                        "models": {},
-                    }
+            claude = source_data.get("claude", {})
+            claude_providers = claude.get("providers", {})
+            if isinstance(claude_providers, dict):
+                for provider_data in claude_providers.values():
+                    if not isinstance(provider_data, dict):
+                        continue
+                    settings = provider_data.get("settingsConfig", {})
+                    extracted = self._extract_from_env(settings.get("env", {}))
+                    model_ids = self._collect_model_ids(
+                        settings.get("env", {}),
+                        settings.get("config", {}),
+                        provider_data,
+                        claude,
+                    )
+                    if not (extracted["api_key"] or extracted["base_url"] or model_ids):
+                        continue
+                    display_name = provider_data.get("name", "Anthropic (Claude)")
+                    provider_key = self._sanitize_provider_key(display_name)
+                    add_provider(
+                        provider_key,
+                        display_name,
+                        "@ai-sdk/anthropic",
+                        extracted["api_key"],
+                        extracted["base_url"],
+                        require_v1=False,
+                        model_ids=model_ids or None,
+                    )
+
+            codex = source_data.get("codex", {})
+            codex_providers = codex.get("providers", {})
+            if isinstance(codex_providers, dict):
+                for provider_data in codex_providers.values():
+                    if not isinstance(provider_data, dict):
+                        continue
+                    settings = provider_data.get("settingsConfig", {})
+                    auth = settings.get("auth", {})
+                    config = settings.get("config", {})
+                    if isinstance(config, str):
+                        config = self._parse_toml_string(config)
+                    api_key = ""
+                    if isinstance(auth, dict):
+                        api_key = auth.get("OPENAI_API_KEY") or ""
+                    base_url = ""
+                    if isinstance(config, dict):
+                        base_url = config.get("base_url", "")
+                    model_ids = self._collect_model_ids(
+                        auth,
+                        config,
+                        settings.get("env", {}),
+                        provider_data,
+                        codex,
+                    )
+                    if not (api_key or base_url or model_ids):
+                        continue
+                    display_name = provider_data.get("name", "Codex")
+                    provider_key = self._sanitize_provider_key(display_name)
+                    require_v1 = True
+                    if "/v1/" in base_url or base_url.rstrip("/").endswith("/v1"):
+                        require_v1 = False
+                    add_provider(
+                        provider_key,
+                        display_name,
+                        "@ai-sdk/openai",
+                        api_key,
+                        base_url,
+                        require_v1=require_v1,
+                        model_ids=model_ids or None,
+                    )
 
         return result
+
+
+class ModelFetchService(QObject):
+    """模型列表获取服务"""
+
+    fetch_finished = pyqtSignal(str, list, str)  # provider_name, model_ids, error
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def fetch_async(self, provider_name: str, options: Dict[str, Any]) -> None:
+        thread = threading.Thread(
+            target=self._fetch_models, args=(provider_name, options), daemon=True
+        )
+        thread.start()
+
+    def _build_urls(self, options: Dict[str, Any]) -> List[str]:
+        base_url = (options.get("baseURL") or "").strip()
+        model_list_url = (options.get("modelListUrl") or "").strip()
+        urls: List[str] = []
+
+        if model_list_url:
+            if model_list_url.startswith("http://") or model_list_url.startswith(
+                "https://"
+            ):
+                urls.append(model_list_url)
+            elif base_url:
+                urls.append(base_url.rstrip("/") + "/" + model_list_url.lstrip("/"))
+            return urls
+
+        if not base_url:
+            return urls
+
+        if base_url.rstrip("/").endswith("/v1"):
+            urls.append(base_url.rstrip("/") + "/models")
+            return urls
+
+        urls.append(base_url.rstrip("/") + "/v1/models")
+        urls.append(base_url.rstrip("/") + "/models")
+        return urls
+
+    def _extract_model_ids(self, data: Any) -> List[str]:
+        model_ids: List[str] = []
+        if isinstance(data, dict):
+            items = None
+            if isinstance(data.get("data"), list):
+                items = data.get("data")
+            elif isinstance(data.get("models"), list):
+                items = data.get("models")
+            elif isinstance(data.get("result"), list):
+                items = data.get("result")
+            if items is not None:
+                for item in items:
+                    if isinstance(item, dict):
+                        model_id = item.get("id") or item.get("name") or ""
+                        if model_id:
+                            model_ids.append(str(model_id))
+                    elif isinstance(item, str):
+                        model_ids.append(item)
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    model_id = item.get("id") or item.get("name") or ""
+                    if model_id:
+                        model_ids.append(str(model_id))
+                elif isinstance(item, str):
+                    model_ids.append(item)
+        return model_ids
+
+    def _fetch_models(self, provider_name: str, options: Dict[str, Any]) -> None:
+        urls = self._build_urls(options)
+        if not urls:
+            self.fetch_finished.emit(provider_name, [], "未配置模型列表地址")
+            return
+
+        api_key = (options.get("apiKey") or "").strip()
+        headers = {"User-Agent": "OpenCode-Config-Manager"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        last_error = ""
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                model_ids = self._extract_model_ids(data)
+                if model_ids:
+                    self.fetch_finished.emit(provider_name, model_ids, "")
+                    return
+                last_error = "未返回可用模型列表"
+            except Exception as e:
+                last_error = str(e)
+
+        self.fetch_finished.emit(provider_name, [], last_error or "获取失败")
 
 
 class VersionChecker(QObject):
@@ -2371,18 +3327,16 @@ class BasePage(QWidget):
         super().__init__(parent)
         self.setObjectName(title.replace(" ", "_").lower())
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._init_ui(title)
-
-    def _init_ui(self, title: str):
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(36, 20, 36, 20)
-        self.layout.setSpacing(16)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(36, 20, 36, 20)
+        self._layout.setSpacing(16)
 
         # 页面标题
         self.title_label = TitleLabel(title, self)
-        self.layout.addWidget(self.title_label)
+        self._layout.addWidget(self.title_label)
+        self.setLayout(self._layout)
 
-    def add_card(self, title: str = None) -> SimpleCardWidget:
+    def add_card(self, title: Optional[str] = None) -> SimpleCardWidget:
         """添加一个卡片容器"""
         card = SimpleCardWidget(self)
         card_layout = QVBoxLayout(card)
@@ -2393,7 +3347,7 @@ class BasePage(QWidget):
             card_title = SubtitleLabel(title, card)
             card_layout.addWidget(card_title)
 
-        self.layout.addWidget(card)
+        self._layout.addWidget(card)
         return card
 
     def show_success(self, title: str, content: str):
@@ -2401,7 +3355,7 @@ class BasePage(QWidget):
         InfoBar.success(
             title=title,
             content=content,
-            orient=Qt.Horizontal,
+            orient=QtCore.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP,
             duration=3000,
@@ -2413,7 +3367,7 @@ class BasePage(QWidget):
         InfoBar.error(
             title=title,
             content=content,
-            orient=Qt.Horizontal,
+            orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP,
             duration=5000,
@@ -2425,7 +3379,7 @@ class BasePage(QWidget):
         InfoBar.warning(
             title=title,
             content=content,
-            orient=Qt.Horizontal,
+            orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP,
             duration=4000,
@@ -2455,6 +3409,12 @@ class HomePage(BasePage):
         # ===== 关于卡片 (无标题) =====
         about_card = self.add_card()
         about_layout = about_card.layout()
+        if about_layout is None:
+            about_layout = QVBoxLayout(about_card)
+
+        # 顶部布局：左侧 Logo，右侧标题与按钮
+        hero_layout = QHBoxLayout()
+        hero_layout.setSpacing(16)
 
         # Logo 图片 - 保持原始比例，设置固定尺寸确保完整显示
         logo_path = get_resource_path("assets/logo1.png")
@@ -2463,7 +3423,7 @@ class HomePage(BasePage):
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path))
             # 缩放到高度 100，保持比例 (原始 383x146，缩放后约 262x100)
-            scaled_pixmap = pixmap.scaledToHeight(100, Qt.SmoothTransformation)
+            scaled_pixmap = pixmap.scaledToHeight(100, Qt.SmoothTransformation)  # type: ignore[attr-defined]
             logo_label.setPixmap(scaled_pixmap)
             # 设置固定尺寸确保完整显示
             logo_label.setFixedSize(scaled_pixmap.width(), scaled_pixmap.height())
@@ -2472,20 +3432,16 @@ class HomePage(BasePage):
             logo_label.setStyleSheet(
                 "font-size: 36px; font-weight: bold; color: #3498DB;"
             )
-        about_layout.addWidget(logo_label)
+        hero_layout.addWidget(logo_label)
 
-        # OCCM 和全称放同一行
-        title_layout = QHBoxLayout()
-        occm_label = TitleLabel("OCCM", about_card)
-        occm_label.setStyleSheet("font-size: 32px; font-weight: bold;")
-        title_layout.addWidget(occm_label)
-        title_layout.addWidget(
-            SubtitleLabel(f"OpenCode Config Manager v{APP_VERSION}", about_card)
-        )
-        title_layout.addStretch()
-        about_layout.addLayout(title_layout)
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(6)
 
-        about_layout.addWidget(
+        title_label = TitleLabel(f"OpenCode Config Manager v{APP_VERSION}", about_card)
+        title_label.setStyleSheet("font-size: 28px; font-weight: bold;")
+        right_layout.addWidget(title_label)
+
+        right_layout.addWidget(
             BodyLabel(
                 "一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件",
                 about_card,
@@ -2503,7 +3459,11 @@ class HomePage(BasePage):
         link_layout.addWidget(author_btn)
 
         link_layout.addStretch()
-        about_layout.addLayout(link_layout)
+        right_layout.addLayout(link_layout)
+
+        right_layout.addStretch()
+        hero_layout.addLayout(right_layout, 1)
+        about_layout.addLayout(hero_layout)
 
         # ===== 配置文件路径卡片 =====
         paths_card = self.add_card("配置文件路径")
@@ -2644,10 +3604,65 @@ class HomePage(BasePage):
         backup_btn.clicked.connect(self._on_backup)
         btn_layout.addWidget(backup_btn)
 
+        self.validate_btn = PushButton(FIF.SEARCH, "配置检测", action_card)
+        self.validate_btn.clicked.connect(self._on_validate_config)
+        btn_layout.addWidget(self.validate_btn)
+
         btn_layout.addStretch()
         action_layout.addLayout(btn_layout)
 
-        self.layout.addStretch()
+        # ===== 配置检测详情卡片 =====
+        validate_card = self.add_card("配置检测详情")
+        validate_layout = validate_card.layout()
+        self.validation_details = PlainTextEdit(validate_card)
+        self.validation_details.setReadOnly(True)
+        self.validation_details.setPlaceholderText("尚未执行配置检测")
+        self.validation_details.setMinimumHeight(160)
+        validate_layout.addWidget(self.validation_details)
+
+        self._layout.addStretch()
+
+    def _format_validation_details(self, issues: List[Dict]) -> str:
+        if not issues:
+            return "✅ 未发现配置问题"
+        lines = []
+        for index, issue in enumerate(issues, start=1):
+            level_label = "错误" if issue.get("level") == "error" else "警告"
+            path = issue.get("path", "")
+            message = issue.get("message", "")
+            lines.append(f"{index}. [{level_label}] {path} - {message}")
+        return "\n".join(lines)
+
+    def _on_validate_config(self):
+        """手动配置检测"""
+        oc_issues = ConfigValidator.validate_opencode_config(
+            self.main_window.opencode_config or {}
+        )
+        ohmy_issues = ConfigValidator.validate_ohmyopencode_config(
+            self.main_window.ohmyopencode_config or {}
+        )
+        issues = []
+        for issue in oc_issues:
+            issue_copy = dict(issue)
+            issue_copy["path"] = f"OpenCode.{issue_copy.get('path', '')}".rstrip(".")
+            issues.append(issue_copy)
+        for issue in ohmy_issues:
+            issue_copy = dict(issue)
+            issue_copy["path"] = f"OhMy.{issue_copy.get('path', '')}".rstrip(".")
+            issues.append(issue_copy)
+
+        errors = [i for i in issues if i.get("level") == "error"]
+        warnings = [i for i in issues if i.get("level") == "warning"]
+        if not issues:
+            self.show_success("检测完成", "未发现配置问题")
+        elif errors:
+            self.show_error(
+                "检测完成", f"发现 {len(errors)} 个错误，{len(warnings)} 个警告"
+            )
+        else:
+            self.show_warning("检测完成", f"发现 {len(warnings)} 个警告")
+
+        self.validation_details.setPlainText(self._format_validation_details(issues))
 
     def _copy_to_clipboard(self, text: str):
         """复制文本到剪贴板"""
@@ -2813,16 +3828,24 @@ class HomePage(BasePage):
         if self.main_window.ohmyopencode_config is None:
             self.main_window.ohmyopencode_config = {}
 
+        self.main_window._refresh_file_hashes()
         self._load_stats()
         self.show_success("成功", "配置已重新加载")
 
     def _on_backup(self):
         """备份配置"""
         backup_manager = self.main_window.backup_manager
-        oc_path = backup_manager.backup(ConfigPaths.get_opencode_config(), tag="manual")
-        ohmy_path = backup_manager.backup(
-            ConfigPaths.get_ohmyopencode_config(), tag="manual"
+        oc_file_path = ConfigPaths.get_opencode_config()
+        ohmy_file_path = ConfigPaths.get_ohmyopencode_config()
+
+        oc_path = backup_manager.backup_data(
+            oc_file_path, self.main_window.opencode_config, tag="manual-memory"
         )
+        ohmy_path = backup_manager.backup_data(
+            ohmy_file_path, self.main_window.ohmyopencode_config, tag="manual-memory"
+        )
+        backup_manager.backup(oc_file_path, tag="manual-file")
+        backup_manager.backup(ohmy_file_path, tag="manual-file")
 
         if oc_path and ohmy_path:
             self.show_success("成功", "配置已备份")
@@ -2841,6 +3864,198 @@ class ProviderPage(BasePage):
         self._load_data()
         # 连接配置变更信号
         self.main_window.config_changed.connect(self._on_config_changed)
+
+    def _on_models_fetched(self, provider_name: str, model_ids: List[str], error: str):
+        if error:
+            self.show_warning("提示", f"获取失败: {error}")
+            return
+
+        if not model_ids:
+            self.show_warning("提示", "未获取到任何模型")
+            return
+
+        dialog = ModelSelectDialog(
+            self.main_window, provider_name, model_ids, parent=self
+        )
+        if not dialog.exec_():
+            return
+
+        selected = dialog.get_selected_model_ids()
+        if not selected:
+            self.show_warning("提示", "未选择任何模型")
+            return
+
+        batch_config = dialog.get_batch_config()
+        self._add_models(provider_name, selected, batch_config)
+
+    def _add_models(
+        self,
+        provider_name: str,
+        model_ids: List[str],
+        batch_config: Dict[str, Any] | None = None,
+    ) -> None:
+        config = self.main_window.opencode_config or {}
+        provider = config.get("provider", {}).get(provider_name)
+        if not isinstance(provider, dict):
+            self.show_warning("提示", "Provider 配置不存在")
+            return
+
+        models = provider.setdefault("models", {})
+        added = 0
+        for model_id in model_ids:
+            if model_id in models:
+                continue
+            category = self._resolve_model_category(model_id)
+            model_data = {"name": model_id}
+            if batch_config:
+                model_data.update(self._apply_batch_config(category, batch_config))
+            models[model_id] = model_data
+            added += 1
+
+        self.main_window.save_opencode_config()
+        self._load_data()
+        if added:
+            self.show_success("成功", f"已添加 {added} 个模型")
+        else:
+            self.show_warning("提示", "所选模型已存在")
+
+    def _resolve_model_category(self, model_id: str) -> str:
+        lower = model_id.lower()
+        if "claude" in lower:
+            return "Claude 系列"
+        if "gemini" in lower:
+            return "Gemini 系列"
+        if any(token in lower for token in ("gpt", "openai", "codex", "o1")):
+            return "OpenAI/Codex 系列"
+        return "其他模型"
+
+    def _get_preset_for_category(
+        self, category: str, preset_name: str
+    ) -> Dict[str, Any]:
+        custom = MODEL_PRESET_CUSTOM.get(category, {})
+        if preset_name in custom:
+            return copy.deepcopy(custom[preset_name])
+        presets = MODEL_PRESET_PACKS.get(category, {})
+        if preset_name in presets:
+            return copy.deepcopy(presets[preset_name])
+        return {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 64000, "output": 8192},
+            "options": {},
+            "variants": {},
+        }
+
+    def _apply_batch_config(
+        self, category: str, batch_config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        support = {
+            "attachment": True,
+            "modalities": True,
+            "limit": True,
+            "options": False,
+            "thinking": False,
+            "variants": False,
+        }
+        if category == "Claude 系列":
+            support["thinking"] = True
+            support["variants"] = True
+        elif category == "OpenAI/Codex 系列":
+            support["options"] = True
+            support["variants"] = True
+        elif category == "Gemini 系列":
+            support["thinking"] = True
+            support["variants"] = True
+
+        result: Dict[str, Any] = {}
+        if not batch_config:
+            return result
+
+        base_preset = self._get_preset_for_category(
+            category, MODEL_PRESET_DEFAULT.get(category, "基础")
+        )
+
+        for key in (
+            "attachment",
+            "modalities",
+            "limit",
+            "options",
+            "thinking",
+            "variants",
+        ):
+            config = batch_config.get(key)
+            if not config or not config.get("enabled"):
+                continue
+            if not support.get(key, False):
+                continue
+            if key == "attachment":
+                result["attachment"] = True
+                continue
+            if key == "modalities":
+                result["modalities"] = {"input": ["text", "image"], "output": ["text"]}
+                continue
+
+            if key == "limit":
+                value = config.get("value")
+                limit_map = {
+                    "4k": {"context": 64000, "output": 4096},
+                    "8k": {"context": 128000, "output": 8192},
+                    "16k": {"context": 200000, "output": 16384},
+                    "32k": {"context": 256000, "output": 32768},
+                    "64k": {"context": 256000, "output": 65536},
+                }
+                if value in limit_map:
+                    result["limit"] = limit_map[value]
+                continue
+            if key == "thinking":
+                value = config.get("value")
+                if category == "Claude 系列":
+                    result["options"] = {
+                        "thinking": {"type": "enabled", "budgetTokens": 64000}
+                    }
+                    thinking_map = {
+                        "8k": 8000,
+                        "16k": 16000,
+                        "32k": 32000,
+                        "64k": 64000,
+                    }
+                    if value in thinking_map:
+                        result["options"]["thinking"]["budgetTokens"] = thinking_map[
+                            value
+                        ]
+                elif category == "Gemini 系列":
+                    result["options"] = {"thinkingConfig": {"thinkingBudget": 32000}}
+                    thinking_map = {
+                        "8k": 8000,
+                        "16k": 16000,
+                        "32k": 32000,
+                        "64k": 64000,
+                    }
+                    if value in thinking_map:
+                        result["options"]["thinkingConfig"]["thinkingBudget"] = (
+                            thinking_map[value]
+                        )
+                continue
+            if key == "options":
+                value = config.get("value")
+                if value:
+                    result["options"] = {"reasoningEffort": value}
+                continue
+            if key == "variants":
+                value = config.get("value")
+                if value == "high/medium/low":
+                    result["variants"] = {
+                        "high": {"reasoningEffort": "high"},
+                        "medium": {"reasoningEffort": "medium"},
+                        "low": {"reasoningEffort": "low"},
+                    }
+                elif value == "high/low":
+                    result["variants"] = {
+                        "high": {"reasoningEffort": "high"},
+                        "low": {"reasoningEffort": "low"},
+                    }
+                continue
+        return result
 
     def _on_config_changed(self):
         """配置变更时刷新数据"""
@@ -2862,8 +4077,12 @@ class ProviderPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
+        self.fetch_models_btn = PushButton(FIF.SYNC, "拉取模型", self)
+        self.fetch_models_btn.clicked.connect(self._on_fetch_models)
+        toolbar.addWidget(self.fetch_models_btn)
+
         toolbar.addStretch()
-        self.layout.addLayout(toolbar)
+        self._layout.addLayout(toolbar)
 
         # Provider 列表
         self.table = TableWidget(self)
@@ -2884,7 +4103,8 @@ class ProviderPage(BasePage):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.layout.addWidget(self.table)
+        self.table.doubleClicked.connect(self._on_edit)
+        self._layout.addWidget(self.table)
 
     def _load_data(self):
         """加载 Provider 数据"""
@@ -2948,6 +4168,579 @@ class ProviderPage(BasePage):
                 self._load_data()
                 self.show_success("成功", f'Provider "{name}" 已删除')
 
+    def _on_fetch_models(self):
+        """拉取模型列表"""
+        row = self.table.currentRow()
+        if row < 0:
+            self.show_warning("提示", "请先选择一个 Provider")
+            return
+
+        provider_name = self.table.item(row, 0).text()
+        config = self.main_window.opencode_config or {}
+        provider = config.get("provider", {}).get(provider_name, {})
+        options = provider.get("options", {}) if isinstance(provider, dict) else {}
+        if not options.get("baseURL") and not options.get("modelListUrl"):
+            self.show_warning("提示", "未配置 baseURL 或模型列表地址")
+            return
+
+        self._fetch_models_for_provider(provider_name, options)
+
+    def _fetch_models_for_provider(self, provider_name: str, options: Dict[str, Any]):
+        if not hasattr(self, "_model_fetch_service"):
+            self._model_fetch_service = ModelFetchService(self)
+            self._model_fetch_service.fetch_finished.connect(self._on_models_fetched)
+
+        self.show_warning("提示", f"正在获取 {provider_name} 模型列表...")
+        self._model_fetch_service.fetch_async(provider_name, options)
+
+
+class ModelPresetCustomDialog(BaseDialog):
+    """模型配置包自定义弹窗"""
+
+    def __init__(self, category: str, preset_name: str = "", parent=None):
+        super().__init__(parent)
+        self.category = category
+        self.preset_name = preset_name
+        self._preset: Dict[str, Any] = {}
+
+        self.setWindowTitle("自定义配置包")
+        self.setMinimumSize(560, 420)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        layout.addWidget(TitleLabel("自定义配置包", self))
+        layout.addWidget(BodyLabel(f"分类: {self.category}", self))
+
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(BodyLabel("名称:", self))
+        self.name_edit = LineEdit(self)
+        self.name_edit.setPlaceholderText("如: 我的高思考")
+        if self.preset_name:
+            self.name_edit.setText(self.preset_name)
+        name_layout.addWidget(self.name_edit)
+        layout.addLayout(name_layout)
+
+        layout.addWidget(
+            BodyLabel(
+                "配置 JSON（仅支持 options/limit/modalities/attachment/variants）:",
+                self,
+            )
+        )
+        self.config_edit = PlainTextEdit(self)
+        self.config_edit.setPlaceholderText("请输入 JSON")
+        self.config_edit.setPlainText(
+            json.dumps(
+                {
+                    "attachment": False,
+                    "modalities": {"input": ["text"], "output": ["text"]},
+                    "limit": {"context": 200000, "output": 16000},
+                    "options": {},
+                    "variants": {},
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        layout.addWidget(self.config_edit, 1)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self.cancel_btn)
+
+        self.save_btn = PrimaryPushButton("保存", self)
+        self.save_btn.clicked.connect(self._on_save)
+        btn_layout.addWidget(self.save_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _on_save(self):
+        name = self.name_edit.text().strip()
+        if not name:
+            InfoBar.error("错误", "请输入配置包名称", parent=self)
+            return
+
+        try:
+            data = json.loads(self.config_edit.toPlainText().strip() or "{}")
+        except json.JSONDecodeError as e:
+            InfoBar.error("错误", f"JSON 格式错误: {e}", parent=self)
+            return
+
+        allowed_keys = {"options", "limit", "modalities", "attachment", "variants"}
+        filtered = {k: data.get(k) for k in allowed_keys if k in data}
+        if not filtered:
+            InfoBar.error("错误", "配置包内容为空或无可用字段", parent=self)
+            return
+
+        self._preset = filtered
+        self.preset_name = name
+        self.accept()
+
+    def get_preset(self) -> Tuple[str, Dict[str, Any]]:
+        return self.preset_name, self._preset
+
+
+class ModelSelectDialog(BaseDialog):
+    """模型选择对话框"""
+
+    def __init__(
+        self, main_window, provider_name: str, model_ids: List[str], parent=None
+    ):
+        super().__init__(parent)
+        self.main_window = main_window
+        self.provider_name = provider_name
+        self.model_ids = list(dict.fromkeys(model_ids or []))
+        self._selected: List[str] = []
+        self._items = []
+        self._row_widgets: Dict[str, Dict[str, Any]] = {}
+        self._visible_model_ids: List[str] = []
+        self._bulk_controls: Dict[str, Dict[str, Any]] = {}
+        self._batch_config: Dict[str, Any] = {}
+
+        self.setWindowTitle("模型选择")
+        self.setMinimumSize(900, 560)
+        self._setup_ui()
+        self._load_categories()
+        self._refresh_models()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        layout.addWidget(TitleLabel("模型选择", self))
+        layout.addWidget(BodyLabel("已拉取模型列表，请选择要添加的模型", self))
+
+        filter_layout = QHBoxLayout()
+        filter_layout.setSpacing(8)
+
+        filter_layout.addWidget(BodyLabel("分类方式:", self))
+        self.group_mode_combo = ComboBox(self)
+        self.group_mode_combo.addItems(["厂商识别", "前缀分组", "首字母"])
+        self.group_mode_combo.currentTextChanged.connect(self._on_group_mode_changed)
+        filter_layout.addWidget(self.group_mode_combo)
+
+        filter_layout.addWidget(BodyLabel("筛选方式:", self))
+        self.match_mode_combo = ComboBox(self)
+        self.match_mode_combo.addItems(["包含", "前缀", "正则"])
+        self.match_mode_combo.currentTextChanged.connect(self._on_filter_changed)
+        filter_layout.addWidget(self.match_mode_combo)
+
+        self.keyword_edit = LineEdit(self)
+        self.keyword_edit.setPlaceholderText("输入关键词筛选")
+        self.keyword_edit.textChanged.connect(self._on_filter_changed)
+        filter_layout.addWidget(self.keyword_edit, 1)
+
+        self.clear_btn = PushButton("清空筛选", self)
+        self.clear_btn.clicked.connect(self._clear_filters)
+        filter_layout.addWidget(self.clear_btn)
+
+        layout.addLayout(filter_layout)
+
+        self.batch_layout = QHBoxLayout()
+        self.batch_layout.setSpacing(8)
+        self.batch_layout.addWidget(BodyLabel("批量配置:", self))
+        layout.addLayout(self.batch_layout)
+
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(12)
+
+        self.category_list = ListWidget(self)
+        self.category_list.setFixedWidth(200)
+        self.category_list.currentTextChanged.connect(self._on_category_list_changed)
+        content_layout.addWidget(self.category_list)
+
+        self.model_list = ListWidget(self)
+        self.model_list.setSpacing(6)
+        self.model_list.setUniformItemSizes(True)
+        self.model_list.setSelectionMode(QAbstractItemView.NoSelection)
+        content_layout.addWidget(self.model_list, 1)
+
+        layout.addLayout(content_layout, 1)
+
+        footer_layout = QHBoxLayout()
+        footer_layout.setSpacing(8)
+
+        self.select_all_check = CheckBox("全选", self)
+        self.select_all_check.stateChanged.connect(self._on_select_all_changed)
+        self.select_all_check.setTristate(False)
+        footer_layout.addWidget(self.select_all_check)
+
+        self.count_label = CaptionLabel("已选 0 / 共 0", self)
+        footer_layout.addWidget(self.count_label)
+
+        self.empty_label = CaptionLabel("暂无可添加模型", self)
+        self.empty_label.setVisible(False)
+        footer_layout.addWidget(self.empty_label)
+
+        footer_layout.addStretch()
+
+        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn.clicked.connect(self.reject)
+        footer_layout.addWidget(self.cancel_btn)
+
+        self.confirm_btn = PrimaryPushButton("添加所选", self)
+        self.confirm_btn.clicked.connect(self._on_confirm)
+        footer_layout.addWidget(self.confirm_btn)
+
+        layout.addLayout(footer_layout)
+
+    def _build_batch_controls(self):
+        self._batch_config = {}
+        self._bulk_controls = {}
+        while self.batch_layout.count() > 1:
+            item = self.batch_layout.takeAt(1)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+
+    def _load_categories(self):
+        self._rebuild_categories()
+        self._build_batch_controls()
+        self._add_batch_control("attachment", "附件", [])
+        self._add_batch_control("modalities", "图片", [])
+        self._add_batch_control("limit", "输出长度", ["4k", "8k", "16k", "32k", "64k"])
+        self._add_batch_control(
+            "options", "Options", ["fast", "medium", "high", "xhigh"]
+        )
+        self._add_batch_control("thinking", "Thinking", ["8k", "16k", "32k", "64k"])
+        self._add_batch_control("variants", "Variants", ["high/medium/low", "high/low"])
+
+    def _add_batch_control(
+        self,
+        key: str,
+        label: str,
+        choices: List[str],
+    ):
+        container = QWidget(self)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        checkbox = CheckBox(label, container)
+        checkbox.stateChanged.connect(
+            lambda state, k=key: self._on_batch_check_changed(k, state)
+        )
+        layout.addWidget(checkbox)
+
+        combo = None
+        if choices:
+            combo = ComboBox(container)
+            combo.addItems(choices)
+            combo.currentTextChanged.connect(
+                lambda text, k=key: self._on_batch_combo_changed(k, text)
+            )
+            metrics = QFontMetrics(combo.font())
+            max_text_width = max(metrics.horizontalAdvance(text) for text in choices)
+            combo.setMinimumWidth(max_text_width + 18)
+            layout.addWidget(combo)
+
+        self.batch_layout.addWidget(container)
+        self._bulk_controls[key] = {
+            "container": container,
+            "checkbox": checkbox,
+            "combo": combo,
+        }
+        self._batch_config[key] = {"enabled": False, "value": None}
+
+    def _on_batch_check_changed(self, key: str, state: int):
+        config = self._batch_config.get(key)
+        if config is None:
+            return
+        config["enabled"] = state == Qt.Checked
+
+    def _on_batch_combo_changed(self, key: str, text: str):
+        config = self._batch_config.get(key)
+        if config is None:
+            return
+        config["value"] = text
+
+    def _on_group_mode_changed(self):
+        self._rebuild_categories()
+        self._refresh_models()
+
+    def _on_category_list_changed(self, text: str):
+        self._refresh_models()
+        self._update_batch_controls()
+
+    def _on_filter_changed(self):
+        self._refresh_models()
+
+    def _clear_filters(self):
+        self.group_mode_combo.setCurrentIndex(0)
+        self.match_mode_combo.setCurrentIndex(0)
+        self.keyword_edit.clear()
+
+    def _rebuild_categories(self):
+        self.category_list.blockSignals(True)
+        self.category_list.clear()
+        self.category_list.addItem("全部")
+
+        groups = self._group_models()
+        for group in sorted(groups.keys(), key=str.lower):
+            if group != "全部":
+                self.category_list.addItem(group)
+
+        self.category_list.setCurrentRow(0)
+        self.category_list.blockSignals(False)
+
+    def _group_models(self) -> Dict[str, List[str]]:
+        mode = self.group_mode_combo.currentText()
+        groups: Dict[str, List[str]] = {}
+        for model_id in self.model_ids:
+            key = self._get_group_key(model_id, mode)
+            groups.setdefault(key, []).append(model_id)
+        return groups
+
+    def _get_group_key(self, model_id: str, mode: str) -> str:
+        lower = model_id.lower()
+        if mode == "前缀分组":
+            if "-" in model_id:
+                return model_id.split("-", 1)[0]
+            if "/" in model_id:
+                return model_id.split("/", 1)[0]
+            return model_id[:1].upper() if model_id else "其他"
+        if mode == "首字母":
+            return model_id[:1].upper() if model_id else "其他"
+        # 厂商识别
+        if "claude" in lower:
+            return "Claude 系列"
+        if "gemini" in lower:
+            return "Gemini 系列"
+        if any(token in lower for token in ("gpt", "openai", "codex", "o1")):
+            return "OpenAI/Codex 系列"
+        return "其他模型"
+
+    def _resolve_category_for_preset(self, model_id: str) -> str:
+        return self._get_group_key(model_id, "厂商识别")
+
+    def _refresh_preset_combo(self):
+        return
+
+    def _get_preset_names(self, category: str) -> List[str]:
+        names = list(MODEL_PRESET_PACKS.get(category, {}).keys())
+        names += list(MODEL_PRESET_CUSTOM.get(category, {}).keys())
+        if not names:
+            names.append("基础")
+        return names
+
+    def _get_default_preset_for_category(self, category: str) -> Dict[str, Any]:
+        preset_name = MODEL_PRESET_DEFAULT.get(category, "基础")
+        return self._get_preset(category, preset_name)
+
+    def _get_bulk_category(self) -> str:
+        if not self._visible_model_ids:
+            return "其他模型"
+        return self._resolve_category_for_preset(self._visible_model_ids[0])
+
+    def _get_category_bulk_support(self, category: str) -> Dict[str, bool]:
+        support = {
+            "attachment": True,
+            "modalities": True,
+            "limit": True,
+            "options": False,
+            "thinking": False,
+            "variants": False,
+        }
+        if category == "Claude 系列":
+            support["thinking"] = True
+            support["variants"] = True
+        elif category == "OpenAI/Codex 系列":
+            support["options"] = True
+            support["variants"] = True
+        elif category == "Gemini 系列":
+            support["thinking"] = True
+            support["variants"] = True
+        return support
+
+    def _update_batch_controls(self):
+        if not self._bulk_controls:
+            return
+        category = self._get_bulk_category()
+        support = self._get_category_bulk_support(category)
+        for key, meta in self._bulk_controls.items():
+            checkbox = meta.get("checkbox")
+            combo = meta.get("combo")
+            enabled = support.get(key, False)
+            if checkbox is not None:
+                checkbox.setEnabled(enabled)
+                if not enabled:
+                    checkbox.setChecked(False)
+                    config = self._batch_config.get(key)
+                    if config is not None:
+                        config["enabled"] = False
+            if combo is not None:
+                combo.setEnabled(enabled)
+
+    def _get_preset(self, category: str, preset_name: str) -> Dict[str, Any]:
+        if preset_name in MODEL_PRESET_CUSTOM.get(category, {}):
+            return MODEL_PRESET_CUSTOM[category][preset_name]
+        presets = MODEL_PRESET_PACKS.get(category, {})
+        if preset_name in presets:
+            return presets[preset_name]
+        return {
+            "attachment": False,
+            "modalities": {"input": ["text"], "output": ["text"]},
+            "limit": {"context": 64000, "output": 8192},
+            "options": {},
+            "variants": {},
+        }
+
+    def _on_model_check_changed(self, model_id: str, state: int):
+        if state == Qt.Checked:
+            if model_id not in self._selected:
+                self._selected.append(model_id)
+        else:
+            if model_id in self._selected:
+                self._selected.remove(model_id)
+        self._update_count_label()
+        self._sync_select_all_state()
+
+    def _toggle_model_check(self, model_id: str):
+        row = self._row_widgets.get(model_id)
+        if not row:
+            return
+        checkbox = row.get("checkbox")
+        if checkbox is None:
+            return
+        checkbox.setChecked(not checkbox.isChecked())
+
+    def _build_model_row(self, model_id: str):
+        row_widget = QWidget(self.model_list)
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(6, 4, 6, 4)
+        row_layout.setSpacing(8)
+
+        check = CheckBox("", row_widget)
+        check.setChecked(model_id in self._selected)
+        check.stateChanged.connect(
+            lambda state, mid=model_id: self._on_model_check_changed(mid, state)
+        )
+        row_layout.addWidget(check)
+
+        name_label = BodyLabel(model_id, row_widget)
+        name_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        name_label.mousePressEvent = (
+            lambda event, mid=model_id: self._toggle_model_check(mid)
+        )
+        row_layout.addWidget(name_label, 1)
+
+        row_widget.mousePressEvent = (
+            lambda event, mid=model_id: self._toggle_model_check(mid)
+        )
+
+        item = QListWidgetItem(self.model_list)
+        item.setSizeHint(row_widget.sizeHint())
+        self.model_list.setItemWidget(item, row_widget)
+
+        self._row_widgets[model_id] = {
+            "item": item,
+            "checkbox": check,
+        }
+        self._items.append(model_id)
+
+    def _refresh_models(self):
+        self.model_list.blockSignals(True)
+        self.model_list.clear()
+        self._items = []
+        self._visible_model_ids = []
+        self._row_widgets = {}
+        self.model_list.setFocusPolicy(Qt.NoFocus)
+
+        group = (
+            self.category_list.currentItem().text()
+            if self.category_list.currentItem()
+            else "全部"
+        )
+        keyword = self.keyword_edit.text().strip()
+        match_mode = self.match_mode_combo.currentText()
+        pattern = keyword.lower()
+        regex = None
+        if pattern and match_mode == "正则":
+            try:
+                regex = re.compile(pattern, re.IGNORECASE)
+            except re.error:
+                regex = None
+
+        for model_id in self.model_ids:
+            if group != "全部":
+                if (
+                    self._get_group_key(model_id, self.group_mode_combo.currentText())
+                    != group
+                ):
+                    continue
+            if pattern:
+                if match_mode == "包含":
+                    if pattern not in model_id.lower():
+                        continue
+                elif match_mode == "前缀":
+                    if not model_id.lower().startswith(pattern):
+                        continue
+                elif match_mode == "正则":
+                    if not regex or not regex.search(model_id):
+                        continue
+            self._build_model_row(model_id)
+            self._visible_model_ids.append(model_id)
+
+        self.model_list.blockSignals(False)
+        self._update_count_label()
+        self._sync_select_all_state()
+        self._update_batch_controls()
+
+        if not self._items:
+            self.empty_label.setVisible(True)
+        else:
+            self.empty_label.setVisible(False)
+
+    def _on_select_all_changed(self, state):
+        if not self._items:
+            return
+        target_state = state == Qt.Checked
+        for model_id, row in self._row_widgets.items():
+            checkbox = row.get("checkbox")
+            if checkbox is None:
+                continue
+            checkbox.blockSignals(True)
+            checkbox.setChecked(target_state)
+            checkbox.blockSignals(False)
+            if target_state:
+                if model_id not in self._selected:
+                    self._selected.append(model_id)
+            else:
+                if model_id in self._selected:
+                    self._selected.remove(model_id)
+        self._update_count_label()
+
+    def _sync_select_all_state(self):
+        if not self._items:
+            self.select_all_check.setChecked(False)
+            return
+        checked = sum(1 for model_id in self._items if model_id in self._selected)
+        if checked == len(self._items):
+            self.select_all_check.setChecked(True)
+        else:
+            self.select_all_check.setChecked(False)
+
+    def _update_count_label(self):
+        total = len(self._items)
+        selected = len(self._selected)
+        self.count_label.setText(f"已选 {selected} / 共 {total}")
+
+    def _on_confirm(self):
+        selected = [model_id for model_id in self._items if model_id in self._selected]
+        self._selected = selected
+        self.accept()
+
+    def get_selected_model_ids(self) -> List[str]:
+        return list(self._selected)
+
+    def get_batch_config(self) -> Dict[str, Any]:
+        return dict(self._batch_config)
+
 
 class ProviderDialog(BaseDialog):
     """Provider 编辑对话框"""
@@ -2959,7 +4752,7 @@ class ProviderDialog(BaseDialog):
         self.is_edit = provider_name is not None
 
         self.setWindowTitle("编辑 Provider" if self.is_edit else "添加 Provider")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(520)
         self._setup_ui()
 
         if self.is_edit:
@@ -2971,10 +4764,13 @@ class ProviderDialog(BaseDialog):
 
         # Provider 名称
         name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("Provider 名称:", self))
+        name_label = BodyLabel("Provider 名称:", self)
+        name_label.setMinimumWidth(90)
+        name_layout.addWidget(name_label)
         self.name_edit = LineEdit(self)
         self.name_edit.setPlaceholderText("如: anthropic, openai, my-proxy")
         self.name_edit.setToolTip(get_tooltip("provider_name"))
+        self.name_edit.setMinimumHeight(36)
         if self.is_edit:
             self.name_edit.setEnabled(False)
         name_layout.addWidget(self.name_edit)
@@ -2982,44 +4778,67 @@ class ProviderDialog(BaseDialog):
 
         # 显示名称
         display_layout = QHBoxLayout()
-        display_layout.addWidget(BodyLabel("显示名称:", self))
+        display_label = BodyLabel("显示名称:", self)
+        display_label.setMinimumWidth(90)
+        display_layout.addWidget(display_label)
         self.display_edit = LineEdit(self)
-        self.display_edit.setPlaceholderText("如: Anthropic (Claude)")
+        self.display_edit.setPlaceholderText("如: Anthropic (Claude)、OpenAI 官方")
         self.display_edit.setToolTip(get_tooltip("provider_display"))
+        self.display_edit.setMinimumHeight(36)
         display_layout.addWidget(self.display_edit)
         layout.addLayout(display_layout)
 
-        # SDK 选择
+        # SDK
         sdk_layout = QHBoxLayout()
-        sdk_layout.addWidget(BodyLabel("SDK:", self))
+        sdk_label = BodyLabel("SDK:", self)
+        sdk_label.setMinimumWidth(90)
+        sdk_layout.addWidget(sdk_label)
         self.sdk_combo = ComboBox(self)
         self.sdk_combo.addItems(PRESET_SDKS)
         self.sdk_combo.setToolTip(get_tooltip("provider_sdk"))
+        self.sdk_combo.setMinimumHeight(36)
         sdk_layout.addWidget(self.sdk_combo)
         layout.addLayout(sdk_layout)
 
         # API 地址
         url_layout = QHBoxLayout()
-        url_layout.addWidget(BodyLabel("API 地址:", self))
+        url_label = BodyLabel("API 地址:", self)
+        url_label.setMinimumWidth(90)
+        url_layout.addWidget(url_label)
         self.url_edit = LineEdit(self)
-        self.url_edit.setPlaceholderText("留空使用默认地址")
+        self.url_edit.setPlaceholderText(
+            "如: https://api.openai.com/v1（留空使用默认）"
+        )
         self.url_edit.setToolTip(get_tooltip("provider_url"))
+        self.url_edit.setMinimumHeight(36)
         url_layout.addWidget(self.url_edit)
         layout.addLayout(url_layout)
 
         # API 密钥
         key_layout = QHBoxLayout()
-        key_layout.addWidget(BodyLabel("API 密钥:", self))
+        key_label = BodyLabel("API 密钥:", self)
+        key_label.setMinimumWidth(90)
+        key_layout.addWidget(key_label)
         self.key_edit = LineEdit(self)
-        self.key_edit.setPlaceholderText("支持环境变量: {env:API_KEY}")
+        self.key_edit.setPlaceholderText("支持环境变量: {env:OPENAI_API_KEY}")
         self.key_edit.setToolTip(get_tooltip("provider_apikey"))
-        self.key_edit.setEchoMode(LineEdit.Password)
+        self.key_edit.setMinimumHeight(36)
         key_layout.addWidget(self.key_edit)
-
-        self.show_key_btn = ToolButton(FIF.VIEW, self)
-        self.show_key_btn.clicked.connect(self._toggle_key_visibility)
-        key_layout.addWidget(self.show_key_btn)
         layout.addLayout(key_layout)
+
+        # 模型列表地址
+        model_list_layout = QHBoxLayout()
+        model_list_label = BodyLabel("模型列表地址:", self)
+        model_list_label.setMinimumWidth(90)
+        model_list_layout.addWidget(model_list_label)
+        self.model_list_url_edit = LineEdit(self)
+        self.model_list_url_edit.setPlaceholderText(
+            "如: https://api.example.com/v1/models（可选）"
+        )
+        self.model_list_url_edit.setToolTip(get_tooltip("provider_model_list_url"))
+        self.model_list_url_edit.setMinimumHeight(36)
+        model_list_layout.addWidget(self.model_list_url_edit)
+        layout.addLayout(model_list_layout)
 
         # 按钮
         btn_layout = QHBoxLayout()
@@ -3035,28 +4854,18 @@ class ProviderDialog(BaseDialog):
 
         layout.addLayout(btn_layout)
 
-    def _toggle_key_visibility(self):
-        if self.key_edit.echoMode() == LineEdit.Password:
-            self.key_edit.setEchoMode(LineEdit.Normal)
-            self.show_key_btn.setIcon(FIF.HIDE)
-        else:
-            self.key_edit.setEchoMode(LineEdit.Password)
-            self.show_key_btn.setIcon(FIF.VIEW)
-
     def _load_provider_data(self):
         config = self.main_window.opencode_config or {}
         provider = config.get("provider", {}).get(self.provider_name, {})
 
         self.name_edit.setText(self.provider_name)
         self.display_edit.setText(provider.get("name", ""))
+        self.sdk_combo.setCurrentText(provider.get("npm", ""))
 
-        sdk = provider.get("npm", "")
-        if sdk in PRESET_SDKS:
-            self.sdk_combo.setCurrentText(sdk)
-
-        options = provider.get("options", {})
+        options = provider.get("options", {}) if isinstance(provider, dict) else {}
         self.url_edit.setText(options.get("baseURL", ""))
         self.key_edit.setText(options.get("apiKey", ""))
+        self.model_list_url_edit.setText(options.get("modelListUrl", ""))
 
     def _on_save(self):
         name = self.name_edit.text().strip()
@@ -3072,26 +4881,50 @@ class ProviderDialog(BaseDialog):
         if "provider" not in config:
             config["provider"] = {}
 
-        # 检查名称冲突
         if not self.is_edit and name in config["provider"]:
             InfoBar.error("错误", f'Provider "{name}" 已存在', parent=self)
             return
 
-        # 保存数据
         provider_data = config["provider"].get(name, {"models": {}})
         provider_data["npm"] = self.sdk_combo.currentText()
         provider_data["name"] = self.display_edit.text().strip()
         provider_data["options"] = {
             "baseURL": self.url_edit.text().strip(),
             "apiKey": self.key_edit.text().strip(),
+            "modelListUrl": self.model_list_url_edit.text().strip(),
         }
 
         config["provider"][name] = provider_data
         self.main_window.save_opencode_config()
+
+        options = provider_data.get("options", {})
+        if options.get("baseURL") or options.get("modelListUrl"):
+            if not hasattr(self.main_window, "_model_fetch_service"):
+                self.main_window._model_fetch_service = ModelFetchService(
+                    self.main_window
+                )
+
+            service = self.main_window._model_fetch_service
+            if hasattr(self.main_window, "provider_page") and not getattr(
+                service, "_provider_page_connected", False
+            ):
+                service.fetch_finished.connect(
+                    self.main_window.provider_page._on_models_fetched
+                )
+                service._provider_page_connected = True
+
+            service.fetch_async(name, options)
+        else:
+            InfoBar.warning(
+                "提示", "未配置 baseURL 或模型列表地址，跳过自动拉取", parent=self
+            )
+
         self.accept()
 
 
 # ==================== Model 页面 ====================
+
+
 class ModelPage(BasePage):
     """Model 管理页面"""
 
@@ -3122,10 +4955,12 @@ class ModelPage(BasePage):
         self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
         provider_layout.addWidget(self.provider_combo)
         provider_layout.addStretch()
-        self.layout.addLayout(provider_layout)
+        self._layout.addLayout(provider_layout)
 
         # 工具栏
         toolbar = QHBoxLayout()
+
+        self._bulk_models_owner = "model"
 
         self.add_btn = PrimaryPushButton(FIF.ADD, "添加模型", self)
         self.add_btn.clicked.connect(self._on_add)
@@ -3143,11 +4978,18 @@ class ModelPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
-        toolbar.addStretch()
-        self.layout.addLayout(toolbar)
+        self.bulk_model_label = BodyLabel("批量模型:", self)
+        toolbar.addWidget(self.bulk_model_label)
+        self.bulk_model_combo = ComboBox(self)
+        self.bulk_model_combo.setMinimumWidth(220)
+        toolbar.addWidget(self.bulk_model_combo)
 
-        # Model 列表
+        toolbar.addStretch()
+        self._layout.addLayout(toolbar)
+
+        # Agent 列表
         self.table = TableWidget(self)
+
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(
             ["模型ID", "显示名称", "上下文", "输出", "附件"]
@@ -3165,7 +5007,8 @@ class ModelPage(BasePage):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.layout.addWidget(self.table)
+        self.table.doubleClicked.connect(self._on_edit)
+        self._layout.addWidget(self.table)
 
     def _load_providers(self):
         """加载 Provider 列表"""
@@ -3938,6 +5781,24 @@ class ModelDialog(BaseDialog):
                 "output": output_modalities if output_modalities else ["text"],
             }
 
+        # 保存前进行配置校验，避免写入错误结构
+        temp_provider = dict(provider)
+        temp_models = dict(temp_provider.get("models", {}))
+        temp_models[model_id] = model_data
+        temp_provider["models"] = temp_models
+        temp_config = dict(config)
+        temp_providers = dict(temp_config.get("provider", {}))
+        temp_providers[self.provider_name] = temp_provider
+        temp_config["provider"] = temp_providers
+        issues = ConfigValidator.validate_opencode_config(temp_config)
+        errors = [i for i in issues if i["level"] == "error"]
+        if errors:
+            msg = "\n".join(f"• {e['message']}" for e in errors[:8])
+            if len(errors) > 8:
+                msg += f"\n... 还有 {len(errors) - 8} 个错误"
+            InfoBar.error("错误", f"配置校验失败：\n{msg}", parent=self)
+            return
+
         options = self.current_model_data.get("options", {})
         if options:
             model_data["options"] = options
@@ -4109,11 +5970,17 @@ class MCPPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
-        toolbar.addStretch()
-        self.layout.addLayout(toolbar)
+        self.awesome_btn = PushButton(FIF.LIBRARY, "awesome MCP 集合", self)
+        self.awesome_btn.setToolTip("打开 awesome MCP 集合仓库")
+        self.awesome_btn.clicked.connect(self._open_awesome_mcp)
+        toolbar.addWidget(self.awesome_btn)
 
-        # MCP 列表
+        toolbar.addStretch()
+        self._layout.addLayout(toolbar)
+
+        # Agent 列表
         self.table = TableWidget(self)
+
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(
             ["名称", "类型", "启用", "超时", "命令/URL"]
@@ -4131,7 +5998,8 @@ class MCPPage(BasePage):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.layout.addWidget(self.table)
+        self.table.doubleClicked.connect(self._on_edit)
+        self._layout.addWidget(self.table)
 
     def _load_data(self):
         self.table.setRowCount(0)
@@ -4161,6 +6029,9 @@ class MCPPage(BasePage):
                 )
             else:
                 self.table.setItem(row, 4, QTableWidgetItem(data.get("url", "")))
+
+    def _open_awesome_mcp(self):
+        webbrowser.open("https://github.com/punkpeye/awesome-mcp-servers")
 
     def _on_add(self, mcp_type: str):
         dialog = MCPDialog(self.main_window, mcp_type=mcp_type, parent=self)
@@ -4203,6 +6074,101 @@ class MCPPage(BasePage):
 class MCPDialog(BaseDialog):
     """MCP 编辑对话框"""
 
+    PRESET_MCP_TEMPLATES = {
+        "fetch": {
+            "name": "mcp-server-fetch",
+            "type": "local",
+            "command": ["uvx", "mcp-server-fetch"],
+            "environment": {},
+            "description": "抓取网页内容与资源的基础 MCP 服务器",
+            "tags": ["stdio", "http", "web"],
+            "homepage": "https://github.com/modelcontextprotocol/servers",
+            "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+        },
+        "time": {
+            "name": "@modelcontextprotocol/server-time",
+            "type": "local",
+            "command": ["npx", "-y", "@modelcontextprotocol/server-time"],
+            "environment": {},
+            "description": "提供时间相关工具的轻量 MCP 服务器",
+            "tags": ["stdio", "time", "utility"],
+            "homepage": "https://github.com/modelcontextprotocol/servers",
+            "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/time",
+        },
+        "memory": {
+            "name": "@modelcontextprotocol/server-memory",
+            "type": "local",
+            "command": ["npx", "-y", "@modelcontextprotocol/server-memory"],
+            "environment": {},
+            "description": "提供记忆图谱能力的 MCP 服务器",
+            "tags": ["stdio", "memory", "graph"],
+            "homepage": "https://github.com/modelcontextprotocol/servers",
+            "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+        },
+        "sequential-thinking": {
+            "name": "@modelcontextprotocol/server-sequential-thinking",
+            "type": "local",
+            "command": [
+                "npx",
+                "-y",
+                "@modelcontextprotocol/server-sequential-thinking",
+            ],
+            "environment": {},
+            "description": "结构化推理与分步思考的 MCP 服务器",
+            "tags": ["stdio", "thinking", "reasoning"],
+            "homepage": "https://github.com/modelcontextprotocol/servers",
+            "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+        },
+        "context7": {
+            "name": "@upstash/context7-mcp",
+            "type": "local",
+            "command": ["npx", "-y", "@upstash/context7-mcp"],
+            "environment": {},
+            "description": "提供最新文档检索的 Context7 MCP",
+            "tags": ["stdio", "docs", "search"],
+            "homepage": "https://context7.com",
+            "docs": "https://github.com/upstash/context7/blob/master/README.md",
+        },
+        "chrome-devtools": {
+            "name": "chrome-devtools-mcp",
+            "type": "local",
+            "command": ["npx", "-y", "chrome-devtools-mcp@latest"],
+            "environment": {},
+            "description": "连接 Chrome DevTools 的调试 MCP 服务器",
+            "tags": ["stdio", "browser", "devtools"],
+            "homepage": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+            "docs": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+        },
+        "open-web-mcp": {
+            "name": "open-web-mcp",
+            "type": "local",
+            "command": ["npx", "-y", "open-web-mcp"],
+            "environment": {},
+            "description": "开放网页搜索与打开页面的 MCP 服务器",
+            "tags": ["stdio", "web", "search"],
+            "homepage": "https://github.com/modelcontextprotocol/servers",
+            "docs": "https://github.com/modelcontextprotocol/servers",
+        },
+        "serena": {
+            "name": "serena",
+            "type": "local",
+            "command": [
+                "uvx",
+                "--from",
+                "git+https://github.com/oraios/serena",
+                "serena",
+                "start-mcp-server",
+                "--context",
+                "ide-assistant",
+            ],
+            "environment": {},
+            "description": "提供本地项目理解与指令执行的 Serena MCP",
+            "tags": ["stdio", "local", "automation"],
+            "homepage": "https://github.com/oraios/serena",
+            "docs": "https://oraios.github.io/serena/",
+        },
+    }
+
     def __init__(
         self, main_window, mcp_name: str = None, mcp_type: str = "local", parent=None
     ):
@@ -4220,10 +6186,34 @@ class MCPDialog(BaseDialog):
 
         if self.is_edit:
             self._load_mcp_data()
+        self._update_preview()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+
+        preset_layout = QHBoxLayout()
+        preset_layout.setSpacing(6)
+        preset_layout.addWidget(BodyLabel("常用 MCP 预设:", self))
+        self.preset_buttons = {}
+        current_type_label = "远程" if self.mcp_type == "remote" else "本地"
+        for preset_name in self.PRESET_MCP_TEMPLATES.keys():
+            preset_data = self._get_preset_data(preset_name)
+            preset_type = preset_data.get("type", "local")
+            preset_type_label = "远程" if preset_type == "remote" else "本地"
+            preset_btn = PushButton(preset_name, self)
+            preset_btn.clicked.connect(partial(self._on_preset_clicked, preset_name))
+            if preset_type != self.mcp_type:
+                preset_btn.setEnabled(False)
+                preset_btn.setToolTip(
+                    f"当前为{current_type_label} MCP，此预设为{preset_type_label}类型"
+                )
+            else:
+                preset_btn.setToolTip("点击应用预设")
+            preset_layout.addWidget(preset_btn)
+            self.preset_buttons[preset_name] = preset_btn
+        preset_layout.addStretch()
+        layout.addLayout(preset_layout)
 
         # MCP 名称
         name_layout = QHBoxLayout()
@@ -4289,6 +6279,88 @@ class MCPDialog(BaseDialog):
         timeout_layout.addWidget(self.timeout_spin)
         layout.addLayout(timeout_layout)
 
+        # 附加信息（默认收起）
+        self.extra_group = QGroupBox("附加信息（点击标题展开/收起）", self)
+        self.extra_group.setCheckable(True)
+        self.extra_group.setChecked(False)
+        self.extra_group.setToolTip("点击标题切换展开/收起")
+        self.extra_group.toggled.connect(self._on_extra_group_toggled)
+        group_layout = QVBoxLayout(self.extra_group)
+        group_layout.setSpacing(0)
+
+        self.extra_content = QWidget(self.extra_group)
+        extra_layout = QVBoxLayout(self.extra_content)
+        extra_layout.setSpacing(8)
+
+        desc_label = BodyLabel("描述:", self.extra_group)
+        self.desc_edit = TextEdit(self.extra_group)
+        self.desc_edit.setPlaceholderText("如: 提供网页抓取能力的 MCP 服务器")
+        self.desc_edit.setMaximumHeight(80)
+        extra_layout.addWidget(desc_label)
+        extra_layout.addWidget(self.desc_edit)
+
+        tags_layout = QHBoxLayout()
+        tags_layout.addWidget(BodyLabel("标签:", self.extra_group))
+        self.tags_edit = LineEdit(self.extra_group)
+        self.tags_edit.setPlaceholderText("如: stdio, web, search")
+        tags_layout.addWidget(self.tags_edit)
+        extra_layout.addLayout(tags_layout)
+
+        homepage_layout = QHBoxLayout()
+        homepage_layout.addWidget(BodyLabel("主页链接:", self.extra_group))
+        self.homepage_edit = LineEdit(self.extra_group)
+        self.homepage_edit.setPlaceholderText("https://github.com/xxx")
+        homepage_layout.addWidget(self.homepage_edit)
+        extra_layout.addLayout(homepage_layout)
+
+        docs_layout = QHBoxLayout()
+        docs_layout.addWidget(BodyLabel("文档链接:", self.extra_group))
+        self.docs_edit = LineEdit(self.extra_group)
+        self.docs_edit.setPlaceholderText("https://docs.example.com")
+        docs_layout.addWidget(self.docs_edit)
+        extra_layout.addLayout(docs_layout)
+
+        group_layout.addWidget(self.extra_content)
+        self.extra_content.setVisible(False)
+        layout.addWidget(self.extra_group)
+
+        # JSON 预览
+        self.preview_group = QGroupBox("完整 JSON 预览", self)
+        preview_layout = QVBoxLayout(self.preview_group)
+        preview_layout.setSpacing(8)
+
+        preview_header = QHBoxLayout()
+        preview_header.addWidget(BodyLabel("完整 MCP 配置预览", self.preview_group))
+        self.preview_wrap_check = CheckBox("包含 mcpServers 包装", self.preview_group)
+        self.preview_wrap_check.setChecked(False)
+        self.preview_wrap_check.stateChanged.connect(lambda: self._update_preview())
+        preview_header.addWidget(self.preview_wrap_check)
+        preview_header.addStretch()
+        self.format_btn = PushButton("格式化", self.preview_group)
+        self.format_btn.clicked.connect(self._on_format_preview)
+        preview_header.addWidget(self.format_btn)
+        preview_layout.addLayout(preview_header)
+
+        self.preview_edit = TextEdit(self.preview_group)
+        self.preview_edit.setReadOnly(True)
+        self.preview_edit.setMinimumHeight(180)
+        self.preview_edit.setLineWrapMode(QTextEdit.NoWrap)
+        self.preview_edit.setFont(QFont("Consolas", 10))
+        preview_layout.addWidget(self.preview_edit)
+        layout.addWidget(self.preview_group)
+
+        self._preview_highlighter = JsonTomlHighlighter(
+            self.preview_edit.document(), isDarkTheme()
+        )
+        self.preview_edit.cursorPositionChanged.connect(
+            lambda: apply_bracket_match_highlight(self.preview_edit, isDarkTheme())
+        )
+
+        self._bind_preview_signals()
+        if self.mcp_type == "remote":
+            self.preview_wrap_check.setChecked(True)
+        self._update_preview()
+
         # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -4302,6 +6374,50 @@ class MCPDialog(BaseDialog):
         btn_layout.addWidget(self.save_btn)
 
         layout.addLayout(btn_layout)
+
+    @classmethod
+    def register_preset(cls, name: str, data: Dict[str, Any]) -> None:
+        """注册或更新 MCP 预设模板"""
+        if not name or not isinstance(data, dict):
+            return
+        cls.PRESET_MCP_TEMPLATES[name] = data
+
+    def _get_preset_data(self, preset_key: str) -> Dict[str, Any]:
+        data = self.PRESET_MCP_TEMPLATES.get(preset_key, {})
+        if not isinstance(data, dict):
+            return {}
+        return {
+            "name": data.get("name") or preset_key,
+            "type": data.get("type", "local"),
+            "command": data.get("command", []),
+            "environment": data.get("environment", {}),
+            "description": data.get("description", ""),
+            "tags": data.get("tags", []),
+            "homepage": data.get("homepage", ""),
+            "docs": data.get("docs", ""),
+        }
+
+    def _on_preset_clicked(self, preset_key: str) -> None:
+        preset = self._get_preset_data(preset_key)
+        if not preset:
+            InfoBar.warning("提示", "预设数据不可用", parent=self)
+            return
+        if preset.get("type") != self.mcp_type:
+            InfoBar.warning("提示", "当前预设类型与对话框类型不一致", parent=self)
+            return
+        if self.name_edit.isEnabled():
+            self.name_edit.setText(preset.get("name", ""))
+        if self.mcp_type == "local":
+            command = preset.get("command", [])
+            env = preset.get("environment", {})
+            self.command_edit.setPlainText(
+                json.dumps(command, ensure_ascii=False) if command else ""
+            )
+            self.env_edit.setPlainText(
+                json.dumps(env, indent=2, ensure_ascii=False) if env else ""
+            )
+        self._apply_extra_info(preset)
+        self._update_preview()
 
     def _load_mcp_data(self):
         config = self.main_window.opencode_config or {}
@@ -4328,11 +6444,22 @@ class MCPDialog(BaseDialog):
                     json.dumps(headers, indent=2, ensure_ascii=False)
                 )
 
+        extra_info = {
+            "description": mcp.get("description", ""),
+            "tags": mcp.get("tags", []),
+            "homepage": mcp.get("homepage", ""),
+            "docs": mcp.get("docs", ""),
+        }
+        self._apply_extra_info(extra_info)
+        self._update_preview()
+
     def _on_save(self):
         name = self.name_edit.text().strip()
         if not name:
             InfoBar.error("错误", "请输入 MCP 名称", parent=self)
             return
+
+        self._update_preview()
 
         config = self.main_window.opencode_config
         if config is None:
@@ -4383,9 +6510,121 @@ class MCPDialog(BaseDialog):
                     InfoBar.error("错误", f"请求头 JSON 格式错误: {e}", parent=self)
                     return
 
+        self._update_extra_info(mcp_data)
         config["mcp"][name] = mcp_data
         self.main_window.save_opencode_config()
         self.accept()
+
+    def _apply_extra_info(self, data: Dict[str, Any]) -> None:
+        description = (data.get("description") or "").strip()
+        tags = data.get("tags", [])
+        homepage = (data.get("homepage") or "").strip()
+        docs = (data.get("docs") or "").strip()
+
+        self.desc_edit.setPlainText(description)
+        if isinstance(tags, list):
+            tags_text = ", ".join(str(tag).strip() for tag in tags if str(tag).strip())
+        else:
+            tags_text = str(tags).strip()
+        self.tags_edit.setText(tags_text)
+        self.homepage_edit.setText(homepage)
+        self.docs_edit.setText(docs)
+
+    def _update_extra_info(self, mcp_data: Dict[str, Any]) -> None:
+        description = self.desc_edit.toPlainText().strip()
+        tags_text = self.tags_edit.text().strip()
+        homepage = self.homepage_edit.text().strip()
+        docs = self.docs_edit.text().strip()
+
+        if description:
+            mcp_data["description"] = description
+
+        if tags_text:
+            tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
+            if tags:
+                mcp_data["tags"] = tags
+
+        if homepage:
+            mcp_data["homepage"] = homepage
+
+        if docs:
+            mcp_data["docs"] = docs
+
+    def _bind_preview_signals(self) -> None:
+        self.name_edit.textChanged.connect(lambda: self._update_preview())
+        self.enabled_check.stateChanged.connect(lambda: self._update_preview())
+        self.timeout_spin.valueChanged.connect(lambda: self._update_preview())
+        self.desc_edit.textChanged.connect(lambda: self._update_preview())
+        self.tags_edit.textChanged.connect(lambda: self._update_preview())
+        self.homepage_edit.textChanged.connect(lambda: self._update_preview())
+        self.docs_edit.textChanged.connect(lambda: self._update_preview())
+
+        if self.mcp_type == "local":
+            self.command_edit.textChanged.connect(lambda: self._update_preview())
+            self.env_edit.textChanged.connect(lambda: self._update_preview())
+        else:
+            self.url_edit.textChanged.connect(lambda: self._update_preview())
+            self.headers_edit.textChanged.connect(lambda: self._update_preview())
+
+    def _on_extra_group_toggled(self, checked: bool) -> None:
+        self.extra_content.setVisible(checked)
+
+    def _parse_json_text(self, text: str, default_value: Any) -> Any:
+        if not text:
+            return default_value
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return text
+
+    def _collect_preview_data(self) -> Dict[str, Any]:
+        tags_text = self.tags_edit.text().strip()
+        tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
+
+        data = {
+            "type": self.mcp_type,
+            "enabled": self.enabled_check.isChecked(),
+            "timeout": self.timeout_spin.value(),
+        }
+
+        description = self.desc_edit.toPlainText().strip()
+        if description:
+            data["description"] = description
+
+        if tags:
+            data["tags"] = tags
+
+        homepage = self.homepage_edit.text().strip()
+        if homepage:
+            data["homepage"] = homepage
+
+        docs = self.docs_edit.text().strip()
+        if docs:
+            data["docs"] = docs
+
+        if self.mcp_type == "local":
+            command_text = self.command_edit.toPlainText().strip()
+            env_text = self.env_edit.toPlainText().strip()
+            data["command"] = self._parse_json_text(command_text, [])
+            data["environment"] = self._parse_json_text(env_text, {})
+        else:
+            data["url"] = self.url_edit.text().strip()
+            headers_text = self.headers_edit.toPlainText().strip()
+            data["headers"] = self._parse_json_text(headers_text, {})
+
+        return data
+
+    def _update_preview(self) -> None:
+        data = self._collect_preview_data()
+        if self.preview_wrap_check.isChecked():
+            data = {"mcpServers": {self.name_edit.text().strip() or "server": data}}
+        preview_text = json.dumps(data, indent=2, ensure_ascii=False)
+        self.preview_edit.setPlainText(preview_text)
+        apply_bracket_match_highlight(self.preview_edit, isDarkTheme())
+
+    def _on_format_preview(self) -> None:
+        self._update_preview()
+        self.preview_edit.moveCursor(QTextCursor.Start)
 
 
 # ==================== OpenCode Agent 页面 ====================
@@ -4425,7 +6664,7 @@ class OpenCodeAgentPage(BasePage):
         toolbar.addWidget(self.delete_btn)
 
         toolbar.addStretch()
-        self.layout.addLayout(toolbar)
+        self._layout.addLayout(toolbar)
 
         # Agent 列表
         self.table = TableWidget(self)
@@ -4435,7 +6674,8 @@ class OpenCodeAgentPage(BasePage):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.layout.addWidget(self.table)
+        self.table.doubleClicked.connect(self._on_edit)
+        self._layout.addWidget(self.table)
 
     def _load_data(self):
         self.table.setRowCount(0)
@@ -4450,9 +6690,12 @@ class OpenCodeAgentPage(BasePage):
             self.table.setItem(
                 row, 2, QTableWidgetItem(str(data.get("temperature", "")))
             )
-            self.table.setItem(
-                row, 3, QTableWidgetItem(data.get("description", "")[:50])
-            )
+            desc = data.get("description", "")
+            if not desc:
+                desc = PRESET_OPENCODE_AGENTS.get(name, {}).get("description", "")
+            desc_item = QTableWidgetItem(desc[:50] + "..." if len(desc) > 50 else desc)
+            desc_item.setToolTip(desc)
+            self.table.setItem(row, 3, desc_item)
 
     def _on_add(self):
         dialog = OpenCodeAgentDialog(self.main_window, parent=self)
@@ -4940,7 +7183,7 @@ class PermissionPage(BasePage):
             btn.clicked.connect(lambda checked, t=tool: self._quick_add(t))
             toolbar.addWidget(btn)
 
-        self.layout.addLayout(toolbar)
+        self._layout.addLayout(toolbar)
 
         # 权限列表
         self.table = TableWidget(self)
@@ -4951,7 +7194,7 @@ class PermissionPage(BasePage):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.doubleClicked.connect(self._on_edit)
-        self.layout.addWidget(self.table)
+        self._layout.addWidget(self.table)
 
     def _load_data(self):
         self.table.setRowCount(0)
@@ -5156,7 +7399,7 @@ class HelpPage(BasePage):
         link_layout.addStretch()
         about_card_layout.addLayout(link_layout)
 
-        self.layout.addWidget(about_card)  # 不设置 stretch factor，不扩展
+        self._layout.addWidget(about_card)  # 不设置 stretch factor，不扩展
 
         # ===== Tab 切换区域 - 占满剩余空间 =====
         tab_container = CardWidget(self)
@@ -5332,7 +7575,7 @@ Thinking 模式配置示例
         tab_layout.addWidget(self.pivot)
         tab_layout.addWidget(self.stacked_widget, 1)
 
-        self.layout.addWidget(tab_container, 1)
+        self._layout.addWidget(tab_container, 1)
 
 
 # ==================== 主窗口 ====================
@@ -5364,6 +7607,9 @@ class MainWindow(FluentWindow):
         if self.ohmyopencode_config is None:
             self.ohmyopencode_config = {}
 
+        # 初始化文件指纹
+        self._refresh_file_hashes()
+
         # 启动时验证配置
         self._validate_config_on_startup()
 
@@ -5374,6 +7620,11 @@ class MainWindow(FluentWindow):
         self.latest_version = None
         self.release_url = None
         self._version_info_bar = None
+
+        # 外部修改检测（记录文件指纹）
+        self._opencode_file_hash = None
+        self._ohmy_file_hash = None
+        self._external_change_pending: Dict[str, Optional[str]] = {}
 
         self._init_window()
         self._init_navigation()
@@ -5391,6 +7642,12 @@ class MainWindow(FluentWindow):
             self.version_checker.check_update_async
         )
         self._version_update_timer.start()
+
+        # 外部修改检测定时器
+        self._file_watch_timer = QTimer(self)
+        self._file_watch_timer.setInterval(10000)
+        self._file_watch_timer.timeout.connect(self._check_external_file_changes)
+        self._file_watch_timer.start()
 
     def _init_window(self):
         self.setWindowTitle(f"OCCM - OpenCode Config Manager v{APP_VERSION}")
@@ -5487,6 +7744,10 @@ class MainWindow(FluentWindow):
         # Import 页面
         self.import_page = ImportPage(self)
         self.addSubInterface(self.import_page, FIF.DOWNLOAD, "外部导入")
+
+        # 监控页面
+        self.monitor_page = MonitorPage(self)
+        self.addSubInterface(self.monitor_page, FIF.SPEED_HIGH, "监控")
 
         # ===== 底部导航 =====
         # 主题切换按钮
@@ -5642,6 +7903,105 @@ class MainWindow(FluentWindow):
         release_url = self.release_url or f"{GITHUB_URL}/releases"
         if release_url:
             QDesktopServices.openUrl(QUrl(release_url))
+
+    def _refresh_file_hashes(self):
+        """刷新当前配置文件哈希"""
+        self._opencode_file_hash = BackupManager.file_hash(
+            ConfigPaths.get_opencode_config()
+        )
+        self._ohmy_file_hash = BackupManager.file_hash(
+            ConfigPaths.get_ohmyopencode_config()
+        )
+
+    def _check_external_file_changes(self):
+        """检测配置文件是否被外部修改"""
+        oc_path = ConfigPaths.get_opencode_config()
+        ohmy_path = ConfigPaths.get_ohmyopencode_config()
+        current_oc_hash = BackupManager.file_hash(oc_path)
+        current_ohmy_hash = BackupManager.file_hash(ohmy_path)
+
+        if (
+            self._opencode_file_hash
+            and current_oc_hash
+            and current_oc_hash != self._opencode_file_hash
+        ):
+            pending = self._external_change_pending.get("opencode")
+            if pending == current_oc_hash:
+                self._external_change_pending["opencode"] = None
+                self._handle_external_change("OpenCode", oc_path)
+            else:
+                self._external_change_pending["opencode"] = current_oc_hash
+        if (
+            self._ohmy_file_hash
+            and current_ohmy_hash
+            and current_ohmy_hash != self._ohmy_file_hash
+        ):
+            pending = self._external_change_pending.get("ohmy")
+            if pending == current_ohmy_hash:
+                self._external_change_pending["ohmy"] = None
+                self._handle_external_change("Oh My OpenCode", ohmy_path)
+            else:
+                self._external_change_pending["ohmy"] = current_ohmy_hash
+
+        self._opencode_file_hash = current_oc_hash
+        self._ohmy_file_hash = current_ohmy_hash
+
+    def _handle_external_change(self, config_name: str, path: Path):
+        """处理外部修改提示"""
+        msg = (
+            f"检测到 {config_name} 配置文件已被外部修改。\n\n"
+            "请选择如何处理：\n"
+            "• 点击【确定】重新加载文件内容（可能覆盖当前界面数据）\n"
+            "• 点击【取消】保留当前界面数据（文件保持外部修改）"
+        )
+        dialog = FluentMessageBox("配置文件已变更", msg, self)
+        if dialog.exec_():
+            # 重新加载并刷新哈希
+            if config_name == "OpenCode":
+                new_config = ConfigManager.load_json(path) or {}
+                issues = ConfigValidator.validate_opencode_config(new_config)
+                errors = [i for i in issues if i["level"] == "error"]
+                if errors:
+                    msg = "\n".join(f"• {e['message']}" for e in errors[:8])
+                    if len(errors) > 8:
+                        msg += f"\n... 还有 {len(errors) - 8} 个错误"
+                    InfoBar.error("错误", f"重新加载失败：\n{msg}", parent=self)
+                    return
+                self.opencode_config = new_config
+            else:
+                self.ohmyopencode_config = ConfigManager.load_json(path) or {}
+            self._refresh_file_hashes()
+            self.notify_config_changed()
+            if hasattr(self, "home_page"):
+                self.home_page._load_stats()
+            InfoBar.success(
+                title="已重新加载",
+                content=f"已加载 {config_name} 最新配置",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+                parent=self,
+            )
+        else:
+            # 保持当前内存态，同时备份内存数据
+            if config_name == "OpenCode":
+                self.backup_manager.backup_data(
+                    path, self.opencode_config, tag="external-keep"
+                )
+            else:
+                self.backup_manager.backup_data(
+                    path, self.ohmyopencode_config, tag="external-keep"
+                )
+            InfoBar.warning(
+                title="保持当前数据",
+                content=f"未重新加载 {config_name}，当前界面数据保持不变",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=6000,
+                parent=self,
+            )
 
     def _toggle_theme(self):
         """切换深浅色主题 (手动切换会停止跟随系统)"""
@@ -5877,8 +8237,15 @@ class OhMyAgentPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
+        self.bulk_model_label = BodyLabel("批量模型:", self)
+        toolbar.addWidget(self.bulk_model_label)
+        self.bulk_model_combo = ComboBox(self)
+        self.bulk_model_combo.setMinimumWidth(220)
+        self.bulk_model_combo.currentIndexChanged.connect(self._on_bulk_model_changed)
+        toolbar.addWidget(self.bulk_model_combo)
+
         toolbar.addStretch()
-        self.layout.addLayout(toolbar)
+        self._layout.addLayout(toolbar)
 
         # Agent 列表
         self.table = TableWidget(self)
@@ -5888,24 +8255,80 @@ class OhMyAgentPage(BasePage):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.layout.addWidget(self.table)
+        self.table.doubleClicked.connect(self._on_edit)
+        self._layout.addWidget(self.table)
 
     def _load_data(self):
         """加载 Agent 数据"""
         self.table.setRowCount(0)
         config = self.main_window.ohmyopencode_config or {}
         agents = config.get("agents", {})
+        models = self._get_available_models()
+        self._refresh_bulk_model_combo(models)
 
         for name, data in agents.items():
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(name))
-            self.table.setItem(row, 1, QTableWidgetItem(data.get("model", "")))
+
+            model_combo = ComboBox(self.table)
+            model_combo.addItems(models)
+            current_model = data.get("model", "")
+            if current_model:
+                model_combo.setCurrentText(current_model)
+            model_combo.currentIndexChanged.connect(
+                partial(self._on_row_model_changed, name, model_combo)
+            )
+            self.table.setCellWidget(row, 1, model_combo)
+
             # 描述列添加 tooltip 显示全部
             desc = data.get("description", "")
+            if not desc:
+                desc = PRESET_AGENTS.get(name, "")
             desc_item = QTableWidgetItem(desc[:50] + "..." if len(desc) > 50 else desc)
             desc_item.setToolTip(desc)
             self.table.setItem(row, 2, desc_item)
+
+    def _get_available_models(self) -> List[str]:
+        registry = ModelRegistry(self.main_window.opencode_config)
+        return registry.get_all_models()
+
+    def _refresh_bulk_model_combo(self, models: List[str]) -> None:
+        current = self.bulk_model_combo.currentText()
+        self.bulk_model_combo.blockSignals(True)
+        self.bulk_model_combo.clear()
+        self.bulk_model_combo.addItem("- 全部保持 -")
+        self.bulk_model_combo.addItems(models)
+        if current:
+            self.bulk_model_combo.setCurrentText(current)
+        self.bulk_model_combo.blockSignals(False)
+
+    def _on_row_model_changed(self, agent_name: str, combo: ComboBox) -> None:
+        config = self.main_window.ohmyopencode_config
+        if config is None:
+            config = {}
+            self.main_window.ohmyopencode_config = config
+        agents = config.setdefault("agents", {})
+        if agent_name not in agents:
+            return
+        agents[agent_name]["model"] = combo.currentText()
+        self.main_window.save_ohmyopencode_config()
+
+    def _on_bulk_model_changed(self) -> None:
+        model = self.bulk_model_combo.currentText()
+        if model == "- 全部保持 -":
+            return
+        config = self.main_window.ohmyopencode_config
+        if config is None:
+            config = {}
+            self.main_window.ohmyopencode_config = config
+        agents = config.setdefault("agents", {})
+        if not agents:
+            return
+        for name in agents.keys():
+            agents[name]["model"] = model
+        self.main_window.save_ohmyopencode_config()
+        self._load_data()
 
     def _on_add(self):
         """添加 Agent"""
@@ -6048,12 +8471,10 @@ class OhMyAgentDialog(BaseDialog):
         if "agents" not in config:
             config["agents"] = {}
 
-        # 检查名称冲突
         if not self.is_edit and name in config["agents"]:
             InfoBar.error("错误", f'Agent "{name}" 已存在', parent=self)
             return
 
-        # 保存数据
         config["agents"][name] = {
             "model": self.model_combo.currentText(),
             "description": self.desc_edit.toPlainText().strip(),
@@ -6182,8 +8603,15 @@ class CategoryPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
+        self.bulk_model_label = BodyLabel("批量模型:", self)
+        toolbar.addWidget(self.bulk_model_label)
+        self.bulk_model_combo = ComboBox(self)
+        self.bulk_model_combo.setMinimumWidth(220)
+        self.bulk_model_combo.currentIndexChanged.connect(self._on_bulk_model_changed)
+        toolbar.addWidget(self.bulk_model_combo)
+
         toolbar.addStretch()
-        self.layout.addLayout(toolbar)
+        self._layout.addLayout(toolbar)
 
         # Category 列表
         self.table = TableWidget(self)
@@ -6202,27 +8630,83 @@ class CategoryPage(BasePage):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.layout.addWidget(self.table)
+        self.table.doubleClicked.connect(self._on_edit)
+        self._layout.addWidget(self.table)
 
     def _load_data(self):
         """加载 Category 数据"""
         self.table.setRowCount(0)
         config = self.main_window.ohmyopencode_config or {}
         categories = config.get("categories", {})
+        models = self._get_available_models()
+        self._refresh_bulk_model_combo(models)
 
         for name, data in categories.items():
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(name))
-            self.table.setItem(row, 1, QTableWidgetItem(data.get("model", "")))
+
+            model_combo = ComboBox(self.table)
+            model_combo.addItems(models)
+            current_model = data.get("model", "")
+            if current_model:
+                model_combo.setCurrentText(current_model)
+            model_combo.currentIndexChanged.connect(
+                partial(self._on_row_model_changed, name, model_combo)
+            )
+            self.table.setCellWidget(row, 1, model_combo)
+
             self.table.setItem(
                 row, 2, QTableWidgetItem(str(data.get("temperature", 0.7)))
             )
             # 描述列添加 tooltip 显示全部
             desc = data.get("description", "")
+            if not desc:
+                desc = PRESET_CATEGORIES.get(name, {}).get("description", "")
             desc_item = QTableWidgetItem(desc[:30] + "..." if len(desc) > 30 else desc)
             desc_item.setToolTip(desc)
             self.table.setItem(row, 3, desc_item)
+
+    def _get_available_models(self) -> List[str]:
+        registry = ModelRegistry(self.main_window.opencode_config)
+        return registry.get_all_models()
+
+    def _refresh_bulk_model_combo(self, models: List[str]) -> None:
+        current = self.bulk_model_combo.currentText()
+        self.bulk_model_combo.blockSignals(True)
+        self.bulk_model_combo.clear()
+        self.bulk_model_combo.addItem("- 全部保持 -")
+        self.bulk_model_combo.addItems(models)
+        if current:
+            self.bulk_model_combo.setCurrentText(current)
+        self.bulk_model_combo.blockSignals(False)
+
+    def _on_row_model_changed(self, category_name: str, combo: ComboBox) -> None:
+        config = self.main_window.ohmyopencode_config
+        if config is None:
+            config = {}
+            self.main_window.ohmyopencode_config = config
+        categories = config.setdefault("categories", {})
+        if category_name not in categories:
+            return
+        categories[category_name]["model"] = combo.currentText()
+        self.main_window.save_ohmyopencode_config()
+
+    def _on_bulk_model_changed(self) -> None:
+        model = self.bulk_model_combo.currentText()
+        if model == "- 全部保持 -":
+            return
+        config = self.main_window.ohmyopencode_config
+        if config is None:
+            config = {}
+            self.main_window.ohmyopencode_config = config
+        categories = config.setdefault("categories", {})
+        if not categories:
+            return
+        for name in categories.keys():
+            categories[name]["model"] = model
+        self.main_window.save_ohmyopencode_config()
+        self._load_data()
 
     def _on_add(self):
         dialog = CategoryDialog(self.main_window, parent=self)
@@ -6627,7 +9111,7 @@ class SkillPage(BasePage):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
 
-        self.layout.addWidget(
+        self._layout.addWidget(
             splitter, 1
         )  # 添加 stretch factor 让 splitter 占满剩余空间
 
@@ -6867,7 +9351,7 @@ class RulesPage(BasePage):
         btn_layout.addStretch()
         agents_layout.addLayout(btn_layout)
 
-        self.layout.addStretch()
+        self._layout.addStretch()
 
         # 初始加载
         self._load_agents_md()
@@ -7021,7 +9505,7 @@ class CompactionPage(BasePage):
         self.preview_edit.setMaximumHeight(150)
         preview_layout.addWidget(self.preview_edit)
 
-        self.layout.addStretch()
+        self._layout.addStretch()
 
         # 连接信号更新预览
         self.auto_check.stateChanged.connect(self._update_preview)
@@ -7065,6 +9549,716 @@ class CompactionPage(BasePage):
         self.show_success("成功", "上下文压缩配置已保存")
 
 
+# ==================== 监控页面 ====================
+class MonitorPage(BasePage):
+    """站点/模型可用度与延迟监控页面"""
+
+    result_ready = pyqtSignal(object)
+
+    def __init__(self, main_window, parent=None):
+        super().__init__("监控", parent)
+        self.title_label.hide()
+        self.main_window = main_window
+        # 监控数据存储: target_id -> deque[MonitorResult]
+        self._history: Dict[str, Deque[MonitorResult]] = {}
+        # 监控目标列表
+        self._targets: List[MonitorTarget] = []
+        # 轮询定时器
+        self._poll_timer: Optional[QTimer] = None
+        # 轮询状态
+        self._is_polling = False
+        # 行索引映射
+        self._row_index: Dict[str, int] = {}
+        # 线程池
+        self._executor = ThreadPoolExecutor(max_workers=6)
+        # 轮询超时控制
+        self._pending_targets: Dict[str, float] = {}
+        self._timeout_timer: Optional[QTimer] = None
+        self._request_timeout_sec = 15
+        self._setup_ui()
+        self._load_targets()
+        self._start_polling()
+        # 连接配置变更信号
+        self.main_window.config_changed.connect(self._on_config_changed)
+        self.result_ready.connect(self._on_single_result)
+
+    def _on_config_changed(self):
+        """配置变更时重新加载目标"""
+        self._load_targets()
+        self._refresh_ui()
+
+    def _setup_ui(self):
+        """构建监控页面 UI"""
+        self._build_compact_summary()
+        self._build_table()
+
+    def _build_compact_summary(self):
+        """构建紧凑统计区（两行以内）"""
+        wrapper = QWidget(self)
+        wrapper_layout = QGridLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(8)
+
+        # 单行紧凑统计
+        wrapper_layout.addWidget(BodyLabel("可用率:", wrapper), 0, 0)
+        self.availability_value = BodyLabel("—", wrapper)
+        wrapper_layout.addWidget(self.availability_value, 0, 1)
+
+        wrapper_layout.addWidget(BodyLabel("异常数:", wrapper), 0, 2)
+        self.error_count_value = BodyLabel("0", wrapper)
+        wrapper_layout.addWidget(self.error_count_value, 0, 3)
+
+        wrapper_layout.addWidget(BodyLabel("平均对话延迟:", wrapper), 0, 4)
+        self.chat_latency_value = BodyLabel("—", wrapper)
+        wrapper_layout.addWidget(self.chat_latency_value, 0, 5)
+
+        wrapper_layout.addWidget(BodyLabel("平均 Ping 延迟:", wrapper), 0, 6)
+        self.ping_latency_value = BodyLabel("—", wrapper)
+        wrapper_layout.addWidget(self.ping_latency_value, 0, 7)
+
+        wrapper_layout.addWidget(BodyLabel("目标数:", wrapper), 0, 8)
+        self.target_count_value = BodyLabel("0", wrapper)
+        wrapper_layout.addWidget(self.target_count_value, 0, 9)
+
+        wrapper_layout.addWidget(BodyLabel("最近检测:", wrapper), 0, 10)
+        self.last_checked_value = CaptionLabel("—", wrapper)
+        wrapper_layout.addWidget(self.last_checked_value, 0, 11)
+
+        self.manual_check_btn = PushButton(FIF.SYNC, "手动检测", wrapper)
+        self.manual_check_btn.clicked.connect(self._do_poll)
+        wrapper_layout.addWidget(self.manual_check_btn, 0, 12)
+
+        self.poll_status_label = CaptionLabel("", wrapper)
+        wrapper_layout.addWidget(self.poll_status_label, 0, 13)
+
+        wrapper_layout.setColumnStretch(14, 1)
+        self._layout.addWidget(wrapper)
+
+    def _build_table(self):
+        """构建明细表格"""
+        card = self.add_card()
+        card_layout = card.layout()
+        if card_layout is not None:
+            card_layout.setContentsMargins(2, 6, 2, 6)
+
+        self.detail_table = TableWidget(card)
+        self.detail_table.setContentsMargins(0, 0, 0, 0)
+        self.detail_table.setViewportMargins(0, 0, 0, 0)
+        self.detail_table.setColumnCount(7)
+        self.detail_table.setHorizontalHeaderLabels(
+            [
+                "模型/提供商",
+                "状态",
+                "可用率",
+                "对话延迟",
+                "Ping延迟",
+                "最后检测",
+                "历史",
+            ]
+        )
+        header = self.detail_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.resizeSection(1, 90)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.resizeSection(2, 96)
+        header.setSectionResizeMode(3, QHeaderView.Fixed)
+        header.resizeSection(3, 120)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        header.resizeSection(4, 120)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        header.resizeSection(5, 100)
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        header.resizeSection(6, 200)
+        self.detail_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.detail_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.detail_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.detail_table.verticalHeader().setDefaultSectionSize(32)
+        card_layout.addWidget(self.detail_table, 1)
+
+    def _load_targets(self):
+        """从配置加载监控目标"""
+        self._targets.clear()
+        config = self.main_window.opencode_config or {}
+        providers = config.get("provider", {})
+
+        for provider_key, provider_data in providers.items():
+            if not isinstance(provider_data, dict):
+                continue
+            provider_name = provider_data.get("name", provider_key)
+            options = provider_data.get("options", {})
+            base_url = _safe_base_url(
+                options.get("baseURL", "") or provider_data.get("baseURL", "")
+            )
+            api_key_raw = options.get("apiKey", "") or provider_data.get("apiKey", "")
+            api_key = _resolve_env_value(api_key_raw) if api_key_raw else ""
+
+            models = provider_data.get("models", {})
+            for model_id, model_data in models.items():
+                if not isinstance(model_data, dict):
+                    continue
+                model_name = model_data.get("name", model_id)
+                target = MonitorTarget(
+                    provider_key=provider_key,
+                    provider_name=provider_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model_id=model_id,
+                    model_name=model_name,
+                )
+                self._targets.append(target)
+                # 初始化历史记录
+                if target.target_id not in self._history:
+                    self._history[target.target_id] = deque(
+                        maxlen=MONITOR_HISTORY_LIMIT
+                    )
+
+        self._refresh_ui()
+
+    def _start_polling(self):
+        """启动轮询定时器"""
+        if self._poll_timer is None:
+            self._poll_timer = QTimer(self)
+            self._poll_timer.timeout.connect(self._do_poll)
+        self._poll_timer.start(MONITOR_POLL_INTERVAL_MS)
+        # 立即执行一次
+        QTimer.singleShot(200, self._do_poll)
+
+    def _do_poll(self):
+        """执行一次轮询（并发请求）"""
+        if self._is_polling:
+            return
+        if not self._targets:
+            self.poll_status_label.setText("无目标")
+            return
+        self._is_polling = True
+        self.poll_status_label.setText("检测中...")
+        self._mark_all_pending()
+
+        self._pending_targets = {t.target_id: time.time() for t in self._targets}
+        self._start_timeout_timer()
+
+        remaining = len(self._targets)
+        if remaining == 0:
+            self._is_polling = False
+            self.poll_status_label.setText("")
+            return
+
+        def _done_callback(target_id: str, future):
+            nonlocal remaining
+            try:
+                result = future.result()
+            except Exception as e:
+                result = MonitorResult(
+                    target_id=target_id,
+                    status="error",
+                    latency_ms=None,
+                    ping_ms=None,
+                    checked_at=datetime.now(),
+                    message=str(e)[:50],
+                )
+            if target_id in self._pending_targets:
+                self._pending_targets.pop(target_id, None)
+            self.result_ready.emit(result)
+            remaining -= 1
+            if remaining == 0:
+                QTimer.singleShot(0, self._on_poll_done)
+
+        # 防止卡住
+        QTimer.singleShot(60000, self._on_poll_done)
+
+        for target in self._targets:
+            future = self._executor.submit(self._check_target, target)
+            future.add_done_callback(
+                lambda f, tid=target.target_id: _done_callback(tid, f)
+            )
+
+    def _on_poll_done(self):
+        """轮询结束"""
+        self._is_polling = False
+        self.poll_status_label.setText("")
+        self._stop_timeout_timer()
+        self._refresh_summary()
+
+    def _start_timeout_timer(self):
+        """启动超时检测定时器"""
+        if self._timeout_timer is None:
+            self._timeout_timer = QTimer(self)
+            self._timeout_timer.timeout.connect(self._check_pending_timeouts)
+        self._timeout_timer.start(1000)
+
+    def _stop_timeout_timer(self):
+        """停止超时检测定时器"""
+        if self._timeout_timer is not None:
+            self._timeout_timer.stop()
+
+    def _check_pending_timeouts(self):
+        """检查超时的请求并标记"""
+        if not self._pending_targets:
+            return
+        now_ts = time.time()
+        timed_out = [
+            tid
+            for tid, start_ts in self._pending_targets.items()
+            if now_ts - start_ts > self._request_timeout_sec
+        ]
+        for tid in timed_out:
+            self._pending_targets.pop(tid, None)
+            result = MonitorResult(
+                target_id=tid,
+                status="error",
+                latency_ms=None,
+                ping_ms=None,
+                checked_at=datetime.now(),
+                message="请求超时",
+            )
+            self._on_single_result(result)
+        if not self._pending_targets:
+            self._on_poll_done()
+
+    def _on_single_result(self, result: MonitorResult):
+        """处理单个结果并即时刷新行"""
+        history = self._history.get(result.target_id)
+        if history is not None:
+            history.append(result)
+        self._update_table_row(result.target_id)
+
+    def _mark_all_pending(self):
+        """将所有行标记为检测中"""
+        for target in self._targets:
+            self._update_table_row(target.target_id, pending=True)
+
+    def _refresh_summary(self):
+        """刷新统计摘要"""
+        # 计算统计数据
+        total_availability = []
+        total_chat_latency = []
+        total_ping_latency = []
+        error_count = 0
+        last_checked: Optional[datetime] = None
+
+        for target in self._targets:
+            history = self._history.get(target.target_id, deque())
+            if history:
+                avail = _calc_availability(history)
+                if avail is not None:
+                    total_availability.append(avail)
+                latest = history[-1]
+                if latest.latency_ms is not None:
+                    total_chat_latency.append(latest.latency_ms)
+                if latest.ping_ms is not None:
+                    total_ping_latency.append(latest.ping_ms)
+                if latest.status in ("failed", "error"):
+                    error_count += 1
+                if last_checked is None or latest.checked_at > last_checked:
+                    last_checked = latest.checked_at
+
+        if total_availability:
+            avg_avail = sum(total_availability) / len(total_availability)
+            self.availability_value.setText(f"{avg_avail:.1f}%")
+        else:
+            self.availability_value.setText("—")
+
+        if total_chat_latency:
+            avg_chat = sum(total_chat_latency) // len(total_chat_latency)
+            self.chat_latency_value.setText(f"{avg_chat} ms")
+        else:
+            self.chat_latency_value.setText("—")
+
+        if total_ping_latency:
+            avg_ping = sum(total_ping_latency) // len(total_ping_latency)
+            self.ping_latency_value.setText(f"{avg_ping} ms")
+        else:
+            self.ping_latency_value.setText("—")
+
+        self.error_count_value.setText(str(error_count))
+
+        if last_checked:
+            self.last_checked_value.setText(last_checked.strftime("%H:%M:%S"))
+        else:
+            self.last_checked_value.setText("—")
+
+    def _check_target(self, target: MonitorTarget) -> MonitorResult:
+        """检查单个目标的可用性和延迟"""
+        checked_at = datetime.now()
+        origin = _extract_origin(target.base_url)
+
+        # Ping 检测
+        ping_ms = _measure_ping(origin) if origin else None
+
+        # Chat 延迟检测
+        latency_ms: Optional[int] = None
+        status = "no_config"
+        message = ""
+
+        if not target.base_url:
+            message = "未配置 baseURL"
+        elif not target.api_key:
+            message = "未配置 apiKey"
+        else:
+            # 发送最小请求
+            try:
+                url = _build_chat_url(target.base_url)
+                if not url:
+                    raise ValueError("baseURL 无效")
+                payload = json.dumps(
+                    {
+                        "model": target.model_id,
+                        "messages": [{"role": "user", "content": "hi"}],
+                        "max_tokens": 1,
+                    }
+                ).encode("utf-8")
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {target.api_key}",
+                    },
+                    method="POST",
+                )
+                start = time.time()
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    resp.read()
+                latency_ms = int((time.time() - start) * 1000)
+                if latency_ms <= DEGRADED_THRESHOLD_MS:
+                    status = "operational"
+                    message = "正常"
+                else:
+                    status = "degraded"
+                    message = f"延迟较高 ({latency_ms}ms)"
+            except urllib.error.HTTPError as e:
+                status = "failed"
+                message = "鉴权失败" if e.code in (401, 403) else f"HTTP {e.code}"
+            except urllib.error.URLError as e:
+                status = "error"
+                message = f"连接失败: {e.reason}"
+            except Exception as e:
+                status = "error"
+                message = str(e)[:50]
+
+        return MonitorResult(
+            target_id=target.target_id,
+            status=status,
+            latency_ms=latency_ms,
+            ping_ms=ping_ms,
+            checked_at=checked_at,
+            message=message,
+        )
+
+    def _refresh_ui(self):
+        """刷新所有 UI 组件"""
+        # 更新目标数
+        self.target_count_value.setText(str(len(self._targets)))
+        self._refresh_summary()
+        self._update_table()
+
+    def _build_history_bar(self, history: Deque[MonitorResult]) -> QWidget:
+        """构建状态历史条带"""
+        container = QWidget(self)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        max_points = 24
+        points = list(history)[-max_points:]
+        if not points:
+            points = []
+
+        for _ in range(max_points - len(points)):
+            points.insert(
+                0, MonitorResult("", "no_config", None, None, datetime.now(), "")
+            )
+
+        for item in points:
+            color = STATUS_COLORS.get(item.status, "#9AA4B2")
+            block = QLabel(container)
+            block.setFixedSize(6, 10)
+            block.setStyleSheet(f"background: {color}; border-radius: 1px;")
+            block.setToolTip(
+                f"{STATUS_LABELS.get(item.status, '未知')}: {item.checked_at.strftime('%H:%M:%S')}"
+            )
+            layout.addWidget(block)
+
+        return container
+
+    def _update_table(self):
+        """更新明细表格"""
+        self.detail_table.setRowCount(0)
+
+        self._row_index.clear()
+        for target in self._targets:
+            history = self._history.get(target.target_id, deque())
+            row = self.detail_table.rowCount()
+            self.detail_table.insertRow(row)
+            self._row_index[target.target_id] = row
+
+            # 目标名称
+            target_name = f"{target.provider_name}/{target.model_name}"
+            self.detail_table.setItem(row, 0, QTableWidgetItem(target_name))
+
+            self._fill_row_from_history(row, history)
+
+    def _update_table_row(self, target_id: str, pending: bool = False):
+        """根据 target_id 更新单行"""
+        row = self._row_index.get(target_id)
+        if row is None:
+            return
+        history = self._history.get(target_id, deque())
+        self._fill_row_from_history(row, history, pending=pending)
+
+    def _fill_row_from_history(
+        self,
+        row: int,
+        history: Deque[MonitorResult],
+        pending: bool = False,
+    ) -> None:
+        """填充表格行"""
+        if pending:
+            status_item = QTableWidgetItem("● 检测中")
+            status_item.setForeground(QColor("#9AA4B2"))
+            self.detail_table.setItem(row, 1, status_item)
+            self.detail_table.setItem(row, 2, QTableWidgetItem("—"))
+            self.detail_table.setItem(row, 3, QTableWidgetItem("—"))
+            self.detail_table.setItem(row, 4, QTableWidgetItem("—"))
+            self.detail_table.setItem(row, 5, QTableWidgetItem("—"))
+            self.detail_table.setCellWidget(row, 6, self._build_history_bar(history))
+            self.detail_table.update()
+            return
+
+        if history:
+            latest = history[-1]
+            # 状态
+            status_label = STATUS_LABELS.get(latest.status, "未知")
+            status_item = QTableWidgetItem(f"● {status_label}")
+            status_item.setForeground(
+                QColor(STATUS_COLORS.get(latest.status, "#9AA4B2"))
+            )
+            status_item.setToolTip(latest.message)
+            self.detail_table.setItem(row, 1, status_item)
+
+            # 可用率
+            avail = _calc_availability(history)
+            avail_text = f"{avail:.1f}%" if avail is not None else "—"
+            self.detail_table.setItem(row, 2, QTableWidgetItem(avail_text))
+
+            # 对话延迟
+            self.detail_table.setItem(
+                row, 3, QTableWidgetItem(_format_latency(latest.latency_ms))
+            )
+
+            # Ping 延迟
+            self.detail_table.setItem(
+                row, 4, QTableWidgetItem(_format_latency(latest.ping_ms))
+            )
+
+            # 最后检测
+            self.detail_table.setItem(
+                row, 5, QTableWidgetItem(latest.checked_at.strftime("%H:%M:%S"))
+            )
+
+            # 历史条带
+            self.detail_table.setCellWidget(row, 6, self._build_history_bar(history))
+        else:
+            # 无数据
+            self.detail_table.setItem(row, 1, QTableWidgetItem("—"))
+            self.detail_table.setItem(row, 2, QTableWidgetItem("—"))
+            self.detail_table.setItem(row, 3, QTableWidgetItem("—"))
+            self.detail_table.setItem(row, 4, QTableWidgetItem("—"))
+            self.detail_table.setItem(row, 5, QTableWidgetItem("—"))
+            self.detail_table.setCellWidget(row, 6, self._build_history_bar(deque()))
+
+        self.detail_table.update()
+
+
+class JsonTomlHighlighter(QSyntaxHighlighter):
+    """JSON/TOML 语法高亮"""
+
+    def __init__(self, document, is_dark: bool, prefer_toml: bool = False):
+        super().__init__(document)
+        self._is_dark = is_dark
+        self._prefer_toml = prefer_toml
+        self._rules = []
+        self._init_rules()
+
+    def _make_format(self, color: QColor, bold: bool = False) -> QTextCharFormat:
+        fmt = QTextCharFormat()
+        fmt.setForeground(color)
+        if bold:
+            fmt.setFontWeight(QFont.Bold)
+        return fmt
+
+    def _init_rules(self) -> None:
+        if self._is_dark:
+            key_color = QColor("#7AA2F7")
+            string_color = QColor("#9ECE6A")
+            number_color = QColor("#E0AF68")
+            boolean_color = QColor("#7DCFFF")
+            null_color = QColor("#F7768E")
+            bracket_level_colors = [
+                QColor("#C0CAF5"),
+                QColor("#B4F9F8"),
+                QColor("#BB9AF7"),
+                QColor("#F7768E"),
+            ]
+            section_color = QColor("#FF9E64")
+        else:
+            key_color = QColor("#1F4AA1")
+            string_color = QColor("#1A7F37")
+            number_color = QColor("#B26A00")
+            boolean_color = QColor("#006D77")
+            null_color = QColor("#B00020")
+            bracket_level_colors = [
+                QColor("#4B4B4B"),
+                QColor("#0077B6"),
+                QColor("#6A4C93"),
+                QColor("#9B2226"),
+            ]
+            section_color = QColor("#A65D00")
+
+        self._bracket_colors = bracket_level_colors
+
+        string_fmt = self._make_format(string_color)
+        number_fmt = self._make_format(number_color)
+        boolean_fmt = self._make_format(boolean_color, bold=True)
+        null_fmt = self._make_format(null_color, bold=True)
+        key_fmt = self._make_format(key_color, bold=True)
+        section_fmt = self._make_format(section_color, bold=True)
+
+        def add_rule(pattern: str, fmt: QTextCharFormat, flags=None) -> None:
+            regex = QRegularExpression(pattern)
+            if flags:
+                regex.setPatternOptions(flags)
+            self._rules.append((regex, fmt))
+
+        add_rule(r'"[^"\\]*(?:\\.[^"\\]*)*"', string_fmt)
+        add_rule(r"'[^'\\]*(?:\\.[^'\\]*)*'", string_fmt)
+        add_rule(r"\b-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?\b", number_fmt)
+        add_rule(
+            r"\b(true|false)\b", boolean_fmt, QRegularExpression.CaseInsensitiveOption
+        )
+        add_rule(r"\b(null|none)\b", null_fmt, QRegularExpression.CaseInsensitiveOption)
+        add_rule(r'"[^"\\]*(?:\\.[^"\\]*)*"(?=\s*[:=])', key_fmt)
+        add_rule(r"'[^'\\]*(?:\\.[^'\\]*)*'(?=\s*=)", key_fmt)
+        add_rule(r"\b[A-Za-z0-9_\-\.]+(?=\s*=)", key_fmt)
+        add_rule(r"^\s*\[[^\]]+\]", section_fmt)
+
+        # 括号层级着色：通过字符前缀决定层级（上限4层）
+        for level, color in enumerate(bracket_level_colors, start=1):
+            prefix = r"[^\{\}\[\]\(\)]*" * (level - 1)
+            add_rule(rf"{prefix}[\{{\[\(]", self._make_format(color))
+            add_rule(rf"{prefix}[\}}\]\)]", self._make_format(color))
+
+    def highlightBlock(self, text: str) -> None:
+        for regex, fmt in self._rules:
+            it = regex.globalMatch(text)
+            while it.hasNext():
+                match = it.next()
+                start = match.capturedStart()
+                length = match.capturedLength()
+                if start >= 0 and length > 0:
+                    self.setFormat(start, length, fmt)
+
+        # 逐字符处理括号层级着色
+        if not text:
+            return
+        depth = self.previousBlockState()
+        if depth < 0:
+            depth = 0
+        colors = self._bracket_colors or []
+        color_count = len(colors)
+        if color_count == 0:
+            return
+
+        for i, ch in enumerate(text):
+            if ch in "{[(":
+                depth += 1
+                color = colors[(depth - 1) % color_count]
+                self.setFormat(i, 1, self._make_format(color))
+            elif ch in "}])":
+                color = colors[(depth - 1) % color_count] if depth > 0 else colors[0]
+                self.setFormat(i, 1, self._make_format(color))
+                if depth > 0:
+                    depth -= 1
+
+        self.setCurrentBlockState(depth)
+
+
+def _find_matching_bracket(text: str, index: int) -> Optional[int]:
+    if index < 0 or index >= len(text):
+        return None
+    pairs = {"(": ")", ")": "(", "[": "]", "]": "[", "{": "}", "}": "{"}
+    char = text[index]
+    if char not in pairs:
+        return None
+    if char in "([{":
+        target = pairs[char]
+        depth = 0
+        for i in range(index + 1, len(text)):
+            current = text[i]
+            if current == char:
+                depth += 1
+            elif current == target:
+                if depth == 0:
+                    return i
+                depth -= 1
+        return None
+    target = pairs[char]
+    depth = 0
+    for i in range(index - 1, -1, -1):
+        current = text[i]
+        if current == char:
+            depth += 1
+        elif current == target:
+            if depth == 0:
+                return i
+            depth -= 1
+    return None
+
+
+def apply_bracket_match_highlight(text_edit: QTextEdit, is_dark: bool) -> None:
+    text = text_edit.toPlainText()
+    if not text:
+        text_edit.setExtraSelections([])
+        return
+
+    cursor = text_edit.textCursor()
+    pos = cursor.position()
+    candidates = [pos - 1, pos]
+    match_index = None
+    active_index = None
+    for idx in candidates:
+        if 0 <= idx < len(text) and text[idx] in "()[]{}":
+            active_index = idx
+            match_index = _find_matching_bracket(text, idx)
+            if match_index is not None:
+                break
+
+    if active_index is None or match_index is None:
+        text_edit.setExtraSelections([])
+        return
+
+    fmt = QTextCharFormat()
+    if is_dark:
+        fmt.setBackground(QColor(255, 255, 255, 50))
+    else:
+        fmt.setBackground(QColor(0, 0, 0, 35))
+    fmt.setFontWeight(QFont.Bold)
+
+    selections = []
+    for idx in (active_index, match_index):
+        sel = QTextEdit.ExtraSelection()
+        sel.format = fmt
+        sel_cursor = text_edit.textCursor()
+        sel_cursor.setPosition(idx)
+        sel_cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 1)
+        sel.cursor = sel_cursor
+        selections.append(sel)
+
+    text_edit.setExtraSelections(selections)
+
+
 # ==================== Import 页面 ====================
 class ImportPage(BasePage):
     """外部配置导入页面"""
@@ -7073,6 +10267,7 @@ class ImportPage(BasePage):
         super().__init__("外部导入", parent)
         self.main_window = main_window
         self.import_service = ImportService()
+        self._last_converted: Optional[Dict[str, Any]] = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -7084,6 +10279,27 @@ class ImportPage(BasePage):
         refresh_btn = PrimaryPushButton(FIF.SYNC, "刷新检测", detect_card)
         refresh_btn.clicked.connect(self._refresh_scan)
         detect_layout.addWidget(refresh_btn)
+
+        # 手动选择文件
+        manual_layout = QHBoxLayout()
+        manual_layout.addWidget(BodyLabel("手动选择:", detect_card))
+        self.manual_source_combo = ComboBox(detect_card)
+        self.manual_source_combo.addItems(
+            [
+                "Claude Code Settings",
+                "Claude Providers",
+                "Codex Config",
+                "Gemini Config",
+                "CC-Switch Config",
+            ]
+        )
+        manual_layout.addWidget(self.manual_source_combo)
+
+        manual_btn = PushButton(FIF.FOLDER, "选择文件", detect_card)
+        manual_btn.clicked.connect(self._select_manual_file)
+        manual_layout.addWidget(manual_btn)
+        manual_layout.addStretch()
+        detect_layout.addLayout(manual_layout)
 
         # 配置列表
         self.config_table = TableWidget(detect_card)
@@ -7100,26 +10316,16 @@ class ImportPage(BasePage):
         self.config_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.config_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.config_table.itemSelectionChanged.connect(self._on_select)
-        self.config_table.setMaximumHeight(180)
+        self.config_table.setMinimumHeight(320)
+        self.config_table.setMaximumHeight(520)
         detect_layout.addWidget(self.config_table)
 
         # 预览卡片
         preview_card = self.add_card("配置预览与转换结果")
         preview_layout = preview_card.layout()
-
-        # 原始配置预览
-        preview_layout.addWidget(BodyLabel("原始配置:", preview_card))
-        self.preview_edit = TextEdit(preview_card)
-        self.preview_edit.setReadOnly(True)
-        self.preview_edit.setMaximumHeight(120)
-        preview_layout.addWidget(self.preview_edit)
-
-        # 转换结果预览
-        preview_layout.addWidget(BodyLabel("转换为 OpenCode 格式:", preview_card))
-        self.convert_edit = TextEdit(preview_card)
-        self.convert_edit.setReadOnly(True)
-        self.convert_edit.setMaximumHeight(120)
-        preview_layout.addWidget(self.convert_edit)
+        preview_layout.addWidget(
+            BodyLabel("点击“预览转换”在弹窗中查看左右对照。", preview_card)
+        )
 
         # 按钮
         btn_layout = QHBoxLayout()
@@ -7132,10 +10338,14 @@ class ImportPage(BasePage):
         import_btn.clicked.connect(self._import_selected)
         btn_layout.addWidget(import_btn)
 
+        confirm_btn = PushButton("确认映射", preview_card)
+        confirm_btn.clicked.connect(self._confirm_mapping)
+        btn_layout.addWidget(confirm_btn)
+
         btn_layout.addStretch()
         preview_layout.addLayout(btn_layout)
 
-        self.layout.addStretch()
+        self._layout.addStretch()
 
         # 初始扫描
         self._refresh_scan()
@@ -7149,29 +10359,44 @@ class ImportPage(BasePage):
             row = self.config_table.rowCount()
             self.config_table.insertRow(row)
             self.config_table.setItem(row, 0, QTableWidgetItem(key))
-            self.config_table.setItem(row, 1, QTableWidgetItem(info["path"]))
+            path_item = QTableWidgetItem(info["path"])
+            path_item.setToolTip(info["path"])
+            self.config_table.setItem(row, 1, path_item)
             status = "已检测" if info["exists"] else "未找到"
             self.config_table.setItem(row, 2, QTableWidgetItem(status))
 
+    def _select_manual_file(self):
+        """手动选择配置文件"""
+        source = self.manual_source_combo.currentText()
+        if not source:
+            return
+
+        file_filter = "配置文件 (*.json *.jsonc *.toml);;所有文件 (*.*)"
+        path, _ = QFileDialog.getOpenFileName(self, "选择配置文件", "", file_filter)
+        if not path:
+            return
+
+        source_map = {
+            "Claude Code Settings": "claude",
+            "Claude Providers": "claude_providers",
+            "Codex Config": "codex",
+            "Gemini Config": "gemini",
+            "CC-Switch Config": "ccswitch",
+        }
+        source_key = source_map.get(source)
+        if not source_key:
+            return
+
+        ConfigPaths.set_import_path(source_key, Path(path))
+        self._refresh_scan()
+
     def _on_select(self):
-        """选中配置时显示预览"""
+        """选中配置时记录当前选择"""
         row = self.config_table.currentRow()
         if row < 0:
             return
 
-        source = self.config_table.item(row, 0).text()
-        results = self.import_service.scan_external_configs()
-
-        if source in results and results[source]["data"]:
-            import json
-
-            self.preview_edit.setPlainText(
-                json.dumps(results[source]["data"], indent=2, ensure_ascii=False)
-            )
-            self.convert_edit.setPlainText("")
-        else:
-            self.preview_edit.setPlainText("无数据")
-            self.convert_edit.setPlainText("")
+        self._last_converted = None
 
     def _preview_convert(self):
         """预览转换结果"""
@@ -7188,14 +10413,72 @@ class ImportPage(BasePage):
             converted = self.import_service.convert_to_opencode(
                 source_type, results[source]["data"]
             )
-            if converted:
-                import json
-
-                self.convert_edit.setPlainText(
-                    json.dumps(converted, indent=2, ensure_ascii=False)
-                )
-            else:
+            if not converted:
                 self.show_warning("提示", "无法转换此配置格式")
+                return
+
+            import json
+
+            self._last_converted = converted
+
+            dialog = BaseDialog(self)
+            dialog.setWindowTitle("配置转换预览")
+            dialog.setMinimumSize(900, 520)
+
+            layout = QVBoxLayout(dialog)
+            layout.setSpacing(12)
+
+            columns_layout = QHBoxLayout()
+            columns_layout.setSpacing(12)
+
+            left_layout = QVBoxLayout()
+            left_layout.addWidget(SubtitleLabel("原始配置", dialog))
+            source_edit = TextEdit(dialog)
+            source_edit.setReadOnly(True)
+            source_edit.setPlainText(
+                json.dumps(results[source]["data"], indent=2, ensure_ascii=False)
+            )
+            left_layout.addWidget(source_edit)
+
+            right_layout = QVBoxLayout()
+            right_layout.addWidget(SubtitleLabel("转换后的 OpenCode 配置", dialog))
+            convert_edit = TextEdit(dialog)
+            convert_edit.setReadOnly(True)
+            convert_edit.setPlainText(
+                json.dumps(converted, indent=2, ensure_ascii=False)
+            )
+            right_layout.addWidget(convert_edit)
+
+            is_dark = isDarkTheme()
+            dialog._preview_highlighters = [
+                JsonTomlHighlighter(
+                    source_edit.document(), is_dark, prefer_toml=source_type == "codex"
+                ),
+                JsonTomlHighlighter(convert_edit.document(), is_dark),
+            ]
+
+            def update_source_match():
+                apply_bracket_match_highlight(source_edit, is_dark)
+
+            def update_convert_match():
+                apply_bracket_match_highlight(convert_edit, is_dark)
+
+            source_edit.cursorPositionChanged.connect(update_source_match)
+            convert_edit.cursorPositionChanged.connect(update_convert_match)
+            update_source_match()
+            update_convert_match()
+
+            columns_layout.addLayout(left_layout, 1)
+            columns_layout.addLayout(right_layout, 1)
+            layout.addLayout(columns_layout, 1)
+
+            close_btn = PrimaryPushButton("关闭", dialog)
+            close_btn.clicked.connect(dialog.accept)
+            layout.addWidget(close_btn, alignment=Qt.AlignRight)
+
+            dialog.exec_()
+        else:
+            self.show_warning("提示", "所选配置不存在或为空")
 
     def _import_selected(self):
         """导入选中的配置"""
@@ -7220,6 +10503,19 @@ class ImportPage(BasePage):
             self.show_warning("提示", "无法转换此配置格式")
             return
 
+        # 打开确认映射对话框
+        dialog = ImportMappingDialog(self.main_window, converted, parent=self)
+        if not dialog.exec_():
+            return
+        confirmed = dialog.get_confirmed_config()
+        if not confirmed:
+            self.show_warning("提示", "未确认任何有效的导入配置")
+            return
+
+        self._apply_import(source, confirmed)
+
+    def _apply_import(self, source: str, converted: Dict[str, Any]):
+        """应用导入配置"""
         # 确认导入
         provider_count = len(converted.get("provider", {}))
         perm_count = len(converted.get("permission", {}))
@@ -7254,8 +10550,143 @@ class ImportPage(BasePage):
         if self.main_window.save_opencode_config():
             self.show_success("成功", f"已导入 {source} 的配置")
 
+    def _confirm_mapping(self):
+        """手动确认映射"""
+        if not self._last_converted:
+            self.show_warning("提示", "请先预览转换结果")
+            return
+        dialog = ImportMappingDialog(
+            self.main_window, self._last_converted, parent=self
+        )
+        if not dialog.exec_():
+            return
+        confirmed = dialog.get_confirmed_config()
+        if not confirmed:
+            self.show_warning("提示", "未确认任何有效的导入配置")
+            return
+        self._apply_import("手动确认", confirmed)
+
 
 # ==================== Backup 对话框 ====================
+class ImportMappingDialog(BaseDialog):
+    """导入映射确认对话框（仅必需字段）"""
+
+    def __init__(self, main_window, converted: Dict[str, Any], parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+        self.converted = converted or {}
+        self._confirmed: Dict[str, Any] = {}
+
+        self.setWindowTitle("确认导入映射")
+        self.setMinimumWidth(560)
+        self.setFixedHeight(520)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        layout.addWidget(SubtitleLabel("请确认必要字段", self))
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        scroll_container = QWidget(scroll)
+        scroll_layout = QVBoxLayout(scroll_container)
+        scroll_layout.setSpacing(12)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+
+        providers = self.converted.get("provider", {})
+        if not providers:
+            scroll_layout.addWidget(
+                BodyLabel("未检测到可导入的 Provider", scroll_container)
+            )
+        else:
+            self.provider_edits = {}
+            for provider_key, provider_data in providers.items():
+                card = SimpleCardWidget(scroll_container)
+                card_layout = QVBoxLayout(card)
+                card_layout.setSpacing(8)
+
+                card_layout.addWidget(
+                    StrongBodyLabel(f"Provider: {provider_key}", card)
+                )
+
+                name_layout = QHBoxLayout()
+                name_layout.addWidget(BodyLabel("显示名称:", card))
+                name_edit = LineEdit(card)
+                name_edit.setText(provider_data.get("name", ""))
+                name_layout.addWidget(name_edit)
+                card_layout.addLayout(name_layout)
+
+                key_layout = QHBoxLayout()
+                key_layout.addWidget(BodyLabel("API Key:", card))
+                key_edit = LineEdit(card)
+                key_edit.setText(provider_data.get("options", {}).get("apiKey", ""))
+                key_layout.addWidget(key_edit)
+                card_layout.addLayout(key_layout)
+
+                url_layout = QHBoxLayout()
+                url_layout.addWidget(BodyLabel("BaseURL:", card))
+                url_edit = LineEdit(card)
+                url_edit.setText(provider_data.get("options", {}).get("baseURL", ""))
+                url_layout.addWidget(url_edit)
+                card_layout.addLayout(url_layout)
+
+                self.provider_edits[provider_key] = {
+                    "name": name_edit,
+                    "apiKey": key_edit,
+                    "baseURL": url_edit,
+                }
+
+                scroll_layout.addWidget(card)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_container)
+        layout.addWidget(scroll, 1)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        cancel_btn = PushButton("取消", self)
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        ok_btn = PrimaryPushButton("确认导入", self)
+        ok_btn.clicked.connect(self._on_confirm)
+        btn_layout.addWidget(ok_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _on_confirm(self):
+        providers = {}
+        for provider_key, edits in getattr(self, "provider_edits", {}).items():
+            name = edits["name"].text().strip()
+            api_key = edits["apiKey"].text().strip()
+            base_url = edits["baseURL"].text().strip()
+            if not name and not api_key and not base_url:
+                continue
+            original = self.converted.get("provider", {}).get(provider_key, {})
+            providers[provider_key] = {
+                "npm": original.get("npm", ""),
+                "name": name,
+                "options": {
+                    "apiKey": api_key,
+                    "baseURL": base_url,
+                },
+                "models": original.get("models", {}),
+            }
+
+        self._confirmed = {
+            "provider": providers,
+            "permission": self.converted.get("permission", {}),
+        }
+        self.accept()
+
+    def get_confirmed_config(self) -> Dict[str, Any]:
+        return self._confirmed
+
+
 class BackupDialog(BaseDialog):
     """备份恢复对话框"""
 
@@ -7289,6 +10720,14 @@ class BackupDialog(BaseDialog):
         refresh_btn = PushButton(FIF.SYNC, "刷新", self)
         refresh_btn.clicked.connect(self._load_backups)
         toolbar.addWidget(refresh_btn)
+
+        open_dir_btn = PushButton(FIF.FOLDER, "打开备份目录", self)
+        open_dir_btn.clicked.connect(self._open_backup_dir)
+        toolbar.addWidget(open_dir_btn)
+
+        preview_btn = PushButton(FIF.VIEW, "预览内容", self)
+        preview_btn.clicked.connect(self._preview_backup)
+        toolbar.addWidget(preview_btn)
 
         layout.addLayout(toolbar)
 
@@ -7336,7 +10775,9 @@ class BackupDialog(BaseDialog):
             self.backup_table.setItem(row, 0, QTableWidgetItem(backup["name"]))
             self.backup_table.setItem(row, 1, QTableWidgetItem(backup["timestamp"]))
             self.backup_table.setItem(row, 2, QTableWidgetItem(backup["tag"]))
-            self.backup_table.setItem(row, 3, QTableWidgetItem(str(backup["path"])))
+            path_item = QTableWidgetItem(str(backup["path"]))
+            path_item.setToolTip(str(backup["path"]))
+            self.backup_table.setItem(row, 3, path_item)
 
     def _backup_opencode(self):
         """备份 OpenCode 配置"""
@@ -7359,6 +10800,43 @@ class BackupDialog(BaseDialog):
             self._load_backups()
         else:
             InfoBar.error("错误", "备份失败", parent=self)
+
+    def _open_backup_dir(self):
+        """打开备份目录"""
+        backup_dir = str(self.backup_manager.backup_dir)
+        if backup_dir:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(backup_dir))
+
+    def _preview_backup(self):
+        """预览选中备份内容"""
+        row = self.backup_table.currentRow()
+        if row < 0:
+            InfoBar.warning("提示", "请先选择一个备份", parent=self)
+            return
+        backup_path = Path(self.backup_table.item(row, 3).text())
+        if not backup_path.exists():
+            InfoBar.error("错误", "备份文件不存在", parent=self)
+            return
+        try:
+            with open(backup_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as e:
+            InfoBar.error("错误", f"无法读取备份内容: {e}", parent=self)
+            return
+
+        dialog = BaseDialog(self)
+        dialog.setWindowTitle("备份内容预览")
+        dialog.setMinimumSize(700, 500)
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(12)
+        text_edit = TextEdit(dialog)
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(content)
+        layout.addWidget(text_edit)
+        close_btn = PrimaryPushButton("关闭", dialog)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        dialog.exec_()
 
     def _restore_backup(self):
         """恢复备份"""
