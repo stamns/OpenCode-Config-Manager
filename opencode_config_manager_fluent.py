@@ -31,6 +31,28 @@ v1.0.1 更新：
 - 自动检测 .jsonc 和 .json 双扩展名
 """
 
+# 修复 PyInstaller 打包后中文用户名导致的 DLL 加载问题
+# 必须在所有其他 import 之前执行
+import os
+import sys
+
+if sys.platform == "win32" and getattr(sys, "frozen", False):
+    # 检查临时目录路径是否包含非 ASCII 字符
+    temp_dir = os.environ.get("TEMP", "")
+    try:
+        temp_dir.encode("ascii")
+    except UnicodeEncodeError:
+        # 路径包含非 ASCII 字符，使用安全的临时目录
+        safe_temp = "C:\\Temp"
+        if not os.path.exists(safe_temp):
+            try:
+                os.makedirs(safe_temp)
+            except OSError:
+                pass
+        if os.path.exists(safe_temp):
+            os.environ["TEMP"] = safe_temp
+            os.environ["TMP"] = safe_temp
+
 import sys
 import json
 import re
@@ -370,7 +392,7 @@ class UIConfig:
         """
 
 
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.1.4"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

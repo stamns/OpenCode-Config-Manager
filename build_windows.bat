@@ -2,7 +2,7 @@
 chcp 65001 > nul
 REM ============================================================
 REM OpenCode Config Manager - Windows Build Script
-REM v1.1.3 Fluent (PyQt5 + QFluentWidgets)
+REM v1.1.4 Fluent (PyQt5 + QFluentWidgets)
 REM ============================================================
 REM
 REM 使用方法:
@@ -16,7 +16,7 @@ REM ============================================================
 
 setlocal enabledelayedexpansion
 
-set VERSION=1.1.3
+set VERSION=1.1.4
 set MAIN_SCRIPT=opencode_config_manager_fluent.py
 
 echo ========================================
