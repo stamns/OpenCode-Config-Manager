@@ -37,18 +37,17 @@
 
 ---
 
-## 🎯 v1.0.9 最新版本
+## 🎯 v1.1.6 最新版本
 
 ### 🆕 新功能
-- **配置文件冲突检测** - 启动时自动检测 `.json` 和 `.jsonc` 冲突，用户选择保留哪个
-- **配置格式验证器** - 启动时自动检测并修复配置问题
-- **JSONC 注释支持** - 完美兼容带注释的配置文件
-- **自定义路径** - 支持切换到项目级配置或任意配置文件
+- **Skill 发现与浏览** - 扫描 OpenCode 和 Claude 兼容路径，显示已有 Skill
+- **完整 SKILL.md 编辑** - 支持 license、compatibility 等完整 frontmatter
+- **Agent 级别权限** - 为特定 Agent 配置 Skill 权限或禁用 Skill 工具
+- **Claude 兼容路径** - 完整支持 `.claude/skills/` 路径
 
-### 🐛 修复
-- Category 和 Agent 描述丢失问题（因 `.jsonc` 优先级导致）
-- 版本检查线程安全问题
-- MCP 服务器 type 字段缺失
+### 🔧 优化
+- Skill 页面重构为 3 标签页布局
+- 新增 SkillDiscovery 类统一管理 Skill 发现
 
 ---
 
@@ -181,17 +180,14 @@ python opencode_config_manager_fluent.py
 
 详见 [CHANGELOG.md](CHANGELOG.md)
 
-### v1.0.9 (最新)
+### v1.1.6 (最新)
+- 🆕 Skill 发现与浏览（支持 Claude 兼容路径）
+- 🆕 完整 SKILL.md 创建/编辑
+- 🆕 Agent 级别 Skill 权限配置
+
+### v1.0.9
 - 🆕 配置文件冲突检测（.json vs .jsonc）
 - 🐛 修复 Category 和 Agent 描述丢失问题
-
-### v1.0.8
-- 🐛 修复版本检查线程安全问题
-- 🐛 修复 PyInstaller 打包资源路径问题
-
-### v1.0.7
-- 🆕 配置格式验证器和自动修复功能
-- 🐛 防御性类型检查，修复配置异常崩溃
 
 [查看完整更新日志 →](CHANGELOG.md)
 

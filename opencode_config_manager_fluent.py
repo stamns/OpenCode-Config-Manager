@@ -137,6 +137,442 @@ class MonitorResult:
     message: str
 
 
+# ==================== 原生 Provider 认证管理 ====================
+class AuthManager:
+    """认证凭证管理器 - 管理 auth.json 文件的读写操作
+    
+    auth.json 存储原生 Provider 的认证凭证，路径：
+    - Windows: %LOCALAPPDATA%/opencode/auth.json 或 ~/.local/share/opencode/auth.json
+    - macOS/Linux: ~/.local/share/opencode/auth.json
+    """
+    
+    def __init__(self):
+        self._auth_path: Optional[Path] = None
+    
+    @property
+    def auth_path(self) -> Path:
+        """获取 auth.json 路径（延迟初始化）"""
+        if self._auth_path is None:
+            self._auth_path = self._get_auth_path()
+        return self._auth_path
+    
+    def _get_auth_path(self) -> Path:
+        """获取 auth.json 路径（跨平台支持）
+        
+        Windows: 优先使用 %LOCALAPPDATA%/opencode，回退到 ~/.local/share/opencode
+        Unix: 使用 ~/.local/share/opencode
+        """
+        if sys.platform == "win32":
+            # Windows: 优先使用 LOCALAPPDATA
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if local_app_data:
+                base = Path(local_app_data) / "opencode"
+            else:
+                # 回退到 Unix 风格路径
+                base = Path.home() / ".local" / "share" / "opencode"
+        else:
+            # macOS / Linux
+            base = Path.home() / ".local" / "share" / "opencode"
+        
+        return base / "auth.json"
+    
+    def _ensure_parent_dir(self) -> None:
+        """确保 auth.json 的父目录存在"""
+        parent = self.auth_path.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+    
+    def read_auth(self) -> Dict[str, Any]:
+        """读取 auth.json 文件
+        
+        Returns:
+            认证配置字典，文件不存在时返回空字典
+            
+        Raises:
+            json.JSONDecodeError: 当文件格式错误时（由调用方处理）
+        """
+        if not self.auth_path.exists():
+            return {}
+        
+        try:
+            with open(self.auth_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if not content:
+                    return {}
+                return json.loads(content)
+        except json.JSONDecodeError:
+            # 重新抛出，让调用方决定如何处理
+            raise
+        except Exception:
+            # 其他读取错误，返回空字典
+            return {}
+    
+    def write_auth(self, auth_data: Dict[str, Any]) -> None:
+        """写入 auth.json 文件
+        
+        Args:
+            auth_data: 要写入的认证配置字典
+        """
+        self._ensure_parent_dir()
+        with open(self.auth_path, "w", encoding="utf-8") as f:
+            json.dump(auth_data, f, indent=2, ensure_ascii=False)
+    
+    def get_provider_auth(self, provider_id: str) -> Optional[Dict[str, Any]]:
+        """获取指定 Provider 的认证信息
+        
+        Args:
+            provider_id: Provider 标识符（如 'anthropic', 'openai'）
+            
+        Returns:
+            Provider 的认证配置字典，不存在时返回 None
+        """
+        auth_data = self.read_auth()
+        return auth_data.get(provider_id)
+    
+    def set_provider_auth(self, provider_id: str, auth_config: Dict[str, Any]) -> None:
+        """设置指定 Provider 的认证信息
+        
+        Args:
+            provider_id: Provider 标识符
+            auth_config: 认证配置字典（如 {'apiKey': 'sk-xxx'}）
+        """
+        auth_data = self.read_auth()
+        auth_data[provider_id] = auth_config
+        self.write_auth(auth_data)
+    
+    def delete_provider_auth(self, provider_id: str) -> bool:
+        """删除指定 Provider 的认证信息
+        
+        Args:
+            provider_id: Provider 标识符
+            
+        Returns:
+            是否成功删除（Provider 不存在时返回 False）
+        """
+        auth_data = self.read_auth()
+        if provider_id in auth_data:
+            del auth_data[provider_id]
+            self.write_auth(auth_data)
+            return True
+        return False
+    
+    @staticmethod
+    def mask_api_key(api_key: str) -> str:
+        """遮蔽 API Key，只显示首尾字符
+        
+        Args:
+            api_key: 原始 API Key
+            
+        Returns:
+            遮蔽后的字符串：
+            - 长度 > 8: 显示首 4 字符 + ... + 尾 4 字符
+            - 长度 <= 8: 显示 ****
+        """
+        if not api_key:
+            return ""
+        if len(api_key) <= 8:
+            return "****"
+        return f"{api_key[:4]}...{api_key[-4:]}"
+
+
+# ==================== 原生 Provider 配置数据类 ====================
+@dataclass
+class AuthField:
+    """认证字段定义"""
+    key: str           # 字段键名（如 'apiKey', 'accessKeyId'）
+    label: str         # 显示标签（如 'API Key', 'Access Key ID'）
+    field_type: str    # 字段类型: text, password, file
+    required: bool     # 是否必填
+    placeholder: str   # 占位符文本
+
+
+@dataclass
+class OptionField:
+    """选项字段定义"""
+    key: str                    # 字段键名（如 'baseURL', 'region'）
+    label: str                  # 显示标签
+    field_type: str             # 字段类型: text, select
+    options: List[str]          # 可选值（select 类型时使用）
+    default: str                # 默认值
+
+
+@dataclass
+class NativeProviderConfig:
+    """原生 Provider 配置定义"""
+    id: str                              # Provider ID（如 'anthropic', 'openai'）
+    name: str                            # 显示名称（如 'Anthropic (Claude)'）
+    sdk: str                             # SDK 包名（如 '@ai-sdk/anthropic'）
+    auth_fields: List[AuthField]         # 认证字段列表
+    option_fields: List[OptionField]     # 选项字段列表
+    env_vars: List[str]                  # 相关环境变量
+    test_endpoint: Optional[str]         # 测试端点（用于连接测试）
+
+
+# 所有支持的原生 Provider 配置
+NATIVE_PROVIDERS: List[NativeProviderConfig] = [
+    NativeProviderConfig(
+        id="anthropic",
+        name="Anthropic (Claude)",
+        sdk="@ai-sdk/anthropic",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, "sk-ant-..."),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], ""),
+        ],
+        env_vars=["ANTHROPIC_API_KEY"],
+        test_endpoint="/v1/models",
+    ),
+    NativeProviderConfig(
+        id="openai",
+        name="OpenAI",
+        sdk="@ai-sdk/openai",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, "sk-..."),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], ""),
+        ],
+        env_vars=["OPENAI_API_KEY"],
+        test_endpoint="/v1/models",
+    ),
+    NativeProviderConfig(
+        id="gemini",
+        name="Google Gemini",
+        sdk="@ai-sdk/google",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], ""),
+        ],
+        env_vars=["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        test_endpoint="/v1/models",
+    ),
+    NativeProviderConfig(
+        id="amazon-bedrock",
+        name="Amazon Bedrock",
+        sdk="@ai-sdk/amazon-bedrock",
+        auth_fields=[
+            AuthField("accessKeyId", "Access Key ID", "password", False, "AKIA..."),
+            AuthField("secretAccessKey", "Secret Access Key", "password", False, ""),
+            AuthField("profile", "AWS Profile", "text", False, "default"),
+        ],
+        option_fields=[
+            OptionField("region", "Region", "select",
+                       ["us-east-1", "us-west-2", "eu-west-1", "ap-northeast-1"], "us-east-1"),
+            OptionField("endpoint", "VPC Endpoint", "text", [], ""),
+        ],
+        env_vars=["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE", "AWS_REGION"],
+        test_endpoint=None,
+    ),
+    NativeProviderConfig(
+        id="azure",
+        name="Azure OpenAI",
+        sdk="@ai-sdk/azure",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+            AuthField("resourceName", "Resource Name", "text", True, ""),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], ""),
+        ],
+        env_vars=["AZURE_OPENAI_API_KEY", "AZURE_RESOURCE_NAME"],
+        test_endpoint=None,
+    ),
+    NativeProviderConfig(
+        id="copilot",
+        name="GitHub Copilot",
+        sdk="@ai-sdk/openai",
+        auth_fields=[
+            AuthField("token", "GitHub Token", "password", True, ""),
+        ],
+        option_fields=[],
+        env_vars=[],
+        test_endpoint=None,
+    ),
+    NativeProviderConfig(
+        id="xai",
+        name="xAI (Grok)",
+        sdk="@ai-sdk/xai",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], ""),
+        ],
+        env_vars=["XAI_API_KEY"],
+        test_endpoint="/v1/models",
+    ),
+    NativeProviderConfig(
+        id="groq",
+        name="Groq",
+        sdk="@ai-sdk/groq",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, "gsk_..."),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], ""),
+        ],
+        env_vars=["GROQ_API_KEY"],
+        test_endpoint="/openai/v1/models",
+    ),
+    NativeProviderConfig(
+        id="openrouter",
+        name="OpenRouter",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, "sk-or-..."),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], "https://openrouter.ai/api/v1"),
+        ],
+        env_vars=["OPENROUTER_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="vertexai",
+        name="Google Vertex AI",
+        sdk="@ai-sdk/google-vertex",
+        auth_fields=[
+            AuthField("credentials", "Service Account JSON", "file", False, ""),
+            AuthField("projectId", "Project ID", "text", True, ""),
+        ],
+        option_fields=[
+            OptionField("location", "Location", "select",
+                       ["global", "us-central1", "us-east1", "europe-west1", "asia-east1"], "global"),
+        ],
+        env_vars=["GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "VERTEX_LOCATION"],
+        test_endpoint=None,
+    ),
+    NativeProviderConfig(
+        id="deepseek",
+        name="DeepSeek",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, "sk-..."),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], "https://api.deepseek.com"),
+        ],
+        env_vars=["DEEPSEEK_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="opencode",
+        name="OpenCode Zen",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField("baseURL", "Base URL", "text", [], "https://api.opencode.ai/v1"),
+        ],
+        env_vars=[],
+        test_endpoint="/models",
+    ),
+]
+
+
+def get_native_provider(provider_id: str) -> Optional[NativeProviderConfig]:
+    """根据 ID 获取原生 Provider 配置"""
+    for provider in NATIVE_PROVIDERS:
+        if provider.id == provider_id:
+            return provider
+    return None
+
+
+# ==================== 环境变量检测器 ====================
+class EnvVarDetector:
+    """环境变量检测器 - 检测系统中已设置的 Provider 相关环境变量"""
+    
+    # Provider 与环境变量的映射
+    PROVIDER_ENV_VARS: Dict[str, List[str]] = {
+        "anthropic": ["ANTHROPIC_API_KEY"],
+        "openai": ["OPENAI_API_KEY"],
+        "gemini": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "amazon-bedrock": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE", "AWS_REGION"],
+        "azure": ["AZURE_OPENAI_API_KEY", "AZURE_RESOURCE_NAME"],
+        "xai": ["XAI_API_KEY"],
+        "groq": ["GROQ_API_KEY"],
+        "openrouter": ["OPENROUTER_API_KEY"],
+        "vertexai": ["GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "VERTEX_LOCATION"],
+        "deepseek": ["DEEPSEEK_API_KEY"],
+    }
+    
+    # 环境变量到认证字段的映射
+    ENV_TO_AUTH_FIELD: Dict[str, str] = {
+        "ANTHROPIC_API_KEY": "apiKey",
+        "OPENAI_API_KEY": "apiKey",
+        "GEMINI_API_KEY": "apiKey",
+        "GOOGLE_API_KEY": "apiKey",
+        "AWS_ACCESS_KEY_ID": "accessKeyId",
+        "AWS_SECRET_ACCESS_KEY": "secretAccessKey",
+        "AWS_PROFILE": "profile",
+        "AZURE_OPENAI_API_KEY": "apiKey",
+        "AZURE_RESOURCE_NAME": "resourceName",
+        "XAI_API_KEY": "apiKey",
+        "GROQ_API_KEY": "apiKey",
+        "OPENROUTER_API_KEY": "apiKey",
+        "GOOGLE_APPLICATION_CREDENTIALS": "credentials",
+        "GOOGLE_CLOUD_PROJECT": "projectId",
+        "DEEPSEEK_API_KEY": "apiKey",
+    }
+    
+    def detect_env_vars(self, provider_id: str) -> Dict[str, str]:
+        """检测指定 Provider 的环境变量
+        
+        Args:
+            provider_id: Provider 标识符
+            
+        Returns:
+            已设置的环境变量字典 {变量名: 值}
+        """
+        env_vars = self.PROVIDER_ENV_VARS.get(provider_id, [])
+        detected = {}
+        for var in env_vars:
+            value = os.environ.get(var)
+            if value:
+                detected[var] = value
+        return detected
+    
+    def detect_all_env_vars(self) -> Dict[str, Dict[str, str]]:
+        """检测所有 Provider 的环境变量
+        
+        Returns:
+            {provider_id: {变量名: 值}}
+        """
+        result = {}
+        for provider_id in self.PROVIDER_ENV_VARS:
+            detected = self.detect_env_vars(provider_id)
+            if detected:
+                result[provider_id] = detected
+        return result
+    
+    @staticmethod
+    def format_env_reference(var_name: str) -> str:
+        """格式化环境变量引用
+        
+        Args:
+            var_name: 环境变量名
+            
+        Returns:
+            格式化的引用字符串 {env:VARIABLE_NAME}
+        """
+        return f"{{env:{var_name}}}"
+    
+    def get_auth_field_for_env(self, env_var: str) -> Optional[str]:
+        """获取环境变量对应的认证字段名
+        
+        Args:
+            env_var: 环境变量名
+            
+        Returns:
+            对应的认证字段名，未找到时返回 None
+        """
+        return self.ENV_TO_AUTH_FIELD.get(env_var)
+
+
 STATUS_LABELS = {
     "operational": "正常",
     "degraded": "延迟",
@@ -159,7 +595,7 @@ STATUS_BG_COLORS = {
     "degraded": "#3D3018",
     "failed": "#3D1B1B",
     "error": "#3D1B1B",
-    "no_config": "#2D2D2D",
+    "no_config": "#0d1117",
 }
 
 
@@ -298,8 +734,8 @@ from qfluentwidgets import (
 class UIConfig:
     """全局 UI 配置"""
 
-    # 字体配置
-    FONT_FAMILY = "JetBrains Mono"
+    # 字体配置 - 使用系统默认字体，更清晰
+    FONT_FAMILY = "Microsoft YaHei UI, Segoe UI, PingFang SC, Helvetica Neue, Arial"
     FONT_SIZE_TITLE = 16
     FONT_SIZE_BODY = 14
     FONT_SIZE_SMALL = 12
@@ -310,6 +746,11 @@ class UIConfig:
     COLOR_SUCCESS = "#4CAF50"  # 成功
     COLOR_WARNING = "#FF9800"  # 警告
     COLOR_ERROR = "#F44336"  # 错误
+    
+    # 深色主题颜色 (GitHub Dark 风格 - 接近纯黑)
+    DARK_BG = "#0d1117"           # 主背景
+    DARK_CARD = "#161b22"         # 卡片背景
+    DARK_BORDER = "#30363d"       # 边框
 
     # 布局
     WINDOW_WIDTH = 1200
@@ -317,7 +758,7 @@ class UIConfig:
 
     @staticmethod
     def get_stylesheet() -> str:
-        """获取全局 QSS 样式表 - 仅设置字体，颜色由 QFluentWidgets 主题控制"""
+        """获取全局 QSS 样式表 - 只设置字体，颜色由主题控制"""
         return f"""
             /* ==================== 全局字体 ==================== */
             * {{
@@ -368,8 +809,8 @@ class UIConfig:
                 font-size: {UIConfig.FONT_SIZE_BODY}px;
             }}
             QHeaderView::section {{
-                font-weight: bold;
-                font-size: {UIConfig.FONT_SIZE_BODY}px;
+                font-weight: 600;
+                font-size: 12px;
             }}
 
             /* ==================== 列表字体 ==================== */
@@ -377,7 +818,7 @@ class UIConfig:
                 font-size: {UIConfig.FONT_SIZE_BODY}px;
             }}
 
-            /* ==================== 滚动条样式（紧凑） ==================== */
+            /* ==================== 滚动条样式 ==================== */
             QScrollBar:vertical {{
                 width: 8px;
             }}
@@ -392,7 +833,7 @@ class UIConfig:
         """
 
 
-APP_VERSION = "1.1.5"
+APP_VERSION = "1.1.6"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -2668,13 +3109,18 @@ class ConfigValidator:
 class ModelRegistry:
     """模型注册表 - 管理所有已配置的模型"""
 
-    def __init__(self, opencode_config: Optional[Dict]):
+    def __init__(self, opencode_config: Optional[Dict], auth_manager: Optional[AuthManager] = None):
         self.config = opencode_config or {}
+        self.auth_manager = auth_manager or AuthManager()
         self.models: Dict[str, bool] = {}
+        self.native_providers: Dict[str, bool] = {}  # 已配置的原生 Provider
         self.refresh()
 
     def refresh(self):
         self.models = {}
+        self.native_providers = {}
+        
+        # 获取自定义 Provider 的模型
         providers = self.config.get("provider", {})
         for provider_name, provider_data in providers.items():
             if not isinstance(provider_data, dict):
@@ -2683,9 +3129,26 @@ class ModelRegistry:
             for model_id in models.keys():
                 full_ref = f"{provider_name}/{model_id}"
                 self.models[full_ref] = True
+        
+        # 获取已配置的原生 Provider
+        try:
+            auth_data = self.auth_manager.read_auth()
+            for provider_id in auth_data:
+                if auth_data[provider_id]:  # 有认证数据
+                    self.native_providers[provider_id] = True
+        except Exception:
+            pass
 
     def get_all_models(self) -> List[str]:
         return list(self.models.keys())
+    
+    def get_configured_native_providers(self) -> List[str]:
+        """获取已配置的原生 Provider ID 列表"""
+        return list(self.native_providers.keys())
+    
+    def is_native_provider_configured(self, provider_id: str) -> bool:
+        """检查原生 Provider 是否已配置"""
+        return provider_id in self.native_providers
 
 
 class ImportService:
@@ -3346,10 +3809,10 @@ class BaseDialog(QDialog):
                     color: #FFFFFF;
                 }
                 QTableWidget {
-                    background-color: #2D2D2D;
+                    background-color: #0d1117;
                     color: #E0E0E0;
-                    gridline-color: #404040;
-                    border: 1px solid #404040;
+                    gridline-color: #30363d;
+                    border: 1px solid #30363d;
                 }
                 QTableWidget::item {
                     padding: 6px;
@@ -3358,17 +3821,17 @@ class BaseDialog(QDialog):
                     background-color: #0078D4;
                 }
                 QHeaderView::section {
-                    background-color: #333333;
+                    background-color: #161b22;
                     color: #B0B0B0;
                     border: none;
-                    border-bottom: 1px solid #404040;
+                    border-bottom: 1px solid #30363d;
                     padding: 8px;
                     font-weight: bold;
                 }
                 QTextEdit, TextEdit {
-                    background-color: #2D2D2D;
+                    background-color: #0d1117;
                     color: #E0E0E0;
-                    border: 1px solid #404040;
+                    border: 1px solid #30363d;
                 }
             """)
         else:
@@ -3531,7 +3994,7 @@ class HomePage(BasePage):
         right_layout.setSpacing(6)
 
         title_label = TitleLabel(f"OpenCode Config Manager v{APP_VERSION}", about_card)
-        title_label.setStyleSheet("font-size: 28px; font-weight: bold;")
+        title_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #e6edf3;")
         right_layout.addWidget(title_label)
 
         right_layout.addWidget(
@@ -3562,9 +4025,15 @@ class HomePage(BasePage):
         paths_card = self.add_card("配置文件路径")
         paths_layout = paths_card.layout()
 
+        # 路径标签样式
+        def create_path_label(text):
+            label = StrongBodyLabel(text)
+            label.setStyleSheet("color: #58a6ff; min-width: 120px;")
+            return label
+
         # OpenCode 配置路径
         oc_layout = QHBoxLayout()
-        oc_layout.addWidget(BodyLabel("OpenCode:", paths_card))
+        oc_layout.addWidget(create_path_label("OpenCode:"))
         self.oc_path_label = CaptionLabel(
             str(ConfigPaths.get_opencode_config()), paths_card
         )
@@ -3593,7 +4062,7 @@ class HomePage(BasePage):
 
         # Oh My OpenCode 配置路径
         ohmy_layout = QHBoxLayout()
-        ohmy_layout.addWidget(BodyLabel("Oh My OpenCode:", paths_card))
+        ohmy_layout.addWidget(create_path_label("Oh My OpenCode:"))
         self.ohmy_path_label = CaptionLabel(
             str(ConfigPaths.get_ohmyopencode_config()), paths_card
         )
@@ -3624,7 +4093,7 @@ class HomePage(BasePage):
 
         # 备份目录路径
         backup_layout = QHBoxLayout()
-        backup_layout.addWidget(BodyLabel("备份目录:", paths_card))
+        backup_layout.addWidget(create_path_label("备份目录:"))
         self.backup_path_label = CaptionLabel(
             str(ConfigPaths.get_backup_dir()), paths_card
         )
@@ -3655,33 +4124,49 @@ class HomePage(BasePage):
         stats_card = self.add_card("配置统计")
         stats_layout = stats_card.layout()
 
-        self.stats_grid = QGridLayout()
-        self.stats_grid.setSpacing(16)
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(24)
 
-        # 统计项标签
-        self.provider_count_label = BodyLabel("0", stats_card)
-        self.model_count_label = BodyLabel("0", stats_card)
-        self.mcp_count_label = BodyLabel("0", stats_card)
-        self.agent_count_label = BodyLabel("0", stats_card)
-        self.ohmy_agent_count_label = BodyLabel("0", stats_card)
-        self.category_count_label = BodyLabel("0", stats_card)
+        # 统计项 - 横向显示，数值加粗变色
+        def create_stat_item(label_text, parent):
+            container = QWidget(parent)
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(6)
+            
+            label = CaptionLabel(label_text, container)
+            label.setStyleSheet("color: #7d8590;")
+            layout.addWidget(label)
+            
+            value = StrongBodyLabel("0", container)
+            value.setStyleSheet("font-size: 14px; color: #58a6ff;")
+            layout.addWidget(value)
+            
+            return container, value
+
+        self.provider_count_label = None
+        self.model_count_label = None
+        self.mcp_count_label = None
+        self.agent_count_label = None
+        self.ohmy_agent_count_label = None
+        self.category_count_label = None
 
         stats_items = [
-            ("Provider 数量:", self.provider_count_label),
-            ("Model 数量:", self.model_count_label),
-            ("MCP 服务器:", self.mcp_count_label),
-            ("OpenCode Agent:", self.agent_count_label),
-            ("Oh My Agent:", self.ohmy_agent_count_label),
-            ("Category:", self.category_count_label),
+            ("Provider:", "provider_count_label"),
+            ("Model:", "model_count_label"),
+            ("MCP:", "mcp_count_label"),
+            ("Agent:", "agent_count_label"),
+            ("Oh My Agent:", "ohmy_agent_count_label"),
+            ("Category:", "category_count_label"),
         ]
 
-        for i, (label_text, value_label) in enumerate(stats_items):
-            row = i // 3
-            col = (i % 3) * 2
-            self.stats_grid.addWidget(BodyLabel(label_text, stats_card), row, col)
-            self.stats_grid.addWidget(value_label, row, col + 1)
+        for label_text, attr_name in stats_items:
+            container, value_label = create_stat_item(label_text, stats_card)
+            setattr(self, attr_name, value_label)
+            stats_row.addWidget(container)
 
-        stats_layout.addLayout(self.stats_grid)
+        stats_row.addStretch()
+        stats_layout.addLayout(stats_row)
 
         # ===== 操作按钮卡片 =====
         action_card = self.add_card("快捷操作")
@@ -3710,7 +4195,19 @@ class HomePage(BasePage):
         self.validation_details = PlainTextEdit(validate_card)
         self.validation_details.setReadOnly(True)
         self.validation_details.setPlaceholderText("尚未执行配置检测")
-        self.validation_details.setMinimumHeight(160)
+        self.validation_details.setMinimumHeight(120)
+        self.validation_details.setMaximumHeight(200)
+        self.validation_details.setStyleSheet("""
+            PlainTextEdit {
+                background-color: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                padding: 8px;
+                font-family: "Consolas", "Monaco", monospace;
+                font-size: 12px;
+                color: #e6edf3;
+            }
+        """)
         validate_layout.addWidget(self.validation_details)
 
         self._layout.addStretch()
@@ -5015,6 +5512,464 @@ class ProviderDialog(BaseDialog):
         self.accept()
 
 
+# ==================== 原生 Provider 页面 ====================
+class NativeProviderPage(BasePage):
+    """原生 Provider 配置页面 - 管理 OpenCode 官方支持的原生 AI 服务提供商"""
+
+    def __init__(self, main_window, parent=None):
+        super().__init__("原生 Provider", parent)
+        self.main_window = main_window
+        self.auth_manager = AuthManager()
+        self.env_detector = EnvVarDetector()
+        self._setup_ui()
+        self._load_data()
+        # 连接配置变更信号
+        self.main_window.config_changed.connect(self._on_config_changed)
+
+    def _on_config_changed(self):
+        """配置变更时刷新列表"""
+        self._load_data()
+
+    def _setup_ui(self):
+        """初始化 UI 布局"""
+        # 工具栏
+        toolbar = QHBoxLayout()
+
+        self.config_btn = PrimaryPushButton(FIF.SETTING, "配置 Provider", self)
+        self.config_btn.clicked.connect(self._on_config)
+        toolbar.addWidget(self.config_btn)
+
+        self.test_btn = PushButton(FIF.WIFI, "测试连接", self)
+        self.test_btn.clicked.connect(self._on_test)
+        toolbar.addWidget(self.test_btn)
+
+        self.delete_btn = PushButton(FIF.DELETE, "删除配置", self)
+        self.delete_btn.clicked.connect(self._on_delete)
+        toolbar.addWidget(self.delete_btn)
+
+        toolbar.addStretch()
+        self._layout.addLayout(toolbar)
+
+        # Provider 列表表格
+        self.table = TableWidget(self)
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Provider", "SDK", "状态", "环境变量"])
+        
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.resizeSection(0, 160)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.resizeSection(2, 80)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.doubleClicked.connect(self._on_config)
+        self._layout.addWidget(self.table)
+
+    def _load_data(self):
+        """加载 Provider 数据"""
+        self.table.setRowCount(0)
+        
+        # 读取已配置的认证
+        auth_data = {}
+        try:
+            auth_data = self.auth_manager.read_auth()
+        except Exception:
+            pass
+
+        for provider in NATIVE_PROVIDERS:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            
+            # Provider 名称
+            name_item = QTableWidgetItem(provider.name)
+            name_item.setData(Qt.UserRole, provider.id)
+            self.table.setItem(row, 0, name_item)
+            
+            # SDK
+            self.table.setItem(row, 1, QTableWidgetItem(provider.sdk))
+            
+            # 状态
+            is_configured = provider.id in auth_data and auth_data[provider.id]
+            status_text = "已配置" if is_configured else "未配置"
+            status_item = QTableWidgetItem(status_text)
+            if is_configured:
+                status_item.setForeground(QColor("#4CAF50"))
+            else:
+                status_item.setForeground(QColor("#9E9E9E"))
+            self.table.setItem(row, 2, status_item)
+            
+            # 环境变量
+            env_vars = ", ".join(provider.env_vars) if provider.env_vars else "-"
+            env_item = QTableWidgetItem(env_vars)
+            env_item.setToolTip(env_vars)
+            self.table.setItem(row, 3, env_item)
+
+    def _get_selected_provider(self) -> Optional[NativeProviderConfig]:
+        """获取当前选中的 Provider"""
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        provider_id = self.table.item(row, 0).data(Qt.UserRole)
+        return get_native_provider(provider_id)
+
+    def _on_config(self):
+        """配置 Provider"""
+        provider = self._get_selected_provider()
+        if not provider:
+            self.show_warning("提示", "请先选择一个 Provider")
+            return
+        
+        dialog = NativeProviderDialog(
+            self.main_window, 
+            provider, 
+            self.auth_manager, 
+            self.env_detector,
+            parent=self
+        )
+        if dialog.exec_():
+            self._load_data()
+            self.show_success("成功", f"{provider.name} 配置已保存")
+
+    def _on_test(self):
+        """测试连接"""
+        provider = self._get_selected_provider()
+        if not provider:
+            self.show_warning("提示", "请先选择一个 Provider")
+            return
+        
+        if not provider.test_endpoint:
+            self.show_warning("提示", "此 Provider 不支持连接测试")
+            return
+        
+        # 获取认证信息
+        auth_data = self.auth_manager.get_provider_auth(provider.id)
+        if not auth_data:
+            self.show_error("测试失败", "请先配置此 Provider")
+            return
+        
+        api_key = auth_data.get("apiKey", "")
+        if api_key:
+            api_key = _resolve_env_value(api_key)
+        
+        if not api_key:
+            self.show_error("测试失败", "未找到 API Key")
+            return
+        
+        # 获取 baseURL
+        config = self.main_window.opencode_config or {}
+        provider_options = config.get("provider", {}).get(provider.id, {}).get("options", {})
+        base_url = provider_options.get("baseURL", "")
+        
+        if not base_url:
+            default_urls = {
+                "anthropic": "https://api.anthropic.com",
+                "openai": "https://api.openai.com",
+                "gemini": "https://generativelanguage.googleapis.com",
+                "xai": "https://api.x.ai",
+                "groq": "https://api.groq.com",
+                "openrouter": "https://openrouter.ai/api",
+                "deepseek": "https://api.deepseek.com",
+                "opencode": "https://api.opencode.ai",
+            }
+            base_url = default_urls.get(provider.id, "")
+        
+        if not base_url:
+            self.show_error("测试失败", "无法确定 API 地址")
+            return
+        
+        test_url = base_url.rstrip("/") + provider.test_endpoint
+        
+        # 执行测试
+        self.show_warning("测试中", "正在测试连接...")
+        
+        start_time = time.time()
+        try:
+            req = urllib.request.Request(test_url)
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("x-api-key", api_key)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                elapsed = int((time.time() - start_time) * 1000)
+                self.show_success("连接成功", f"响应时间: {elapsed}ms")
+        except urllib.error.HTTPError as e:
+            self.show_error("连接失败", f"HTTP {e.code}: {e.reason}")
+        except Exception as e:
+            self.show_error("连接失败", str(e))
+
+    def _on_delete(self):
+        """删除配置"""
+        provider = self._get_selected_provider()
+        if not provider:
+            self.show_warning("提示", "请先选择一个 Provider")
+            return
+        
+        # 检查是否已配置
+        auth_data = self.auth_manager.get_provider_auth(provider.id)
+        if not auth_data:
+            self.show_warning("提示", "此 Provider 尚未配置")
+            return
+        
+        # 确认删除
+        msg_box = FluentMessageBox(
+            "确认删除",
+            f"确定要删除 {provider.name} 的配置吗？\n这将删除认证信息和选项配置。",
+            self
+        )
+        if msg_box.exec_() != QMessageBox.Yes:
+            return
+        
+        # 删除认证
+        try:
+            self.auth_manager.delete_provider_auth(provider.id)
+        except Exception as e:
+            self.show_error("删除失败", f"无法删除认证配置: {e}")
+            return
+        
+        # 删除选项
+        config = self.main_window.opencode_config or {}
+        if "provider" in config and provider.id in config["provider"]:
+            if "options" in config["provider"][provider.id]:
+                del config["provider"][provider.id]["options"]
+                if not config["provider"][provider.id]:
+                    del config["provider"][provider.id]
+                self.main_window.opencode_config = config
+                self.main_window.save_opencode_config()
+        
+        self.show_success("删除成功", f"{provider.name} 配置已删除")
+        self._load_data()
+
+
+class NativeProviderDialog(QDialog):
+    """原生 Provider 配置对话框"""
+    
+    def __init__(self, main_window, provider: NativeProviderConfig, 
+                 auth_manager: AuthManager, env_detector: EnvVarDetector, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+        self.provider = provider
+        self.auth_manager = auth_manager
+        self.env_detector = env_detector
+        self.auth_inputs: Dict[str, QWidget] = {}
+        self.option_inputs: Dict[str, QWidget] = {}
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        """初始化对话框 UI"""
+        self.setWindowTitle(f"配置 {self.provider.name}")
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(400)
+        
+        # 设置深色背景样式
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2b2b2b;
+            }
+            QGroupBox {
+                background-color: #363636;
+                border: 1px solid #454545;
+                border-radius: 6px;
+                margin-top: 12px;
+                padding-top: 10px;
+                color: #e0e0e0;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #e0e0e0;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+        
+        # Provider 信息
+        info_label = CaptionLabel(f"SDK: {self.provider.sdk}", self)
+        layout.addWidget(info_label)
+        
+        # 环境变量检测提示
+        detected_env = self.env_detector.detect_env_vars(self.provider.id)
+        if detected_env:
+            env_hint = CaptionLabel(
+                f"✓ 检测到环境变量: {', '.join(detected_env.keys())}",
+                self
+            )
+            env_hint.setStyleSheet("color: #4CAF50;")
+            layout.addWidget(env_hint)
+        
+        # 认证配置卡片
+        auth_card = SimpleCardWidget(self)
+        auth_card_layout = QVBoxLayout(auth_card)
+        auth_card_layout.setContentsMargins(16, 16, 16, 16)
+        auth_card_layout.setSpacing(12)
+        
+        auth_title = StrongBodyLabel("认证配置", auth_card)
+        auth_card_layout.addWidget(auth_title)
+        
+        current_auth = self.auth_manager.get_provider_auth(self.provider.id) or {}
+        
+        for field in self.provider.auth_fields:
+            field_layout = QHBoxLayout()
+            
+            label = BodyLabel(f"{field.label}{'*' if field.required else ''}", auth_card)
+            label.setMinimumWidth(120)
+            field_layout.addWidget(label)
+            
+            if field.field_type == "password":
+                input_widget = LineEdit(auth_card)
+                input_widget.setEchoMode(LineEdit.Password)
+            else:
+                input_widget = LineEdit(auth_card)
+            
+            input_widget.setPlaceholderText(field.placeholder)
+            if field.key in current_auth:
+                input_widget.setText(str(current_auth[field.key]))
+            
+            field_layout.addWidget(input_widget, 1)
+            
+            # 环境变量导入按钮
+            env_var = self._get_env_var_for_field(field.key)
+            if env_var and env_var in detected_env:
+                import_btn = ToolButton(FIF.DOWNLOAD, auth_card)
+                import_btn.setToolTip(f"导入 {env_var}")
+                import_btn.clicked.connect(partial(self._import_env_var, input_widget, env_var))
+                field_layout.addWidget(import_btn)
+            
+            self.auth_inputs[field.key] = input_widget
+            auth_card_layout.addLayout(field_layout)
+        
+        layout.addWidget(auth_card)
+        
+        # 选项配置卡片
+        if self.provider.option_fields:
+            option_card = SimpleCardWidget(self)
+            option_card_layout = QVBoxLayout(option_card)
+            option_card_layout.setContentsMargins(16, 16, 16, 16)
+            option_card_layout.setSpacing(12)
+            
+            option_title = StrongBodyLabel("Provider 选项", option_card)
+            option_card_layout.addWidget(option_title)
+            
+            config = self.main_window.opencode_config or {}
+            current_options = config.get("provider", {}).get(self.provider.id, {}).get("options", {})
+            
+            for field in self.provider.option_fields:
+                field_layout = QHBoxLayout()
+                
+                label = BodyLabel(field.label, option_card)
+                label.setMinimumWidth(120)
+                field_layout.addWidget(label)
+                
+                if field.field_type == "select" and field.options:
+                    input_widget = ComboBox(option_card)
+                    input_widget.addItems(field.options)
+                    current_value = current_options.get(field.key, field.default)
+                    if current_value in field.options:
+                        input_widget.setCurrentText(current_value)
+                else:
+                    input_widget = LineEdit(option_card)
+                    input_widget.setPlaceholderText(field.default or "可选")
+                    input_widget.setText(str(current_options.get(field.key, "")))
+                
+                field_layout.addWidget(input_widget, 1)
+                self.option_inputs[field.key] = input_widget
+                option_card_layout.addLayout(field_layout)
+            
+            layout.addWidget(option_card)
+        
+        layout.addStretch()
+        
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        cancel_btn = PushButton("取消", self)
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        save_btn = PrimaryPushButton("保存", self)
+        save_btn.clicked.connect(self._on_save)
+        btn_layout.addWidget(save_btn)
+        
+        layout.addLayout(btn_layout)
+    
+    def _get_env_var_for_field(self, field_key: str) -> Optional[str]:
+        """获取字段对应的环境变量名"""
+        for env_var, auth_field in self.env_detector.ENV_TO_AUTH_FIELD.items():
+            if auth_field == field_key:
+                provider_vars = self.env_detector.PROVIDER_ENV_VARS.get(self.provider.id, [])
+                if env_var in provider_vars:
+                    return env_var
+        return None
+    
+    def _import_env_var(self, input_widget: LineEdit, env_var: str):
+        """导入环境变量引用"""
+        ref = self.env_detector.format_env_reference(env_var)
+        input_widget.setText(ref)
+    
+    def _on_save(self):
+        """保存配置"""
+        # 检查重复
+        config = self.main_window.opencode_config or {}
+        custom_providers = config.get("provider", {})
+        if self.provider.id in custom_providers:
+            if custom_providers[self.provider.id].get("npm"):
+                msg_box = FluentMessageBox(
+                    "配置冲突",
+                    f"已存在同名的自定义 Provider '{self.provider.id}'。\n继续保存？",
+                    self
+                )
+                if msg_box.exec_() != QMessageBox.Yes:
+                    return
+        
+        # 收集认证数据
+        auth_data = {}
+        for field in self.provider.auth_fields:
+            input_widget = self.auth_inputs.get(field.key)
+            if input_widget:
+                value = input_widget.text().strip()
+                if value:
+                    auth_data[field.key] = value
+                elif field.required:
+                    QMessageBox.warning(self, "验证失败", f"{field.label} 是必填项")
+                    return
+        
+        # 保存认证
+        try:
+            self.auth_manager.set_provider_auth(self.provider.id, auth_data)
+        except Exception as e:
+            QMessageBox.critical(self, "保存失败", f"无法保存认证配置: {e}")
+            return
+        
+        # 保存选项
+        if self.option_inputs:
+            options = {}
+            for field in self.provider.option_fields:
+                input_widget = self.option_inputs.get(field.key)
+                if input_widget:
+                    if isinstance(input_widget, ComboBox):
+                        value = input_widget.currentText()
+                    else:
+                        value = input_widget.text().strip()
+                    if value:
+                        options[field.key] = value
+            
+            if options:
+                if "provider" not in config:
+                    config["provider"] = {}
+                if self.provider.id not in config["provider"]:
+                    config["provider"][self.provider.id] = {}
+                config["provider"][self.provider.id]["options"] = options
+                self.main_window.opencode_config = config
+                self.main_window.save_opencode_config()
+        
+        self.accept()
+
+
 # ==================== Model 页面 ====================
 
 
@@ -5224,42 +6179,67 @@ class ModelDialog(BaseDialog):
                 + """
                 /* Tab/Pivot 样式增强 */
                 Pivot {
-                    background-color: #3d3d3d;
+                    background-color: #161b22;
                     border-radius: 6px;
                     padding: 4px;
                 }
                 /* 卡片样式增强 */
                 CardWidget {
-                    background-color: #363636;
-                    border: 1px solid #4a4a4a;
+                    background-color: #161b22;
+                    border: 1px solid #30363d;
                     border-radius: 8px;
                     margin: 4px 0;
                 }
-                /* 表格样式增强 */
-                QTableWidget {
-                    background-color: #2a2a2a;
-                    border: 1px solid #4a4a4a;
-                    border-radius: 6px;
-                    gridline-color: #404040;
+                /* 表格样式增强 - Antigravity 风格 */
+                QTableWidget, TableWidget {
+                    background-color: #0d1117;
+                    border: none;
+                    border-radius: 8px;
+                    gridline-color: transparent;
+                    outline: none;
                 }
-                QTableWidget::item {
-                    padding: 6px;
-                    border-bottom: 1px solid #3a3a3a;
+                QTableWidget::item, TableWidget::item {
+                    padding: 12px 16px;
+                    border: none;
+                    border-bottom: 1px solid #21262d;
+                    color: #e6edf3;
                 }
-                QTableWidget::item:selected {
-                    background-color: #0078d4;
+                QTableWidget::item:selected, TableWidget::item:selected {
+                    background-color: #1f6feb;
+                    color: #ffffff;
+                }
+                QTableWidget::item:hover, TableWidget::item:hover {
+                    background-color: #161b22;
                 }
                 QHeaderView::section {
-                    background-color: #404040;
-                    color: #ffffff;
+                    background-color: #0d1117;
+                    color: #7d8590;
                     border: none;
-                    border-bottom: 2px solid #0078d4;
-                    padding: 8px;
-                    font-weight: bold;
+                    border-bottom: 1px solid #21262d;
+                    padding: 12px 16px;
+                    font-weight: 600;
+                    font-size: 12px;
+                }
+                QHeaderView {
+                    background-color: #0d1117;
+                }
+                /* 滚动条样式 */
+                QScrollBar:vertical {
+                    background-color: #0d1117;
+                    width: 8px;
+                    border-radius: 4px;
+                }
+                QScrollBar::handle:vertical {
+                    background-color: #30363d;
+                    border-radius: 4px;
+                    min-height: 30px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background-color: #484f58;
                 }
                 /* 分组标题样式 */
                 CaptionLabel {
-                    color: #0078d4;
+                    color: #58a6ff;
                     font-weight: bold;
                     padding: 4px 0;
                 }
@@ -6855,10 +7835,10 @@ class OpenCodeAgentDialog(BaseDialog):
             self.setStyleSheet(
                 self.styleSheet()
                 + """
-                QScrollArea { background-color: #2d2d2d; border: none; }
-                QScrollArea > QWidget > QWidget { background-color: #2d2d2d; }
+                QScrollArea { background-color: #0d1117; border: none; }
+                QScrollArea > QWidget > QWidget { background-color: #0d1117; }
                 QWidget { background-color: transparent; }
-                CardWidget { background-color: #363636; border: 1px solid #4a4a4a; border-radius: 8px; }
+                CardWidget { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; }
             """
             )
 
@@ -6875,7 +7855,7 @@ class OpenCodeAgentDialog(BaseDialog):
         content.setObjectName("scrollContent")
         if isDarkTheme():
             content.setStyleSheet(
-                "QWidget#scrollContent { background-color: #2d2d2d; }"
+                "QWidget#scrollContent { background-color: #0d1117; }"
             )
         content_layout = QVBoxLayout(content)
         content_layout.setSpacing(10)
@@ -7437,19 +8417,19 @@ class HelpPage(BasePage):
         self._setup_ui()
 
     def _setup_ui(self):
-        # ===== 关于卡片 (无标题) - 不扩展 =====
+        # ===== 关于卡片 - 左右布局 =====
         about_card = SimpleCardWidget(self)
         about_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        about_card_layout = QVBoxLayout(about_card)
+        about_card_layout = QHBoxLayout(about_card)
         about_card_layout.setContentsMargins(20, 16, 20, 16)
-        about_card_layout.setSpacing(12)
+        about_card_layout.setSpacing(16)
 
-        # Logo 图片
+        # 左侧 Logo
         logo_path = get_resource_path("assets/logo1.png")
         logo_label = QLabel(about_card)
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path))
-            logo_label.setPixmap(pixmap.scaledToHeight(120, Qt.SmoothTransformation))
+            logo_label.setPixmap(pixmap.scaledToHeight(80, Qt.SmoothTransformation))
         else:
             logo_label.setText("{ }")
             logo_label.setStyleSheet(
@@ -7457,29 +8437,26 @@ class HelpPage(BasePage):
             )
         about_card_layout.addWidget(logo_label)
 
-        # OCCM 和全称放同一行 - 渐变色样式
+        # 右侧信息
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(6)
+        
+        # 标题行
         title_layout = QHBoxLayout()
         occm_label = TitleLabel("OCCM", about_card)
-        occm_label.setStyleSheet("""
-            font-size: 32px;
-            font-weight: bold;
-            color: #9B59B6;
-        """)
+        occm_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #9B59B6;")
         title_layout.addWidget(occm_label)
-        title_layout.addWidget(
-            SubtitleLabel(f"OpenCode Config Manager v{APP_VERSION}", about_card)
-        )
+        
+        version_label = SubtitleLabel(f"OpenCode Config Manager v{APP_VERSION}", about_card)
+        title_layout.addWidget(version_label)
         title_layout.addStretch()
-        about_card_layout.addLayout(title_layout)
+        right_layout.addLayout(title_layout)
 
-        about_card_layout.addWidget(
-            BodyLabel(
-                "一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件",
-                about_card,
-            )
+        right_layout.addWidget(
+            BodyLabel("一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件", about_card)
         )
-        about_card_layout.addWidget(BodyLabel(f"作者: {AUTHOR_NAME}", about_card))
 
+        # 按钮行
         link_layout = QHBoxLayout()
         github_btn = PrimaryPushButton(FIF.GITHUB, "GitHub 项目主页", about_card)
         github_btn.clicked.connect(lambda: webbrowser.open(GITHUB_URL))
@@ -7488,11 +8465,11 @@ class HelpPage(BasePage):
         author_btn = PushButton(FIF.PEOPLE, f"作者: {AUTHOR_NAME}", about_card)
         author_btn.clicked.connect(lambda: webbrowser.open(AUTHOR_GITHUB))
         link_layout.addWidget(author_btn)
-
         link_layout.addStretch()
-        about_card_layout.addLayout(link_layout)
-
-        self._layout.addWidget(about_card)  # 不设置 stretch factor，不扩展
+        right_layout.addLayout(link_layout)
+        
+        about_card_layout.addLayout(right_layout, 1)
+        self._layout.addWidget(about_card)
 
         # ===== Tab 切换区域 - 占满剩余空间 =====
         tab_container = CardWidget(self)
@@ -7744,16 +8721,16 @@ class MainWindow(FluentWindow):
 
     def _init_window(self):
         self.setWindowTitle(f"OCCM - OpenCode Config Manager v{APP_VERSION}")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(900, 600)  # 减小最小高度
         self.resize(UIConfig.WINDOW_WIDTH, UIConfig.WINDOW_HEIGHT)
+        
+        # 立即应用深色背景
+        self._apply_dark_background()
+        
+        # 监听主题变化
+        qconfig.themeChanged.connect(self._apply_dark_background)
 
-        # 设置主题色为蓝色（参考左侧软件的蓝色）
-        setThemeColor("#2979FF")
-
-        # 设置主题跟随系统
-        setTheme(Theme.AUTO)
-
-        # 创建系统主题监听器，自动跟随系统深浅色变化
+        # 创建系统主题监听器
         self.themeListener = SystemThemeListener(self)
         self.themeListener.start()
 
@@ -7769,27 +8746,68 @@ class MainWindow(FluentWindow):
             else:
                 self.setWindowIcon(FIF.CODE.icon())
 
-        # 设置导航栏始终展开，不折叠
+        # 设置导航栏可折叠，自适应窗口大小
         self.navigationInterface.setExpandWidth(180)
-        self.navigationInterface.setCollapsible(False)
+        self.navigationInterface.setCollapsible(True)  # 允许折叠
 
-        # 导航栏样式 - 紧凑布局确保底部菜单可见（颜色由主题控制）
+        # 导航栏样式 - 紧凑布局
+        self._update_nav_style()
+        
+    def _update_nav_style(self):
+        """根据窗口高度更新导航栏样式"""
+        height = self.height()
+        # 根据窗口高度计算菜单项高度 (600px -> 24px, 900px -> 32px)
+        item_height = max(24, min(32, int(height / 28)))
+        font_size = max(11, min(13, int(height / 70)))
+        
         self.navigationInterface.setStyleSheet(f"""
             NavigationTreeWidget {{
                 font-family: "{UIConfig.FONT_FAMILY}", "Consolas", monospace;
-                font-size: 13px;
+                font-size: {font_size}px;
+                font-weight: bold;
             }}
             NavigationTreeWidget::item {{
-                height: 32px;
-                margin: 1px 4px;
-                padding: 0px 8px;
+                height: {item_height}px;
+                margin: 0px 4px;
+                padding: 0px 6px;
                 border-radius: 4px;
+                font-weight: 500;
             }}
             NavigationSeparator {{
                 height: 1px;
-                margin: 2px 8px;
+                margin: 1px 8px;
             }}
         """)
+    
+    def resizeEvent(self, event):
+        """窗口大小改变时更新导航栏"""
+        super().resizeEvent(event)
+        self._update_nav_style()
+    
+    def _apply_dark_background(self):
+        """应用自定义背景样式"""
+        if isDarkTheme():
+            # 深色主题 - 应用自定义深黑色背景
+            if hasattr(self, 'stackedWidget'):
+                self.stackedWidget.setStyleSheet(f"""
+                    StackedWidget {{
+                        background-color: {UIConfig.DARK_BG};
+                        border: 1px solid {UIConfig.DARK_BORDER};
+                        border-right: none;
+                        border-bottom: none;
+                        border-top-left-radius: 10px;
+                    }}
+                """)
+            
+            # 导航栏背景
+            if hasattr(self, 'navigationInterface'):
+                self._update_nav_style()
+        else:
+            # 浅色主题 - 清除自定义样式，使用默认
+            if hasattr(self, 'stackedWidget'):
+                self.stackedWidget.setStyleSheet("")
+            if hasattr(self, 'navigationInterface'):
+                self._update_nav_style()
 
     def _init_navigation(self):
         # ===== 顶部工具栏区域 =====
@@ -7801,6 +8819,10 @@ class MainWindow(FluentWindow):
         # Provider 页面
         self.provider_page = ProviderPage(self)
         self.addSubInterface(self.provider_page, FIF.PEOPLE, "Provider 管理")
+
+        # 原生 Provider 页面
+        self.native_provider_page = NativeProviderPage(self)
+        self.addSubInterface(self.native_provider_page, FIF.GLOBE, "原生 Provider")
 
         # Model 页面
         self.model_page = ModelPage(self)
@@ -7848,14 +8870,15 @@ class MainWindow(FluentWindow):
         self.monitor_page = MonitorPage(self)
         self.addSubInterface(self.monitor_page, FIF.SPEED_HIGH, "监控")
 
-        # ===== 底部导航 =====
+        # ===== 工具菜单 =====
+        self.navigationInterface.addSeparator()
+        
         # 主题切换按钮
         self.navigationInterface.addItem(
             routeKey="theme",
             icon=FIF.CONSTRACT,
             text="切换主题",
             onClick=self._toggle_theme,
-            position=NavigationItemPosition.BOTTOM,
         )
 
         # Backup 按钮
@@ -7864,14 +8887,11 @@ class MainWindow(FluentWindow):
             icon=FIF.HISTORY,
             text="备份管理",
             onClick=self._show_backup_dialog,
-            position=NavigationItemPosition.BOTTOM,
         )
 
-        # Help 页面 (底部)
+        # Help 页面
         self.help_page = HelpPage(self)
-        self.addSubInterface(
-            self.help_page, FIF.HELP, "帮助说明", NavigationItemPosition.BOTTOM
-        )
+        self.addSubInterface(self.help_page, FIF.HELP, "帮助说明")
 
     def _show_backup_dialog(self):
         """显示备份管理对话框"""
@@ -8108,6 +9128,8 @@ class MainWindow(FluentWindow):
             setTheme(Theme.LIGHT)
         else:
             setTheme(Theme.DARK)
+        # 切换后重新应用自定义背景
+        QTimer.singleShot(50, self._apply_dark_background)
 
     def closeEvent(self, e):
         """关闭窗口时停止主题监听器"""
@@ -9063,275 +10085,951 @@ class PresetCategoryDialog(BaseDialog):
         self.accept()
 
 
+# ==================== Skill 发现器 ====================
+@dataclass
+class DiscoveredSkill:
+    """发现的 Skill 信息"""
+    name: str
+    description: str
+    path: Path
+    source: str  # 'opencode-global', 'opencode-project', 'claude-global', 'claude-project'
+    license_info: Optional[str] = None
+    compatibility: Optional[str] = None
+    metadata: Optional[Dict[str, str]] = None
+    content: str = ""
+
+
+class SkillDiscovery:
+    """Skill 发现器 - 扫描所有路径发现已有的 Skill"""
+    
+    # Skill 搜索路径配置
+    SKILL_PATHS = {
+        "opencode-global": Path.home() / ".config" / "opencode" / "skills",
+        "claude-global": Path.home() / ".claude" / "skills",
+    }
+    
+    @staticmethod
+    def get_project_paths() -> Dict[str, Path]:
+        """获取项目级别的 Skill 路径"""
+        cwd = Path.cwd()
+        return {
+            "opencode-project": cwd / ".opencode" / "skills",
+            "claude-project": cwd / ".claude" / "skills",
+        }
+    
+    @staticmethod
+    def validate_skill_name(name: str) -> Tuple[bool, str]:
+        """验证 Skill 名称是否符合规范
+        
+        规则：
+        - 1-64 字符
+        - 小写字母数字 + 单连字符分隔
+        - 不能以 - 开头或结尾
+        - 不能有连续 --
+        
+        Returns:
+            (是否有效, 错误信息)
+        """
+        if not name:
+            return False, "名称不能为空"
+        if len(name) > 64:
+            return False, "名称不能超过 64 字符"
+        if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", name):
+            return False, "名称格式错误：只能使用小写字母、数字、单连字符分隔"
+        return True, ""
+    
+    @staticmethod
+    def validate_description(desc: str) -> Tuple[bool, str]:
+        """验证描述是否符合规范
+        
+        规则：1-1024 字符
+        """
+        if not desc:
+            return False, "描述不能为空"
+        if len(desc) > 1024:
+            return False, "描述不能超过 1024 字符"
+        return True, ""
+    
+    @staticmethod
+    def parse_skill_file(skill_path: Path) -> Optional[DiscoveredSkill]:
+        """解析 SKILL.md 文件
+        
+        Args:
+            skill_path: SKILL.md 文件路径
+            
+        Returns:
+            解析后的 DiscoveredSkill 对象，解析失败返回 None
+        """
+        if not skill_path.exists():
+            return None
+        
+        try:
+            content = skill_path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+        
+        # 解析 frontmatter
+        frontmatter = {}
+        body = content
+        
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                try:
+                    # 简单的 YAML 解析（不依赖 pyyaml）
+                    yaml_content = parts[1].strip()
+                    for line in yaml_content.split("\n"):
+                        line = line.strip()
+                        if ":" in line and not line.startswith("#"):
+                            key, value = line.split(":", 1)
+                            key = key.strip()
+                            value = value.strip().strip('"').strip("'")
+                            # 处理 metadata 子对象
+                            if key == "metadata":
+                                frontmatter["metadata"] = {}
+                            elif key.startswith("  ") and "metadata" in frontmatter:
+                                # metadata 子项
+                                sub_key = key.strip()
+                                frontmatter["metadata"][sub_key] = value
+                            else:
+                                frontmatter[key] = value
+                    body = parts[2].strip()
+                except Exception:
+                    pass
+        
+        name = frontmatter.get("name", "")
+        description = frontmatter.get("description", "")
+        
+        if not name or not description:
+            return None
+        
+        # 确定来源
+        skill_dir = skill_path.parent
+        source = "unknown"
+        for src, base_path in SkillDiscovery.SKILL_PATHS.items():
+            try:
+                if skill_dir.is_relative_to(base_path):
+                    source = src
+                    break
+            except (ValueError, TypeError):
+                pass
+        
+        if source == "unknown":
+            for src, base_path in SkillDiscovery.get_project_paths().items():
+                try:
+                    if skill_dir.is_relative_to(base_path):
+                        source = src
+                        break
+                except (ValueError, TypeError):
+                    pass
+        
+        return DiscoveredSkill(
+            name=name,
+            description=description,
+            path=skill_path,
+            source=source,
+            license_info=frontmatter.get("license"),
+            compatibility=frontmatter.get("compatibility"),
+            metadata=frontmatter.get("metadata") if isinstance(frontmatter.get("metadata"), dict) else None,
+            content=body,
+        )
+    
+    @classmethod
+    def discover_all(cls) -> List[DiscoveredSkill]:
+        """发现所有 Skill
+        
+        Returns:
+            发现的 Skill 列表
+        """
+        skills = []
+        seen_names = set()
+        
+        # 合并所有搜索路径
+        all_paths = {**cls.SKILL_PATHS, **cls.get_project_paths()}
+        
+        for source, base_path in all_paths.items():
+            if not base_path.exists():
+                continue
+            
+            # 遍历 skills 目录下的子目录
+            try:
+                for skill_dir in base_path.iterdir():
+                    if not skill_dir.is_dir():
+                        continue
+                    
+                    skill_file = skill_dir / "SKILL.md"
+                    if not skill_file.exists():
+                        continue
+                    
+                    skill = cls.parse_skill_file(skill_file)
+                    if skill and skill.name not in seen_names:
+                        skills.append(skill)
+                        seen_names.add(skill.name)
+            except Exception:
+                continue
+        
+        return skills
+    
+    @classmethod
+    def get_skill_by_name(cls, name: str) -> Optional[DiscoveredSkill]:
+        """根据名称获取 Skill"""
+        for skill in cls.discover_all():
+            if skill.name == name:
+                return skill
+        return None
+
+
 # ==================== Skill 页面 ====================
 class SkillPage(BasePage):
-    """Skill 权限配置和 SKILL.md 创建页面 - 左右分栏布局"""
+    """Skill 管理页面 - 增强版
+    
+    功能：
+    1. Skill 发现与浏览 - 扫描所有路径显示已有 skill（包括 Claude 兼容路径）
+    2. 完整的 frontmatter 编辑 - 支持 license、compatibility、metadata
+    3. Skill 预览与编辑 - 查看和编辑现有 skill
+    4. 全局权限配置 - 配置 permission.skill 权限
+    5. Agent 级别权限配置 - 为特定 agent 配置 skill 权限
+    6. 禁用 skill 工具 - 支持 agent.tools.skill: false 配置
+    """
+
+    # 来源显示名称映射
+    SOURCE_LABELS = {
+        "opencode-global": "🌐 OpenCode 全局",
+        "opencode-project": "📁 OpenCode 项目",
+        "claude-global": "🌐 Claude 全局",
+        "claude-project": "📁 Claude 项目",
+        "unknown": "❓ 未知",
+    }
 
     def __init__(self, main_window, parent=None):
         super().__init__("Skill 管理", parent)
         self.main_window = main_window
+        self._current_skill: Optional[DiscoveredSkill] = None
         self._setup_ui()
-        self._load_data()
+        self._load_all_data()
 
     def _setup_ui(self):
-        # 使用 QSplitter 实现左右分栏
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # 使用 Pivot 实现标签页切换
+        self.pivot = Pivot(self)
+        self._layout.addWidget(self.pivot)
+        
+        # 内容区域
+        self.stacked_widget = QStackedWidget(self)
+        self._layout.addWidget(self.stacked_widget, 1)
+        
+        # 创建各个标签页
+        self._create_browse_tab()
+        self._create_create_tab()
+        self._create_permission_tab()
+        
+        # 添加标签页到 Pivot
+        self.pivot.addItem(routeKey="browse", text="浏览 Skill", onClick=lambda: self.stacked_widget.setCurrentIndex(0))
+        self.pivot.addItem(routeKey="create", text="创建 Skill", onClick=lambda: self.stacked_widget.setCurrentIndex(1))
+        self.pivot.addItem(routeKey="permission", text="权限配置", onClick=lambda: self.stacked_widget.setCurrentIndex(2))
+        
+        self.pivot.setCurrentItem("browse")
 
-        # ===== 左侧：Skill 权限配置 =====
+    def _load_all_data(self):
+        """加载所有数据"""
+        self._refresh_skill_list()
+        self._load_permission_data()
+    
+    def _refresh_skill_list(self):
+        """刷新 Skill 列表"""
+        if hasattr(self, 'skill_list'):
+            self.skill_list.clear()
+            skills = SkillDiscovery.discover_all()
+            for skill in skills:
+                source_label = self.SOURCE_LABELS.get(skill.source, skill.source)
+                item = QListWidgetItem(f"{skill.name} ({source_label})")
+                item.setData(Qt.UserRole, skill)
+                self.skill_list.addItem(item)
+    
+    def _load_permission_data(self):
+        """加载权限数据"""
+        if hasattr(self, 'perm_table'):
+            self.perm_table.setRowCount(0)
+            config = self.main_window.opencode_config or {}
+            permissions = config.get("permission", {}).get("skill", {})
+            
+            if isinstance(permissions, dict):
+                for pattern, perm in permissions.items():
+                    row = self.perm_table.rowCount()
+                    self.perm_table.insertRow(row)
+                    self.perm_table.setItem(row, 0, QTableWidgetItem(pattern))
+                    self.perm_table.setItem(row, 1, QTableWidgetItem(perm))
+
+    def _create_browse_tab(self):
+        """创建浏览标签页 - 左侧 Skill 列表，右侧详情预览"""
+        browse_widget = QWidget()
+        browse_layout = QVBoxLayout(browse_widget)
+        browse_layout.setContentsMargins(0, 16, 0, 0)
+        
+        # 使用 QSplitter 实现左右分栏
+        splitter = QSplitter(Qt.Orientation.Horizontal, browse_widget)
+
+        # ===== 左侧：Skill 列表 =====
         left_widget = QWidget()
         left_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 8, 0)
 
-        # 左侧标题
-        left_layout.addWidget(SubtitleLabel("Skill 权限配置", left_widget))
+        left_layout.addWidget(SubtitleLabel("已发现的 Skill", left_widget))
         left_layout.addWidget(
             CaptionLabel(
-                "配置 Skill 的加载权限。Skill 是可复用的指令文件，Agent 可按需加载。",
+                "扫描 OpenCode 和 Claude 兼容路径发现的所有 Skill",
                 left_widget,
             )
         )
 
-        # 权限列表工具栏
+        # 工具栏
         toolbar = QHBoxLayout()
-        self.add_btn = PrimaryPushButton(FIF.ADD, "添加", left_widget)
-        self.add_btn.clicked.connect(self._on_add)
-        toolbar.addWidget(self.add_btn)
-
-        self.delete_btn = PushButton(FIF.DELETE, "删除", left_widget)
-        self.delete_btn.clicked.connect(self._on_delete)
-        toolbar.addWidget(self.delete_btn)
-
+        refresh_btn = PushButton(FIF.SYNC, "刷新", left_widget)
+        refresh_btn.clicked.connect(self._refresh_skill_list)
+        toolbar.addWidget(refresh_btn)
         toolbar.addStretch()
         left_layout.addLayout(toolbar)
 
-        # 权限列表
-        self.table = TableWidget(left_widget)
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["模式", "权限"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.itemSelectionChanged.connect(self._on_select)
-        left_layout.addWidget(self.table, 1)  # 添加 stretch factor
-
-        # 编辑区域
-        edit_card = SimpleCardWidget(left_widget)
-        edit_layout = QVBoxLayout(edit_card)
-        edit_layout.setContentsMargins(12, 8, 12, 8)
-        edit_layout.addWidget(CaptionLabel("编辑权限", edit_card))
-
-        # 模式输入
-        pattern_layout = QHBoxLayout()
-        pattern_layout.addWidget(BodyLabel("模式:", edit_card))
-        self.pattern_edit = LineEdit(edit_card)
-        self.pattern_edit.setPlaceholderText("如: *, internal-*, my-skill")
-        self.pattern_edit.setToolTip(get_tooltip("skill_pattern"))
-        pattern_layout.addWidget(self.pattern_edit)
-        edit_layout.addLayout(pattern_layout)
-
-        # 权限选择
-        perm_layout = QHBoxLayout()
-        perm_layout.addWidget(BodyLabel("权限:", edit_card))
-        self.perm_combo = ComboBox(edit_card)
-        self.perm_combo.addItems(["allow", "ask", "deny"])
-        self.perm_combo.setToolTip(get_tooltip("skill_permission"))
-        perm_layout.addWidget(self.perm_combo)
-        perm_layout.addStretch()
-        edit_layout.addLayout(perm_layout)
-
-        # 保存按钮
-        save_btn = PrimaryPushButton("保存权限", edit_card)
-        save_btn.clicked.connect(self._on_save)
-        edit_layout.addWidget(save_btn)
-
-        left_layout.addWidget(edit_card)
-
-        # ===== 右侧：创建 SKILL.md =====
+        # Skill 列表
+        self.skill_list = ListWidget(left_widget)
+        self.skill_list.itemClicked.connect(self._on_skill_selected)
+        left_layout.addWidget(self.skill_list, 1)
+        
+        # 路径说明
+        path_info = CaptionLabel(
+            "搜索路径:\n"
+            "• ~/.config/opencode/skills/\n"
+            "• ~/.claude/skills/\n"
+            "• .opencode/skills/\n"
+            "• .claude/skills/",
+            left_widget
+        )
+        left_layout.addWidget(path_info)
+        
+        # ===== 右侧：Skill 详情预览 =====
         right_widget = QWidget()
         right_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(8, 0, 0, 0)
-
-        # 右侧标题
-        right_layout.addWidget(SubtitleLabel("创建 SKILL.md", right_widget))
-
-        # Skill 名称
-        name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("Skill 名称:", right_widget))
-        self.skill_name_edit = LineEdit(right_widget)
-        self.skill_name_edit.setPlaceholderText(
-            "小写字母、数字、连字符，如: git-release"
-        )
-        self.skill_name_edit.setToolTip(get_tooltip("skill_name"))
-        name_layout.addWidget(self.skill_name_edit)
-        right_layout.addLayout(name_layout)
-
-        # Skill 描述
-        desc_layout = QHBoxLayout()
-        desc_layout.addWidget(BodyLabel("描述:", right_widget))
-        self.skill_desc_edit = LineEdit(right_widget)
-        self.skill_desc_edit.setPlaceholderText("描述 Skill 的功能")
-        desc_layout.addWidget(self.skill_desc_edit)
-        right_layout.addLayout(desc_layout)
-
-        # Skill 内容
-        right_layout.addWidget(BodyLabel("Skill 内容 (Markdown):", right_widget))
-        self.skill_content_edit = TextEdit(right_widget)
-        self.skill_content_edit.setPlaceholderText(
-            "## What I do\n- 描述功能\n\n## Instructions\n- 具体指令"
-        )
-        right_layout.addWidget(self.skill_content_edit, 1)
-
-        # 保存位置
-        loc_layout = QHBoxLayout()
-        loc_layout.addWidget(BodyLabel("保存位置:", right_widget))
-        self.global_radio = RadioButton(
-            "全局 (~/.config/opencode/skill/)", right_widget
-        )
-        self.global_radio.setChecked(True)
-        loc_layout.addWidget(self.global_radio)
-        self.project_radio = RadioButton("项目 (.opencode/skill/)", right_widget)
-        loc_layout.addWidget(self.project_radio)
-        loc_layout.addStretch()
-        right_layout.addLayout(loc_layout)
-
-        # 创建按钮
-        create_btn = PrimaryPushButton("创建 SKILL.md", right_widget)
-        create_btn.clicked.connect(self._on_create_skill)
-        right_layout.addWidget(create_btn)
+        
+        right_layout.addWidget(SubtitleLabel("Skill 详情", right_widget))
+        
+        # 详情卡片
+        detail_card = SimpleCardWidget(right_widget)
+        detail_layout = QVBoxLayout(detail_card)
+        detail_layout.setContentsMargins(16, 12, 16, 12)
+        detail_layout.setSpacing(8)
+        
+        self.detail_name = StrongBodyLabel("选择一个 Skill 查看详情", detail_card)
+        detail_layout.addWidget(self.detail_name)
+        
+        self.detail_desc = CaptionLabel("", detail_card)
+        self.detail_desc.setWordWrap(True)
+        detail_layout.addWidget(self.detail_desc)
+        
+        # 元信息
+        meta_layout = QHBoxLayout()
+        self.detail_source = CaptionLabel("", detail_card)
+        meta_layout.addWidget(self.detail_source)
+        self.detail_license = CaptionLabel("", detail_card)
+        meta_layout.addWidget(self.detail_license)
+        self.detail_compat = CaptionLabel("", detail_card)
+        meta_layout.addWidget(self.detail_compat)
+        meta_layout.addStretch()
+        detail_layout.addLayout(meta_layout)
+        
+        self.detail_path = CaptionLabel("", detail_card)
+        self.detail_path.setWordWrap(True)
+        detail_layout.addWidget(self.detail_path)
+        
+        right_layout.addWidget(detail_card)
+        
+        # 内容预览
+        right_layout.addWidget(BodyLabel("内容预览:", right_widget))
+        self.detail_content = TextEdit(right_widget)
+        self.detail_content.setReadOnly(True)
+        self.detail_content.setPlaceholderText("选择 Skill 后显示内容")
+        right_layout.addWidget(self.detail_content, 1)
+        
+        # 操作按钮
+        btn_layout = QHBoxLayout()
+        self.edit_skill_btn = PushButton(FIF.EDIT, "编辑", right_widget)
+        self.edit_skill_btn.clicked.connect(self._on_edit_skill)
+        self.edit_skill_btn.setEnabled(False)
+        btn_layout.addWidget(self.edit_skill_btn)
+        
+        self.delete_skill_btn = PushButton(FIF.DELETE, "删除", right_widget)
+        self.delete_skill_btn.clicked.connect(self._on_delete_skill)
+        self.delete_skill_btn.setEnabled(False)
+        btn_layout.addWidget(self.delete_skill_btn)
+        
+        self.open_folder_btn = PushButton(FIF.FOLDER, "打开目录", right_widget)
+        self.open_folder_btn.clicked.connect(self._on_open_skill_folder)
+        self.open_folder_btn.setEnabled(False)
+        btn_layout.addWidget(self.open_folder_btn)
+        
+        btn_layout.addStretch()
+        right_layout.addLayout(btn_layout)
 
         # 添加到 splitter
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
+        splitter.setSizes([350, 450])
+        
+        browse_layout.addWidget(splitter, 1)
+        self.stacked_widget.addWidget(browse_widget)
+    
+    def _on_skill_selected(self, item):
+        """选中 Skill 时显示详情"""
+        skill = item.data(Qt.UserRole)
+        if not skill:
+            return
+        
+        self._current_skill = skill
+        self.detail_name.setText(skill.name)
+        self.detail_desc.setText(skill.description)
+        self.detail_source.setText(f"来源: {self.SOURCE_LABELS.get(skill.source, skill.source)}")
+        self.detail_license.setText(f"许可: {skill.license_info}" if skill.license_info else "")
+        self.detail_compat.setText(f"兼容: {skill.compatibility}" if skill.compatibility else "")
+        self.detail_path.setText(f"路径: {skill.path}")
+        self.detail_content.setText(skill.content)
+        
+        # 启用操作按钮
+        self.edit_skill_btn.setEnabled(True)
+        self.delete_skill_btn.setEnabled(True)
+        self.open_folder_btn.setEnabled(True)
+    
+    def _on_edit_skill(self):
+        """编辑选中的 Skill"""
+        if not self._current_skill:
+            return
+        
+        # 切换到创建标签页并填充数据
+        self.pivot.setCurrentItem("create")
+        self.stacked_widget.setCurrentIndex(1)
+        
+        self.create_name_edit.setText(self._current_skill.name)
+        self.create_desc_edit.setText(self._current_skill.description)
+        self.create_license_edit.setText(self._current_skill.license_info or "")
+        self.create_compat_edit.setText(self._current_skill.compatibility or "")
+        self.create_content_edit.setText(self._current_skill.content)
+        
+        # 根据路径设置保存位置
+        path_str = str(self._current_skill.path)
+        if ".claude" in path_str:
+            if str(Path.home()) in path_str:
+                self.create_loc_combo.setCurrentText("Claude 全局 (~/.claude/skills/)")
+            else:
+                self.create_loc_combo.setCurrentText("Claude 项目 (.claude/skills/)")
+        else:
+            if str(Path.home()) in path_str:
+                self.create_loc_combo.setCurrentText("OpenCode 全局 (~/.config/opencode/skills/)")
+            else:
+                self.create_loc_combo.setCurrentText("OpenCode 项目 (.opencode/skills/)")
+    
+    def _on_delete_skill(self):
+        """删除选中的 Skill"""
+        if not self._current_skill:
+            return
+        
+        w = FluentMessageBox(
+            "确认删除",
+            f'确定要删除 Skill "{self._current_skill.name}" 吗？\n路径: {self._current_skill.path}',
+            self
+        )
+        if w.exec_():
+            try:
+                skill_dir = self._current_skill.path.parent
+                shutil.rmtree(skill_dir)
+                self.show_success("成功", f'Skill "{self._current_skill.name}" 已删除')
+                self._current_skill = None
+                self._refresh_skill_list()
+                self._clear_detail()
+            except Exception as e:
+                self.show_error("错误", f"删除失败: {e}")
+    
+    def _on_open_skill_folder(self):
+        """打开 Skill 所在目录"""
+        if not self._current_skill:
+            return
+        
+        folder = self._current_skill.path.parent
+        if folder.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+    
+    def _clear_detail(self):
+        """清空详情显示"""
+        self.detail_name.setText("选择一个 Skill 查看详情")
+        self.detail_desc.setText("")
+        self.detail_source.setText("")
+        self.detail_license.setText("")
+        self.detail_compat.setText("")
+        self.detail_path.setText("")
+        self.detail_content.setText("")
+        self.edit_skill_btn.setEnabled(False)
+        self.delete_skill_btn.setEnabled(False)
+        self.open_folder_btn.setEnabled(False)
+
+    def _create_create_tab(self):
+        """创建 Skill 创建/编辑标签页"""
+        create_widget = QWidget()
+        create_layout = QVBoxLayout(create_widget)
+        create_layout.setContentsMargins(0, 16, 0, 0)
+        
+        create_layout.addWidget(SubtitleLabel("创建/编辑 SKILL.md", create_widget))
+        create_layout.addWidget(CaptionLabel(
+            "创建新的 Skill 或编辑现有 Skill。支持完整的 frontmatter 字段。",
+            create_widget
+        ))
+        
+        # 基本信息卡片
+        basic_card = SimpleCardWidget(create_widget)
+        basic_layout = QVBoxLayout(basic_card)
+        basic_layout.setContentsMargins(16, 12, 16, 12)
+        basic_layout.setSpacing(12)
+        
+        # Skill 名称
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(BodyLabel("名称 *:", basic_card))
+        self.create_name_edit = LineEdit(basic_card)
+        self.create_name_edit.setPlaceholderText("小写字母、数字、连字符，如: git-release")
+        self.create_name_edit.setToolTip(get_tooltip("skill_name"))
+        name_layout.addWidget(self.create_name_edit)
+        basic_layout.addLayout(name_layout)
+        
+        # 描述
+        desc_layout = QHBoxLayout()
+        desc_layout.addWidget(BodyLabel("描述 *:", basic_card))
+        self.create_desc_edit = LineEdit(basic_card)
+        self.create_desc_edit.setPlaceholderText("描述 Skill 的功能 (1-1024 字符)")
+        basic_layout.addLayout(desc_layout)
+        desc_layout.addWidget(self.create_desc_edit)
+        
+        # License
+        license_layout = QHBoxLayout()
+        license_layout.addWidget(BodyLabel("许可证:", basic_card))
+        self.create_license_edit = LineEdit(basic_card)
+        self.create_license_edit.setPlaceholderText("如: MIT, Apache-2.0 (可选)")
+        license_layout.addWidget(self.create_license_edit)
+        basic_layout.addLayout(license_layout)
+        
+        # Compatibility
+        compat_layout = QHBoxLayout()
+        compat_layout.addWidget(BodyLabel("兼容性:", basic_card))
+        self.create_compat_edit = LineEdit(basic_card)
+        self.create_compat_edit.setPlaceholderText("如: opencode, claude (可选)")
+        compat_layout.addWidget(self.create_compat_edit)
+        basic_layout.addLayout(compat_layout)
+        
+        # 保存位置
+        loc_layout = QHBoxLayout()
+        loc_layout.addWidget(BodyLabel("保存位置:", basic_card))
+        self.create_loc_combo = ComboBox(basic_card)
+        self.create_loc_combo.addItems([
+            "OpenCode 全局 (~/.config/opencode/skills/)",
+            "OpenCode 项目 (.opencode/skills/)",
+            "Claude 全局 (~/.claude/skills/)",
+            "Claude 项目 (.claude/skills/)",
+        ])
+        loc_layout.addWidget(self.create_loc_combo)
+        loc_layout.addStretch()
+        basic_layout.addLayout(loc_layout)
+        
+        create_layout.addWidget(basic_card)
+        
+        # 内容编辑
+        create_layout.addWidget(BodyLabel("Skill 内容 (Markdown):", create_widget))
+        self.create_content_edit = TextEdit(create_widget)
+        self.create_content_edit.setPlaceholderText(
+            "## What I do\n\n- 描述功能点 1\n- 描述功能点 2\n\n"
+            "## When to use me\n\n描述使用场景\n\n"
+            "## Instructions\n\n- 具体指令 1\n- 具体指令 2"
+        )
+        create_layout.addWidget(self.create_content_edit, 1)
+        
+        # 按钮
+        btn_layout = QHBoxLayout()
+        save_btn = PrimaryPushButton(FIF.SAVE, "保存 Skill", create_widget)
+        save_btn.clicked.connect(self._on_save_skill)
+        btn_layout.addWidget(save_btn)
+        
+        clear_btn = PushButton(FIF.DELETE, "清空", create_widget)
+        clear_btn.clicked.connect(self._on_clear_create_form)
+        btn_layout.addWidget(clear_btn)
+        
+        btn_layout.addStretch()
+        create_layout.addLayout(btn_layout)
+        
+        self.stacked_widget.addWidget(create_widget)
+    
+    def _on_save_skill(self):
+        """保存 Skill"""
+        name = self.create_name_edit.text().strip()
+        desc = self.create_desc_edit.text().strip()
+        license_info = self.create_license_edit.text().strip()
+        compat = self.create_compat_edit.text().strip()
+        content = self.create_content_edit.toPlainText().strip()
+        
+        # 验证
+        valid, msg = SkillDiscovery.validate_skill_name(name)
+        if not valid:
+            self.show_error("名称错误", msg)
+            return
+        
+        valid, msg = SkillDiscovery.validate_description(desc)
+        if not valid:
+            self.show_error("描述错误", msg)
+            return
+        
+        # 确定保存路径
+        loc_text = self.create_loc_combo.currentText()
+        if "OpenCode 全局" in loc_text:
+            base_path = Path.home() / ".config" / "opencode" / "skills"
+        elif "OpenCode 项目" in loc_text:
+            base_path = Path.cwd() / ".opencode" / "skills"
+        elif "Claude 全局" in loc_text:
+            base_path = Path.home() / ".claude" / "skills"
+        else:
+            base_path = Path.cwd() / ".claude" / "skills"
+        
+        skill_dir = base_path / name
+        skill_file = skill_dir / "SKILL.md"
+        
+        # 构建 frontmatter
+        frontmatter_lines = [
+            f"name: {name}",
+            f"description: {desc}",
+        ]
+        if license_info:
+            frontmatter_lines.append(f"license: {license_info}")
+        if compat:
+            frontmatter_lines.append(f"compatibility: {compat}")
+        
+        frontmatter = "\n".join(frontmatter_lines)
+        
+        # 默认内容
+        if not content:
+            content = "## What I do\n\n- 描述功能\n\n## Instructions\n\n- 具体指令"
+        
+        skill_content = f"---\n{frontmatter}\n---\n\n{content}\n"
+        
+        try:
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            with open(skill_file, "w", encoding="utf-8") as f:
+                f.write(skill_content)
+            
+            self.show_success("成功", f"Skill 已保存: {skill_file}")
+            self._refresh_skill_list()
+            self._on_clear_create_form()
+        except Exception as e:
+            self.show_error("错误", f"保存失败: {e}")
+    
+    def _on_clear_create_form(self):
+        """清空创建表单"""
+        self.create_name_edit.clear()
+        self.create_desc_edit.clear()
+        self.create_license_edit.clear()
+        self.create_compat_edit.clear()
+        self.create_content_edit.clear()
+        self._current_skill = None
+    
+    def _create_permission_tab(self):
+        """创建权限配置标签页"""
+        perm_widget = QWidget()
+        perm_layout = QVBoxLayout(perm_widget)
+        perm_layout.setContentsMargins(0, 16, 0, 0)
+        
+        # 使用 QSplitter 实现左右分栏
+        splitter = QSplitter(Qt.Orientation.Horizontal, perm_widget)
+        
+        # ===== 左侧：全局权限配置 =====
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 8, 0)
+        
+        left_layout.addWidget(SubtitleLabel("全局 Skill 权限", left_widget))
+        left_layout.addWidget(CaptionLabel(
+            "配置 permission.skill 权限，控制 Skill 的加载行为",
+            left_widget
+        ))
+        
+        # 工具栏
+        toolbar = QHBoxLayout()
+        add_perm_btn = PrimaryPushButton(FIF.ADD, "添加", left_widget)
+        add_perm_btn.clicked.connect(self._on_add_permission)
+        toolbar.addWidget(add_perm_btn)
+        
+        del_perm_btn = PushButton(FIF.DELETE, "删除", left_widget)
+        del_perm_btn.clicked.connect(self._on_delete_permission)
+        toolbar.addWidget(del_perm_btn)
+        
+        toolbar.addStretch()
+        left_layout.addLayout(toolbar)
+        
+        # 权限表格
+        self.perm_table = TableWidget(left_widget)
+        self.perm_table.setColumnCount(2)
+        self.perm_table.setHorizontalHeaderLabels(["模式", "权限"])
+        self.perm_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.perm_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.perm_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.perm_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.perm_table.itemSelectionChanged.connect(self._on_perm_selected)
+        left_layout.addWidget(self.perm_table, 1)
+        
+        # 编辑区域
+        edit_card = SimpleCardWidget(left_widget)
+        edit_layout = QVBoxLayout(edit_card)
+        edit_layout.setContentsMargins(12, 8, 12, 8)
+        
+        pattern_layout = QHBoxLayout()
+        pattern_layout.addWidget(BodyLabel("模式:", edit_card))
+        self.perm_pattern_edit = LineEdit(edit_card)
+        self.perm_pattern_edit.setPlaceholderText("如: *, internal-*, my-skill")
+        self.perm_pattern_edit.setToolTip(get_tooltip("skill_pattern"))
+        pattern_layout.addWidget(self.perm_pattern_edit)
+        edit_layout.addLayout(pattern_layout)
+        
+        perm_sel_layout = QHBoxLayout()
+        perm_sel_layout.addWidget(BodyLabel("权限:", edit_card))
+        self.perm_level_combo = ComboBox(edit_card)
+        self.perm_level_combo.addItems(["allow", "ask", "deny"])
+        self.perm_level_combo.setToolTip(get_tooltip("skill_permission"))
+        perm_sel_layout.addWidget(self.perm_level_combo)
+        perm_sel_layout.addStretch()
+        edit_layout.addLayout(perm_sel_layout)
+        
+        save_perm_btn = PrimaryPushButton("保存权限", edit_card)
+        save_perm_btn.clicked.connect(self._on_save_permission)
+        edit_layout.addWidget(save_perm_btn)
+        
+        left_layout.addWidget(edit_card)
+        
+        # ===== 右侧：Agent 级别配置 =====
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(8, 0, 0, 0)
+        
+        right_layout.addWidget(SubtitleLabel("Agent 级别配置", right_widget))
+        right_layout.addWidget(CaptionLabel(
+            "为特定 Agent 配置 Skill 权限或禁用 Skill 工具",
+            right_widget
+        ))
+        
+        # Agent 选择
+        agent_layout = QHBoxLayout()
+        agent_layout.addWidget(BodyLabel("选择 Agent:", right_widget))
+        self.agent_combo = ComboBox(right_widget)
+        self.agent_combo.addItems(["task", "plan", "code", "summarize"])
+        self.agent_combo.currentTextChanged.connect(self._on_agent_changed)
+        agent_layout.addWidget(self.agent_combo)
+        agent_layout.addStretch()
+        right_layout.addLayout(agent_layout)
+        
+        # 禁用 Skill 工具
+        self.disable_skill_check = CheckBox("禁用 Skill 工具 (tools.skill: false)", right_widget)
+        self.disable_skill_check.stateChanged.connect(self._on_disable_skill_changed)
+        right_layout.addWidget(self.disable_skill_check)
+        
+        # Agent 权限覆盖
+        right_layout.addWidget(BodyLabel("Agent 权限覆盖:", right_widget))
+        self.agent_perm_table = TableWidget(right_widget)
+        self.agent_perm_table.setColumnCount(2)
+        self.agent_perm_table.setHorizontalHeaderLabels(["模式", "权限"])
+        self.agent_perm_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.agent_perm_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.agent_perm_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        right_layout.addWidget(self.agent_perm_table, 1)
+        
+        # Agent 权限编辑
+        agent_edit_card = SimpleCardWidget(right_widget)
+        agent_edit_layout = QVBoxLayout(agent_edit_card)
+        agent_edit_layout.setContentsMargins(12, 8, 12, 8)
+        
+        agent_pattern_layout = QHBoxLayout()
+        agent_pattern_layout.addWidget(BodyLabel("模式:", agent_edit_card))
+        self.agent_perm_pattern_edit = LineEdit(agent_edit_card)
+        self.agent_perm_pattern_edit.setPlaceholderText("如: documents-*, internal-*")
+        agent_pattern_layout.addWidget(self.agent_perm_pattern_edit)
+        agent_edit_layout.addLayout(agent_pattern_layout)
+        
+        agent_perm_layout = QHBoxLayout()
+        agent_perm_layout.addWidget(BodyLabel("权限:", agent_edit_card))
+        self.agent_perm_level_combo = ComboBox(agent_edit_card)
+        self.agent_perm_level_combo.addItems(["allow", "ask", "deny"])
+        agent_perm_layout.addWidget(self.agent_perm_level_combo)
+        agent_perm_layout.addStretch()
+        agent_edit_layout.addLayout(agent_perm_layout)
+        
+        agent_btn_layout = QHBoxLayout()
+        add_agent_perm_btn = PushButton(FIF.ADD, "添加", agent_edit_card)
+        add_agent_perm_btn.clicked.connect(self._on_add_agent_permission)
+        agent_btn_layout.addWidget(add_agent_perm_btn)
+        
+        del_agent_perm_btn = PushButton(FIF.DELETE, "删除", agent_edit_card)
+        del_agent_perm_btn.clicked.connect(self._on_delete_agent_permission)
+        agent_btn_layout.addWidget(del_agent_perm_btn)
+        agent_btn_layout.addStretch()
+        agent_edit_layout.addLayout(agent_btn_layout)
+        
+        right_layout.addWidget(agent_edit_card)
+        
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
         splitter.setSizes([400, 400])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-
-        self._layout.addWidget(
-            splitter, 1
-        )  # 添加 stretch factor 让 splitter 占满剩余空间
-
-    def _load_data(self):
-        """加载 Skill 权限数据"""
-        self.table.setRowCount(0)
-        config = self.main_window.opencode_config or {}
-        permissions = config.get("permission", {}).get("skill", {})
-
-        if isinstance(permissions, dict):
-            for pattern, perm in permissions.items():
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(pattern))
-                self.table.setItem(row, 1, QTableWidgetItem(perm))
-        elif isinstance(permissions, str):
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem("*"))
-            self.table.setItem(row, 1, QTableWidgetItem(permissions))
-
-    def _on_select(self):
-        row = self.table.currentRow()
-        if row >= 0:
-            pattern_item = self.table.item(row, 0)
-            perm_item = self.table.item(row, 1)
-            if pattern_item:
-                self.pattern_edit.setText(pattern_item.text())
-            if perm_item:
-                self.perm_combo.setCurrentText(perm_item.text())
-
-    def _on_add(self):
-        self.pattern_edit.setText("")
-        self.perm_combo.setCurrentText("ask")
-
-    def _on_delete(self):
-        row = self.table.currentRow()
+        
+        perm_layout.addWidget(splitter, 1)
+        self.stacked_widget.addWidget(perm_widget)
+    
+    def _on_add_permission(self):
+        """添加新权限"""
+        self.perm_pattern_edit.clear()
+        self.perm_level_combo.setCurrentText("ask")
+    
+    def _on_delete_permission(self):
+        """删除选中的权限"""
+        row = self.perm_table.currentRow()
         if row < 0:
             self.show_warning("提示", "请先选择一个权限")
             return
-
-        pattern = self.table.item(row, 0).text()
-        w = FluentMessageBox(
-            "确认删除", f'确定要删除 Skill 权限 "{pattern}" 吗？', self
-        )
+        
+        pattern = self.perm_table.item(row, 0).text()
+        w = FluentMessageBox("确认删除", f'确定要删除权限 "{pattern}" 吗？', self)
         if w.exec_():
             config = self.main_window.opencode_config or {}
             skill_perms = config.get("permission", {}).get("skill", {})
             if isinstance(skill_perms, dict) and pattern in skill_perms:
                 del skill_perms[pattern]
                 self.main_window.save_opencode_config()
-                self._load_data()
+                self._load_permission_data()
                 self.show_success("成功", f'权限 "{pattern}" 已删除')
-
-    def _on_save(self):
-        pattern = self.pattern_edit.text().strip()
+    
+    def _on_perm_selected(self):
+        """选中权限时填充编辑区"""
+        row = self.perm_table.currentRow()
+        if row >= 0:
+            pattern_item = self.perm_table.item(row, 0)
+            perm_item = self.perm_table.item(row, 1)
+            if pattern_item:
+                self.perm_pattern_edit.setText(pattern_item.text())
+            if perm_item:
+                self.perm_level_combo.setCurrentText(perm_item.text())
+    
+    def _on_save_permission(self):
+        """保存权限"""
+        pattern = self.perm_pattern_edit.text().strip()
         if not pattern:
             self.show_warning("提示", "请输入模式")
             return
-
+        
         config = self.main_window.opencode_config
         if config is None:
             config = {}
             self.main_window.opencode_config = config
-
+        
         if "permission" not in config:
             config["permission"] = {}
-        if "skill" not in config["permission"] or not isinstance(
-            config["permission"]["skill"], dict
-        ):
+        if "skill" not in config["permission"] or not isinstance(config["permission"]["skill"], dict):
             config["permission"]["skill"] = {}
-
-        config["permission"]["skill"][pattern] = self.perm_combo.currentText()
+        
+        config["permission"]["skill"][pattern] = self.perm_level_combo.currentText()
         self.main_window.save_opencode_config()
-        self._load_data()
-        self.show_success("成功", f'Skill 权限 "{pattern}" 已保存')
-
-    def _on_create_skill(self):
-        name = self.skill_name_edit.text().strip()
-        desc = self.skill_desc_edit.text().strip()
-        content = self.skill_content_edit.toPlainText().strip()
-
-        if not name:
-            self.show_warning("提示", "请输入 Skill 名称")
-            return
-        if not desc:
-            self.show_warning("提示", "请输入 Skill 描述")
-            return
-
-        # 验证名称格式
-        import re
-
-        if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", name):
-            self.show_error("错误", "Skill 名称格式错误！要求：小写字母、数字、连字符")
-            return
-
-        # 确定保存路径
-        if self.global_radio.isChecked():
-            base_path = Path.home() / ".config" / "opencode" / "skill"
+        self._load_permission_data()
+        self.show_success("成功", f'权限 "{pattern}" 已保存')
+    
+    def _on_agent_changed(self, agent_name: str):
+        """切换 Agent 时加载其配置"""
+        self._load_agent_skill_config(agent_name)
+    
+    def _load_agent_skill_config(self, agent_name: str):
+        """加载指定 Agent 的 Skill 配置"""
+        config = self.main_window.opencode_config or {}
+        agent_config = config.get("agent", {}).get(agent_name, {})
+        
+        # 加载 tools.skill 状态
+        tools = agent_config.get("tools", {})
+        skill_enabled = tools.get("skill", True)
+        self.disable_skill_check.setChecked(skill_enabled is False)
+        
+        # 加载 Agent 权限覆盖
+        self.agent_perm_table.setRowCount(0)
+        agent_perms = agent_config.get("permission", {}).get("skill", {})
+        if isinstance(agent_perms, dict):
+            for pattern, perm in agent_perms.items():
+                row = self.agent_perm_table.rowCount()
+                self.agent_perm_table.insertRow(row)
+                self.agent_perm_table.setItem(row, 0, QTableWidgetItem(pattern))
+                self.agent_perm_table.setItem(row, 1, QTableWidgetItem(perm))
+    
+    def _on_disable_skill_changed(self, state):
+        """禁用 Skill 工具状态变化"""
+        agent_name = self.agent_combo.currentText()
+        config = self.main_window.opencode_config
+        if config is None:
+            config = {}
+            self.main_window.opencode_config = config
+        
+        if "agent" not in config:
+            config["agent"] = {}
+        if agent_name not in config["agent"]:
+            config["agent"][agent_name] = {}
+        if "tools" not in config["agent"][agent_name]:
+            config["agent"][agent_name]["tools"] = {}
+        
+        if state == Qt.Checked:
+            config["agent"][agent_name]["tools"]["skill"] = False
         else:
-            base_path = Path.cwd() / ".opencode" / "skill"
-
-        skill_dir = base_path / name
-        skill_file = skill_dir / "SKILL.md"
-
-        try:
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            default_content = "## What I do\n- 描述功能\n\n## Instructions\n- 具体指令"
-            skill_content = f"""---
-name: {name}
-description: {desc}
----
-
-{content if content else default_content}
-"""
-            with open(skill_file, "w", encoding="utf-8") as f:
-                f.write(skill_content)
-
-            self.show_success("成功", f"Skill 已创建: {skill_file}")
-        except Exception as e:
-            self.show_error("错误", f"创建失败: {e}")
+            # 移除配置，使用默认值
+            if "skill" in config["agent"][agent_name]["tools"]:
+                del config["agent"][agent_name]["tools"]["skill"]
+        
+        self.main_window.save_opencode_config()
+    
+    def _on_add_agent_permission(self):
+        """添加 Agent 权限覆盖"""
+        pattern = self.agent_perm_pattern_edit.text().strip()
+        if not pattern:
+            self.show_warning("提示", "请输入模式")
+            return
+        
+        agent_name = self.agent_combo.currentText()
+        config = self.main_window.opencode_config
+        if config is None:
+            config = {}
+            self.main_window.opencode_config = config
+        
+        if "agent" not in config:
+            config["agent"] = {}
+        if agent_name not in config["agent"]:
+            config["agent"][agent_name] = {}
+        if "permission" not in config["agent"][agent_name]:
+            config["agent"][agent_name]["permission"] = {}
+        if "skill" not in config["agent"][agent_name]["permission"]:
+            config["agent"][agent_name]["permission"]["skill"] = {}
+        
+        config["agent"][agent_name]["permission"]["skill"][pattern] = self.agent_perm_level_combo.currentText()
+        self.main_window.save_opencode_config()
+        self._load_agent_skill_config(agent_name)
+        self.show_success("成功", f'Agent "{agent_name}" 权限 "{pattern}" 已添加')
+    
+    def _on_delete_agent_permission(self):
+        """删除 Agent 权限覆盖"""
+        row = self.agent_perm_table.currentRow()
+        if row < 0:
+            self.show_warning("提示", "请先选择一个权限")
+            return
+        
+        pattern = self.agent_perm_table.item(row, 0).text()
+        agent_name = self.agent_combo.currentText()
+        
+        config = self.main_window.opencode_config or {}
+        agent_perms = config.get("agent", {}).get(agent_name, {}).get("permission", {}).get("skill", {})
+        
+        if isinstance(agent_perms, dict) and pattern in agent_perms:
+            del agent_perms[pattern]
+            self.main_window.save_opencode_config()
+            self._load_agent_skill_config(agent_name)
+            self.show_success("成功", f'权限 "{pattern}" 已删除')
 
 
 # ==================== Rules 页面 ====================
@@ -9692,10 +11390,10 @@ class MonitorPage(BasePage):
         """切换对话延迟测试状态"""
         self._chat_test_enabled = not self._chat_test_enabled
         if self._chat_test_enabled:
-            self.stop_monitor_btn.setText("停止监控")
+            self.stop_monitor_btn.setText("停止")
             self.stop_monitor_btn.setIcon(FIF.PAUSE)
         else:
-            self.stop_monitor_btn.setText("恢复监控")
+            self.stop_monitor_btn.setText("恢复")
             self.stop_monitor_btn.setIcon(FIF.PLAY)
 
     def _setup_ui(self):
@@ -9704,62 +11402,105 @@ class MonitorPage(BasePage):
         self._build_table()
 
     def _build_compact_summary(self):
-        """构建紧凑统计区（两行以内）"""
+        """构建统计区 - 简洁卡片式设计"""
         wrapper = QWidget(self)
-        wrapper_layout = QGridLayout(wrapper)
-        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 8, 0, 8)
         wrapper_layout.setSpacing(8)
 
-        # 单行紧凑统计
-        wrapper_layout.addWidget(BodyLabel("可用率:", wrapper), 0, 0)
-        self.availability_value = BodyLabel("—", wrapper)
-        wrapper_layout.addWidget(self.availability_value, 0, 1)
+        # 第一行：统计卡片
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(8)
 
-        wrapper_layout.addWidget(BodyLabel("异常数:", wrapper), 0, 2)
-        self.error_count_value = BodyLabel("0", wrapper)
-        wrapper_layout.addWidget(self.error_count_value, 0, 3)
+        # 统计卡片样式
+        def create_stat_card(icon, label_text, value_text, color="#58a6ff"):
+            card = QFrame()
+            card.setFrameShape(QFrame.StyledPanel)
+            card.setStyleSheet("""
+                QFrame {
+                    background-color: #161b22;
+                    border: 1px solid #30363d;
+                    border-radius: 6px;
+                }
+            """)
+            card.setFixedSize(95, 50)
+            
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(8, 4, 8, 4)
+            layout.setSpacing(2)
+            
+            # 数值行（带图标）
+            value_row = QHBoxLayout()
+            value_row.setSpacing(4)
+            
+            icon_label = QLabel()
+            icon_label.setPixmap(icon.icon().pixmap(12, 12))
+            value_row.addWidget(icon_label)
+            
+            value = StrongBodyLabel(value_text)
+            value.setStyleSheet(f"color: {color}; font-size: 14px;")
+            value_row.addWidget(value)
+            value_row.addStretch()
+            layout.addLayout(value_row)
+            
+            # 标签
+            label = CaptionLabel(label_text)
+            label.setStyleSheet("color: #7d8590; font-size: 10px;")
+            layout.addWidget(label)
+            
+            return card, value
 
-        wrapper_layout.addWidget(BodyLabel("平均对话延迟:", wrapper), 0, 4)
-        self.chat_latency_value = BodyLabel("—", wrapper)
-        wrapper_layout.addWidget(self.chat_latency_value, 0, 5)
+        # 可用率
+        card, self.availability_value = create_stat_card(FIF.ACCEPT, "可用率", "—", "#3fb950")
+        stats_row.addWidget(card)
 
-        wrapper_layout.addWidget(BodyLabel("平均 Ping 延迟:", wrapper), 0, 6)
-        self.ping_latency_value = BodyLabel("—", wrapper)
-        wrapper_layout.addWidget(self.ping_latency_value, 0, 7)
+        # 异常数
+        card, self.error_count_value = create_stat_card(FIF.CANCEL, "异常", "0", "#f85149")
+        stats_row.addWidget(card)
 
-        wrapper_layout.addWidget(BodyLabel("目标数:", wrapper), 0, 8)
-        self.target_count_value = BodyLabel("0", wrapper)
-        wrapper_layout.addWidget(self.target_count_value, 0, 9)
+        # 对话延迟
+        card, self.chat_latency_value = create_stat_card(FIF.CHAT, "对话延迟", "—", "#58a6ff")
+        stats_row.addWidget(card)
 
-        wrapper_layout.addWidget(BodyLabel("最近检测:", wrapper), 0, 10)
-        self.last_checked_value = CaptionLabel("—", wrapper)
-        wrapper_layout.addWidget(self.last_checked_value, 0, 11)
+        # Ping 延迟
+        card, self.ping_latency_value = create_stat_card(FIF.WIFI, "Ping", "—", "#58a6ff")
+        stats_row.addWidget(card)
 
-        self.manual_check_btn = PushButton(FIF.SYNC, "手动检测", wrapper)
+        # 目标数
+        card, self.target_count_value = create_stat_card(FIF.TAG, "目标", "0", "#e6edf3")
+        stats_row.addWidget(card)
+
+        # 最近检测
+        card, self.last_checked_value = create_stat_card(FIF.HISTORY, "最近", "—", "#7d8590")
+        card.setFixedSize(110, 50)
+        stats_row.addWidget(card)
+
+        stats_row.addStretch()
+
+        # 按钮和状态放在统计行右侧
+        self.manual_check_btn = PrimaryPushButton(FIF.SYNC, "检测", wrapper)
+        self.manual_check_btn.setFixedSize(80, 32)
         self.manual_check_btn.clicked.connect(self._do_poll)
-        wrapper_layout.addWidget(self.manual_check_btn, 0, 12)
+        stats_row.addWidget(self.manual_check_btn)
 
-        self.stop_monitor_btn = PushButton(FIF.PAUSE, "停止监控", wrapper)
-        self.stop_monitor_btn.setToolTip(
-            "我们使用最小 token 测试完整返回，但仍会产生费用；不需要可停止；停止仅影响对话延迟测试，其他不影响"
-        )
+        self.stop_monitor_btn = PushButton(FIF.PAUSE, "停止", wrapper)
+        self.stop_monitor_btn.setFixedSize(80, 32)
+        self.stop_monitor_btn.setToolTip("停止/恢复对话延迟测试")
         self.stop_monitor_btn.clicked.connect(self._toggle_chat_test)
-        wrapper_layout.addWidget(self.stop_monitor_btn, 0, 13)
+        stats_row.addWidget(self.stop_monitor_btn)
 
         self.poll_status_label = CaptionLabel("", wrapper)
-        wrapper_layout.addWidget(self.poll_status_label, 0, 14)
+        self.poll_status_label.setStyleSheet("color: #f0883e; font-weight: bold;")
+        self.poll_status_label.setMinimumWidth(50)
+        stats_row.addWidget(self.poll_status_label)
 
-        wrapper_layout.setColumnStretch(15, 1)
+        wrapper_layout.addLayout(stats_row)
         self._layout.addWidget(wrapper)
 
     def _build_table(self):
         """构建明细表格"""
-        card = self.add_card()
-        card_layout = card.layout()
-        if card_layout is not None:
-            card_layout.setContentsMargins(2, 6, 2, 6)
-
-        self.detail_table = TableWidget(card)
+        # 直接添加到页面，不使用卡片，保持与其他页面一致的样式
+        self.detail_table = TableWidget(self)
         self.detail_table.setContentsMargins(0, 0, 0, 0)
         self.detail_table.setViewportMargins(0, 0, 0, 0)
         self.detail_table.setColumnCount(7)
@@ -9792,7 +11533,7 @@ class MonitorPage(BasePage):
         self.detail_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.detail_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.detail_table.verticalHeader().setDefaultSectionSize(32)
-        card_layout.addWidget(self.detail_table, 1)
+        self._layout.addWidget(self.detail_table, 1)
 
     def _load_targets(self):
         """从配置加载监控目标"""
@@ -9971,25 +11712,63 @@ class MonitorPage(BasePage):
                 if last_checked is None or latest.checked_at > last_checked:
                     last_checked = latest.checked_at
 
+        # 可用率 - 根据数值变色
         if total_availability:
             avg_avail = sum(total_availability) / len(total_availability)
             self.availability_value.setText(f"{avg_avail:.1f}%")
+            if avg_avail >= 90:
+                color = "#3fb950"  # 绿色
+            elif avg_avail >= 70:
+                color = "#f0883e"  # 橙色
+            else:
+                color = "#f85149"  # 红色
+            self.availability_value.setStyleSheet(f"color: {color}; font-size: 14px;")
         else:
             self.availability_value.setText("—")
+            self.availability_value.setStyleSheet("color: #7d8590; font-size: 14px;")
 
+        # 对话延迟 - 根据数值变色
         if total_chat_latency:
             avg_chat = sum(total_chat_latency) // len(total_chat_latency)
-            self.chat_latency_value.setText(f"{avg_chat} ms")
+            self.chat_latency_value.setText(f"{avg_chat}ms")
+            if avg_chat <= 1000:
+                color = "#3fb950"  # 绿色 <= 1s
+            elif avg_chat <= 3000:
+                color = "#58a6ff"  # 蓝色 <= 3s
+            elif avg_chat <= 6000:
+                color = "#f0883e"  # 橙色 <= 6s
+            else:
+                color = "#f85149"  # 红色 > 6s
+            self.chat_latency_value.setStyleSheet(f"color: {color}; font-size: 14px;")
         else:
             self.chat_latency_value.setText("—")
+            self.chat_latency_value.setStyleSheet("color: #7d8590; font-size: 14px;")
 
+        # Ping 延迟 - 根据数值变色
         if total_ping_latency:
             avg_ping = sum(total_ping_latency) // len(total_ping_latency)
-            self.ping_latency_value.setText(f"{avg_ping} ms")
+            self.ping_latency_value.setText(f"{avg_ping}ms")
+            if avg_ping <= 100:
+                color = "#3fb950"  # 绿色 <= 100ms
+            elif avg_ping <= 300:
+                color = "#58a6ff"  # 蓝色 <= 300ms
+            elif avg_ping <= 500:
+                color = "#f0883e"  # 橙色 <= 500ms
+            else:
+                color = "#f85149"  # 红色 > 500ms
+            self.ping_latency_value.setStyleSheet(f"color: {color}; font-size: 14px;")
         else:
             self.ping_latency_value.setText("—")
+            self.ping_latency_value.setStyleSheet("color: #7d8590; font-size: 14px;")
 
+        # 异常数 - 根据数值变色
         self.error_count_value.setText(str(error_count))
+        if error_count == 0:
+            self.error_count_value.setStyleSheet("color: #3fb950; font-size: 14px;")
+        elif error_count <= 2:
+            self.error_count_value.setStyleSheet("color: #f0883e; font-size: 14px;")
+        else:
+            self.error_count_value.setStyleSheet("color: #f85149; font-size: 14px;")
 
         if last_checked:
             self.last_checked_value.setText(last_checked.strftime("%H:%M:%S"))
@@ -10169,20 +11948,43 @@ class MonitorPage(BasePage):
             status_item.setToolTip(latest.message)
             self.detail_table.setItem(row, 1, status_item)
 
-            # 可用率
+            # 可用率 - 根据数值变色
             avail = _calc_availability(history)
-            avail_text = f"{avail:.1f}%" if avail is not None else "—"
-            self.detail_table.setItem(row, 2, QTableWidgetItem(avail_text))
+            avail_item = QTableWidgetItem(f"{avail:.1f}%" if avail is not None else "—")
+            if avail is not None:
+                if avail >= 90:
+                    avail_item.setForeground(QColor("#3fb950"))
+                elif avail >= 70:
+                    avail_item.setForeground(QColor("#f0883e"))
+                else:
+                    avail_item.setForeground(QColor("#f85149"))
+            self.detail_table.setItem(row, 2, avail_item)
 
-            # 对话延迟
-            self.detail_table.setItem(
-                row, 3, QTableWidgetItem(_format_latency(latest.latency_ms))
-            )
+            # 对话延迟 - 根据数值变色
+            chat_item = QTableWidgetItem(_format_latency(latest.latency_ms))
+            if latest.latency_ms is not None:
+                if latest.latency_ms <= 1000:
+                    chat_item.setForeground(QColor("#3fb950"))
+                elif latest.latency_ms <= 3000:
+                    chat_item.setForeground(QColor("#58a6ff"))
+                elif latest.latency_ms <= 6000:
+                    chat_item.setForeground(QColor("#f0883e"))
+                else:
+                    chat_item.setForeground(QColor("#f85149"))
+            self.detail_table.setItem(row, 3, chat_item)
 
-            # Ping 延迟
-            self.detail_table.setItem(
-                row, 4, QTableWidgetItem(_format_latency(latest.ping_ms))
-            )
+            # Ping 延迟 - 根据数值变色
+            ping_item = QTableWidgetItem(_format_latency(latest.ping_ms))
+            if latest.ping_ms is not None:
+                if latest.ping_ms <= 100:
+                    ping_item.setForeground(QColor("#3fb950"))
+                elif latest.ping_ms <= 300:
+                    ping_item.setForeground(QColor("#58a6ff"))
+                elif latest.ping_ms <= 500:
+                    ping_item.setForeground(QColor("#f0883e"))
+                else:
+                    ping_item.setForeground(QColor("#f85149"))
+            self.detail_table.setItem(row, 4, ping_item)
 
             # 最后检测
             self.detail_table.setItem(
@@ -10404,6 +12206,7 @@ class ImportPage(BasePage):
     def _setup_ui(self):
         # 检测到的配置卡片
         detect_card = self.add_card("检测到的外部配置")
+        detect_card.setStyleSheet("SimpleCardWidget { background-color: transparent; border: none; }")
         detect_layout = detect_card.layout()
 
         # 刷新按钮
@@ -10453,6 +12256,7 @@ class ImportPage(BasePage):
 
         # 预览卡片
         preview_card = self.add_card("配置预览与转换结果")
+        preview_card.setStyleSheet("SimpleCardWidget { background-color: transparent; border: none; }")
         preview_layout = preview_card.layout()
         preview_layout.addWidget(
             BodyLabel("点击“预览转换”在弹窗中查看左右对照。", preview_card)
@@ -10870,7 +12674,15 @@ class BackupDialog(BaseDialog):
         self.backup_table.setHorizontalHeaderLabels(
             ["配置文件", "时间", "标签", "路径"]
         )
-        self.backup_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # 设置列宽：配置文件和标签固定，时间和路径自适应
+        header = self.backup_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.resizeSection(0, 120)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.resizeSection(1, 150)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.resizeSection(2, 80)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)  # 路径列自适应
         self.backup_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.backup_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.backup_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -11040,16 +12852,20 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("OpenCode Config Manager")
     app.setApplicationVersion(APP_VERSION)
+    
+    # 在创建窗口前设置深色主题，避免启动闪烁
+    setTheme(Theme.DARK)
+    setThemeColor("#2979FF")
 
-    # 设置全局字体 - 使用 JetBrains Mono 并提供回退
+    # 设置全局字体
     font = QFont()
     font.setFamilies(
-        ["JetBrains Mono", "Consolas", "Monaco", "Courier New", "monospace"]
+        [UIConfig.FONT_FAMILY, "Consolas", "Monaco", "Courier New", "monospace"]
     )
     font.setPointSize(10)
     app.setFont(font)
 
-    # 应用全局样式（根据当前主题）
+    # 应用全局样式
     app.setStyleSheet(UIConfig.get_stylesheet())
 
     window = MainWindow()
