@@ -392,7 +392,7 @@ class UIConfig:
         """
 
 
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
