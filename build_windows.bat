@@ -2,7 +2,7 @@
 chcp 65001 > nul
 REM ============================================================
 REM OpenCode Config Manager - Windows Build Script
-REM v1.0.4 Fluent (PyQt5 + QFluentWidgets)
+REM v1.1.3 Fluent (PyQt5 + QFluentWidgets)
 REM ============================================================
 REM
 REM 使用方法:
@@ -16,7 +16,7 @@ REM ============================================================
 
 setlocal enabledelayedexpansion
 
-set VERSION=1.0.4
+set VERSION=1.1.3
 set MAIN_SCRIPT=opencode_config_manager_fluent.py
 
 echo ========================================
@@ -71,6 +71,8 @@ REM ==================== 构建 ====================
 echo [INFO] Building executable...
 echo [INFO] This may take a few minutes...
 
+REM 尝试使用 --onedir 模式避免 DLL 加载问题
+REM 如果 --onefile 失败，可以改用 --onedir
 pyinstaller --onefile ^
     --windowed ^
     --name "OpenCodeConfigManager_v%VERSION%" ^
@@ -82,6 +84,8 @@ pyinstaller --onefile ^
     --hidden-import qfluentwidgets.common ^
     --hidden-import qfluentwidgets.window ^
     --icon "assets/icon.ico" ^
+    --noupx ^
+    --clean ^
     --exclude-module torch ^
     --exclude-module tensorflow ^
     --exclude-module scipy ^
