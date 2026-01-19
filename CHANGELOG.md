@@ -4,20 +4,82 @@
 
 ---
 
+## [v1.1.7] - 2026-01-20 02:54
+**版本代号**: CLI 导出与 UI 优化版
+
+### 🆕 CLI 工具导出功能
+- **Claude Code 多模型配置**：
+  - 支持 4 个模型字段：主模型 (ANTHROPIC_MODEL)、Haiku、Sonnet、Opus
+  - 每个模型可独立配置或留空使用默认值
+  - 留空时配置文件不包含占位符文本
+  
+- **Codex/Gemini 双文件预览**：
+  - Codex CLI：auth.json + config.toml 双文件标签页预览
+  - Gemini CLI：.env + settings.json 双文件标签页预览
+  - 每个文件独立显示和编辑
+
+- **Base URL 临时修改**：
+  - 每个 CLI 工具标签页显示 Provider 的 Base URL
+  - 支持临时修改用于导出，不影响 OpenCode 原始配置
+  - 修改后预览配置实时更新
+
+- **模型自定义输入**：
+  - 模型下拉框支持手动输入自定义模型名称
+  - 使用原生 QComboBox 实现可编辑功能
+  - 深色主题下文字颜色优化为白色
+
+- **语法高亮与格式化**：
+  - 新增 ConfigSyntaxHighlighter 类支持 JSON/TOML/ENV 格式
+  - 颜色方案：字符串(绿色)、数字(橙色)、关键字(紫色)、键名(蓝色)、注释(灰色)
+  - 添加"格式化"按钮可格式化 JSON 配置
+
+- **通用配置功能**：
+  - 添加"写入通用配置"复选框
+  - 添加"编辑通用配置"链接按钮
+  - 新增 CommonConfigEditDialog 对话框编辑通用配置
+
+- **配置检测动画**：
+  - 切换 Provider 时显示"⏳ 配置检测中..."状态
+  - 300ms 延迟后显示检测结果
+
+### 🎨 UI 优化
+- **导航菜单字体加粗**：所有导航菜单项字体设置为 bold 提升可读性
+- **CLI 导出页面标签页布局**：采用主标签页设计 (Claude/Codex/Gemini)
+- **CLI 工具状态显示**：固定宽度 150px、高度 100px，居中对齐，状态文字加粗
+- **配置预览框优化**：最小高度 350px，移除最大高度限制
+- **模型下拉框宽度**：从 200px 增加到 300px
+
+### 🔧 监控页面优化
+- **启动/停止按钮切换**：
+  - 默认不启动对话延迟检测
+  - 将"停止"按钮改为"启动"按钮
+  - 点击后切换为"停止"，再点击切换回"启动"
+  - 只有手动点击"启动"才会开始自动检测
+
+### 🐛 Bug 修复
+- **模型留空处理**：选择"(留空使用默认)"时配置预览不包含占位符文本
+- **删除重复样式**：Codex 和 Gemini 标签页中的重复样式定义已删除
+- **外部导入功能修复**：修复外部配置导入相关问题
+
+### 📁 文件变更
+- 更新：`opencode_config_manager_fluent.py`
+
+---
+
 ## [v1.1.6] - 2026-01-19 12:00
 **版本代号**: 原生 Provider 支持版
 
 ### 🆕 新增功能
 - **原生 Provider 支持**：
-  - 新增"原生 Provider"页面，管理 OpenCode 官方支持的 AI 服务提供商
+  - 新增"原生 Provider"页面 管理 OpenCode 官方支持的 AI 服务提供商
   - 支持 12 个原生 Provider：Anthropic、OpenAI、Gemini、Amazon Bedrock、Azure OpenAI、GitHub Copilot、xAI、Groq、OpenRouter、Vertex AI、DeepSeek、OpenCode Zen
-  - 认证信息存储在独立的 `auth.json` 文件中，与 `opencode.json` 分离
+  - 认证信息存储在独立的 `auth.json` 文件中 与 `opencode.json` 分离
   - 跨平台路径支持：Windows (`%LOCALAPPDATA%/opencode`)、Unix (`~/.local/share/opencode`)
 
 - **AuthManager 认证管理器**：
   - `read_auth()` / `write_auth()` - 读写 auth.json
   - `get_provider_auth()` / `set_provider_auth()` / `delete_provider_auth()` - Provider 认证 CRUD
-  - `mask_api_key()` - API Key 遮蔽显示（首尾 4 字符）
+  - `mask_api_key()` - API Key 遮蔽显示 (首尾 4 字符）
 
 - **环境变量检测与导入**：
   - `EnvVarDetector` 类自动检测系统环境变量
@@ -25,15 +87,15 @@
   - 一键导入检测到的环境变量
 
 - **NativeProviderPage 页面**：
-  - 表格布局显示 Provider 列表（名称、SDK、状态、环境变量）
-  - 状态颜色区分：已配置（绿色）/ 未配置（灰色）
+  - 表格布局显示 Provider 列表 (名称、SDK、状态、环境变量）
+  - 状态颜色区分：已配置 (绿色）/ 未配置 (灰色）
   - 工具栏：配置、测试连接、删除按钮
   - 双击行打开配置对话框
 
 - **NativeProviderDialog 配置对话框**：
-  - 动态生成认证字段（支持 text、password、file 类型）
-  - 动态生成选项字段（支持 text、select 类型）
-  - 深色主题适配，使用 SimpleCardWidget 卡片布局
+  - 动态生成认证字段 (支持 text、password、file 类型）
+  - 动态生成选项字段 (支持 text、select 类型）
+  - 深色主题适配 使用 SimpleCardWidget 卡片布局
   - 环境变量导入按钮
 
 - **连接测试功能**：
@@ -42,24 +104,24 @@
 
 - **配置同步与去重**：
   - 在 Agent 模型选择中显示已配置的原生 Provider
-  - 检测原生与自定义 Provider 重复，提示用户处理
+  - 检测原生与自定义 Provider 重复 提示用户处理
 
 - **Skill 发现与浏览**：
   - 扫描所有 4 个路径：OpenCode 全局/项目、Claude 全局/项目
-  - 显示已发现的 Skill 列表，包含来源标识（🌐 全局 / 📁 项目）
+  - 显示已发现的 Skill 列表 包含来源标识 (🌐 全局 / 📁 项目）
   - 点击查看详情：名称、描述、许可证、兼容性、路径、内容预览
   - 支持编辑、删除、打开目录操作
 
 - **完整的 SKILL.md 创建/编辑**：
   - 支持完整 frontmatter：name、description、license、compatibility
-  - 4 种保存位置选择（OpenCode/Claude × 全局/项目）
-  - 名称验证（1-64字符，小写字母数字+单连字符，符合官方规范）
-  - 描述验证（1-1024字符）
+  - 4 种保存位置选择 (OpenCode/Claude × 全局/项目）
+  - 名称验证 (1-64字符 小写字母数字+单连字符 符合官方规范）
+  - 描述验证 (1-1024字符）
 
 - **权限配置增强**：
-  - 全局权限配置（permission.skill）
-  - Agent 级别权限覆盖（agent.xxx.permission.skill）
-  - 禁用 Skill 工具（agent.xxx.tools.skill: false）
+  - 全局权限配置 (permission.skill）
+  - Agent 级别权限覆盖 (agent.xxx.permission.skill）
+  - 禁用 Skill 工具 (agent.xxx.tools.skill: false）
 
 - **SkillDiscovery 类**：
   - `discover_all()` - 发现所有路径下的 Skill
@@ -67,13 +129,13 @@
   - `validate_skill_name()` / `validate_description()` - 验证名称和描述
 
 ### 🔧 优化改进
-- **Skill 页面重构**：采用 3 标签页布局（浏览 Skill、创建 Skill、权限配置）
+- **Skill 页面重构**：采用 3 标签页布局 (浏览 Skill、创建 Skill、权限配置）
 - **Claude 兼容路径支持**：完整支持 `.claude/skills/` 路径
 - **DiscoveredSkill 数据类**：统一 Skill 信息结构
 
 ### 📁 文件变更
 - 更新：`opencode_config_manager_fluent.py`
-- 新增：`assets/512x512.ico`（从 PNG 转换）
+- 新增：`assets/512x512.ico` (从 PNG 转换）
 
 ### 📋 新增数据类
 - `AuthField` - 认证字段定义
@@ -87,16 +149,16 @@
 **版本代号**: UI 样式优化版
 
 ### 🎨 样式优化
-- **主题色调整**：主题色改为 `#2979FF`，与主流设计风格一致
-- **浅色模式优化**：背景色调整为奶白色 `#F7F8FA`，更加柔和护眼
-- **窗口尺寸调整**：默认窗口高度调整为 820px，显示更多内容
+- **主题色调整**：主题色改为 `#2979FF` 与主流设计风格一致
+- **浅色模式优化**：背景色调整为奶白色 `#F7F8FA` 更加柔和护眼
+- **窗口尺寸调整**：默认窗口高度调整为 820px 显示更多内容
 - **对话框主题适配**：备份管理等对话框支持深浅色主题自动切换
 - **状态颜色统一**：监控页面状态颜色与全局配色方案保持一致
 
 ### 🔧 技术改进
-- **UIConfig 配置类**：新增全局 UI 配置类，统一管理字体、颜色、布局参数
-- **字体配置**：默认使用 JetBrains Mono 等宽字体，提升代码可读性
-- **导航栏优化**：紧凑布局，确保底部菜单项完整显示
+- **UIConfig 配置类**：新增全局 UI 配置类 统一管理字体、颜色、布局参数
+- **字体配置**：默认使用 JetBrains Mono 等宽字体 提升代码可读性
+- **导航栏优化**：紧凑布局 确保底部菜单项完整显示
 
 ### 📁 文件变更
 - 更新：`opencode_config_manager_fluent.py`
@@ -107,22 +169,22 @@
 **版本代号**: 配置检测与导入增强版
 
 ### 🆕 新增功能
-- **首页配置检测**：新增“配置检测”按钮与详情面板，支持手动检查 OpenCode 与 Oh My OpenCode 配置并展示问题列表
-- **列表批量模型**：Oh My Agent/Category 支持批量模型下拉选择，即时生效
-- **默认描述展示**：列表内描述为空时展示预设描述（仅显示，不写入配置）
-- **监控页面**：新增模型可用性监控与历史记录显示，支持手动检测
+- **首页配置检测**：新增“配置检测”按钮与详情面板 支持手动检查 OpenCode 与 Oh My OpenCode 配置并展示问题列表
+- **列表批量模型**：Oh My Agent/Category 支持批量模型下拉选择 即时生效
+- **默认描述展示**：列表内描述为空时展示预设描述 (仅显示 不写入配置）
+- **监控页面**：新增模型可用性监控与历史记录显示 支持手动检测
 - **MCP 预设扩展**：新增 chrome-devtools、open-web-mcp、serena 等常用预设
-- **MCP 附加信息**：新增描述/标签/主页/文档字段，支持预设自动填充
+- **MCP 附加信息**：新增描述/标签/主页/文档字段 支持预设自动填充
 - **MCP 资源入口**：MCP 页面新增 awesome MCP 集合入口按钮
 
 ### 🐛 Bug 修复
 - **外部导入路径兼容**：Claude/Codex/cc-switch 导入在默认路径不存在时自动回退到 `D:\opcdcfg\test\...`
-- **cc-switch 模型 ID 过滤**：忽略 GUID 形式的模型 ID，避免污染模型列表
+- **cc-switch 模型 ID 过滤**：忽略 GUID 形式的模型 ID 避免污染模型列表
 - **导入映射对话框滚动**：ImportMappingDialog 固定高度并可滚动
 
 ### 🔧 优化改进
 - **模型批量配置**：新增 thinking/options/variants 批量配置逻辑
-- **模型 ID 解析增强**：从多种字段提取模型 ID，覆盖更多外部配置格式
+- **模型 ID 解析增强**：从多种字段提取模型 ID 覆盖更多外部配置格式
 - **配置验证增强**：补充空值校验并新增 Oh My OpenCode 配置结构校验
 - **监控页面布局**：监控列表布局压缩与列宽优化
 
@@ -139,12 +201,12 @@
   - 模型编辑对话框新增输入/输出模态设置
   - 输入模态支持：text、image、audio、video
   - 输出模态支持：text、image、audio
-  - 编辑时自动加载已有配置，保存时写入 `modalities` 字段
+  - 编辑时自动加载已有配置 保存时写入 `modalities` 字段
 
 - **更新提示增强**：
-  - 提示条不再自动消失，需手动关闭
+  - 提示条不再自动消失 需手动关闭
   - 点击提示条可直接打开 GitHub 发布页面
-  - 浅色模式使用琥珀色背景，深色模式使用蓝色背景
+  - 浅色模式使用琥珀色背景 深色模式使用蓝色背景
   - 定时检查间隔改为 1 分钟
 
 ### 📁 文件变更
@@ -158,8 +220,8 @@
 ### 🆕 新增功能
 - **配置文件冲突检测**：
   - 启动时自动检测是否同时存在 `.json` 和 `.jsonc` 配置文件
-  - 弹窗显示两个文件的大小和修改时间，帮助用户判断
-  - 用户可选择使用哪个文件，另一个会被备份后删除
+  - 弹窗显示两个文件的大小和修改时间 帮助用户判断
+  - 用户可选择使用哪个文件 另一个会被备份后删除
   - 解决了因 `.jsonc` 优先级更高导致加载旧配置的问题
 
 - **ConfigPaths 类增强**：
@@ -168,7 +230,7 @@
 
 ### 🐛 Bug 修复
 - **Category 和 Agent 描述丢失问题**：
-  - 根因：同时存在 `.json` 和 `.jsonc` 时，程序优先加载旧的 `.jsonc` 文件
+  - 根因：同时存在 `.json` 和 `.jsonc` 时 程序优先加载旧的 `.jsonc` 文件
   - 现在会提示用户选择要使用的配置文件
 
 ### 📁 文件变更
@@ -183,10 +245,10 @@
 - **版本检查线程安全问题**：
   - 修复版本检查回调在子线程调用导致程序卡死的问题
   - 使用 `pyqtSignal` 从子线程安全地通知主线程更新 UI
-  - `VersionChecker` 改为继承 `QObject`，支持信号槽机制
+  - `VersionChecker` 改为继承 `QObject` 支持信号槽机制
 
 - **PyInstaller 打包资源路径问题**：
-  - 新增 `get_resource_path()` 函数，正确处理打包后的资源路径
+  - 新增 `get_resource_path()` 函数 正确处理打包后的资源路径
   - 修复打包后 logo/icon 图片加载失败导致的 temp 目录错误
   - 兼容开发环境和 PyInstaller 打包环境
 
@@ -205,16 +267,16 @@
 ### 🆕 新增功能
 - **配置格式验证器 (ConfigValidator)**：
   - 启动时自动检查配置文件格式是否符合 OpenCode 规范
-  - 验证 Provider 必需字段（npm, options, baseURL, apiKey）
+  - 验证 Provider 必需字段 (npm, options, baseURL, apiKey）
   - 验证 Model 结构和 limit 字段类型
-  - 验证 MCP 配置（local/remote 类型对应字段）
-  - 显示错误和警告列表，帮助用户定位问题
+  - 验证 MCP 配置 (local/remote 类型对应字段）
+  - 显示错误和警告列表 帮助用户定位问题
 
 - **配置自动修复功能**：
   - 检测到问题时弹窗提示用户是否修复
-  - 修复前自动备份原配置（标签: `before-fix`）
-  - 自动补全缺失的必需字段（npm, options, models）
-  - 规范化字段顺序（npm → name → options → models）
+  - 修复前自动备份原配置 (标签: `before-fix`）
+  - 自动补全缺失的必需字段 (npm, options, models）
+  - 规范化字段顺序 (npm → name → options → models）
 
 ### 🐛 Bug 修复
 - **防御性类型检查**：修复配置异常时 `'str' object has no attribute 'get'` 崩溃
@@ -225,7 +287,7 @@
   - `ModelDialog._load_model_data()` - 加载模型数据时检查类型
 
 ### 🔧 优化改进
-- **SpinBox 显示优化**：设置最小宽度，改善 Win10 上的显示问题
+- **SpinBox 显示优化**：设置最小宽度 改善 Win10 上的显示问题
 
 ### 📁 文件变更
 - 更新：`opencode_config_manager_fluent.py`
@@ -243,7 +305,7 @@
 
 ### 🔧 优化改进
 - **GitHub Actions 构建配置更新**：
-  - macOS 构建从 `macos-latest` 切换到 `macos-15-intel`（Intel 架构，PyQt5 有预编译 wheel）
+  - macOS 构建从 `macos-latest` 切换到 `macos-15-intel` (Intel 架构 PyQt5 有预编译 wheel）
   - 解决 ARM64 macOS 上 PyQt5 编译失败的问题
 
 ### 📁 文件变更
@@ -261,25 +323,25 @@
 - **JSONC 注释丢失警告**：
   - 保存 JSONC 文件时自动检测是否包含注释
   - 首次保存时显示黄色警告 InfoBar 提示注释将丢失
-  - 保存前自动创建备份（标签: `jsonc-auto`）
+  - 保存前自动创建备份 (标签: `jsonc-auto`）
   - `has_jsonc_comments()` 方法精确检测 `//` 和 `/* */` 注释
 
 ### 🐛 Bug 修复
-- **预设模型 Variants 配置修复**：移除 Claude 系列预设中多余的 `variants` 内容，现在预设模型只在 `options` 中设置 thinking
+- **预设模型 Variants 配置修复**：移除 Claude 系列预设中多余的 `variants` 内容 现在预设模型只在 `options` 中设置 thinking
 
 ### 🔧 优化改进
 - **Options Tab 布局重构**：
-  - 使用 `QScrollArea` 包裹内容，解决垂直空间不足问题
-  - 键值输入改为单行紧凑布局（键: [输入框] 值: [输入框]）
-  - 表头高度优化为 32px，数据行高度 28px
+  - 使用 `QScrollArea` 包裹内容 解决垂直空间不足问题
+  - 键值输入改为单行紧凑布局 (键: [输入框] 值: [输入框]）
+  - 表头高度优化为 32px 数据行高度 28px
   - 按钮高度统一为 32px
 - **外部导入列表列宽调整**：
-  - 第一列（来源）：固定 180px
-  - 第二列（配置路径）：自动填充剩余空间
-  - 第三列（状态）：固定 100px
+  - 第一列 (来源）：固定 180px
+  - 第二列 (配置路径）：自动填充剩余空间
+  - 第三列 (状态）：固定 100px
 - **深色主题对比度增强**：
   - 滚动区域和内容容器设置透明背景
-  - 卡片内边距优化（8,6,8,6）
+  - 卡片内边距优化 (8,6,8,6）
 
 ### 📁 文件变更
 - 更新：`opencode_config_manager_fluent.py`
@@ -372,7 +434,7 @@
   - 兼容现有 `.json` 配置
 
 ### 🔧 优化改进
-- `ConfigPaths` 类重构，支持灵活的配置文件路径检测
+- `ConfigPaths` 类重构 支持灵活的配置文件路径检测
 - `ConfigManager.strip_jsonc_comments()` 方法：安全移除 JSONC 注释
 - `build_unix.sh` 更新为 Fluent 版本构建脚本
 
@@ -393,7 +455,7 @@
   - 支持手动切换深色/浅色模式
   - 使用 SystemThemeListener 实时监听系统主题变化
 - **现代化卡片布局**：所有页面采用 SimpleCardWidget 卡片式设计
-- **侧边栏导航**：FluentWindow 原生导航栏，图标 + 文字
+- **侧边栏导航**：FluentWindow 原生导航栏 图标 + 文字
 
 ### 🆕 新增功能
 - **首页 Logo 展示**：显示 OCCM 品牌 Logo
@@ -408,7 +470,7 @@
 
 ### 🔧 优化改进
 - 所有对话框统一深色主题基类 (BaseDialog)
-- 列表组件列宽优化，信息展示更清晰
+- 列表组件列宽优化 信息展示更清晰
 - Tooltip 提示系统完整保留
 - 配置保存逻辑优化
 
@@ -416,7 +478,7 @@
 - 新增：`opencode_config_manager_fluent_v1.0.0.py` (Fluent 版本主程序)
 - 新增：`assets/logo1.png` (首页 Logo)
 - 新增：`assets/logo.png`, `assets/logo.ico` (品牌资源)
-- 保留：`opencode_config_manager_v0.7.0.py` (ttkbootstrap 版本，兼容旧系统)
+- 保留：`opencode_config_manager_v0.7.0.py` (ttkbootstrap 版本 兼容旧系统)
 
 ---
 
@@ -436,10 +498,10 @@
 
 ### 🆕 新增功能
 - 集成 ttkbootstrap 现代化 UI 框架
-- 支持 10 种内置主题（深色/浅色各 5 种）
+- 支持 10 种内置主题 (深色/浅色各 5 种）
   - 深色：Darkly、Superhero、Cyborg、Vapor、Solar
   - 浅色：Cosmo、Flatly、Litera、Minty、Pulse
-- 实时主题切换，无需重启应用
+- 实时主题切换 无需重启应用
 
 ---
 
@@ -448,7 +510,7 @@
 
 ### 🆕 新增功能
 - GitHub 版本检查和更新提示
-- 优化主题配色（Fluent Design 风格）
+- 优化主题配色 (Fluent Design 风格）
 - 实现实时主题切换
 
 ---
@@ -486,7 +548,7 @@
 - Provider 管理
 - Model 管理
 - 权限管理
-- 外部导入（Claude Code、Codex、Gemini）
+- 外部导入 (Claude Code、Codex、Gemini）
 
 ---
 

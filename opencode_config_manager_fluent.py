@@ -1,34 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v1.0.5 (QFluentWidgets 版本)
+OpenCode & Oh My OpenCode 配置管理器 v1.1.7 (QFluentWidgets 版本)
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
 
 基于 PyQt5 + QFluentWidgets 重写，提供现代化 Fluent Design 界面
-
-v1.0.5 更新：
-- 跨页面数据同步：新增/编辑/删除配置后自动刷新所有相关页面
-- 版本检查改为 30 分钟定时触发（启动后 5 秒首次检查）
-- 修复首页 MCP 统计显示 0 的问题
-
-v1.0.4 更新：
-- 备份目录支持手动选择和重置
-- 文件重命名为 opencode_config_manager_fluent.py
-
-v1.0.3 更新：
-- 跨平台路径支持 (Windows/Linux/macOS 统一)
-- 完善构建脚本 (build_unix.sh + build_windows.bat)
-- Linux 无头服务器自动使用 xvfb
-
-v1.0.2 更新：
-- 首页配置文件路径支持手动选择
-- 支持切换到任意 JSON/JSONC 配置文件
-- 支持重置为默认路径
-
-v1.0.1 更新：
-- 支持 JSONC 格式配置文件（带注释的 JSON）
-- 支持 // 单行注释和 /* */ 多行注释
-- 自动检测 .jsonc 和 .json 双扩展名
 """
 
 # 修复 PyInstaller 打包后中文用户名导致的 DLL 加载问题
@@ -137,28 +113,180 @@ class MonitorResult:
     message: str
 
 
+# ==================== CLI 导出模块数据类 ====================
+@dataclass
+class CLIToolStatus:
+    """CLI 工具安装状态"""
+
+    cli_type: str  # "claude" | "codex" | "gemini"
+    installed: bool  # 是否已安装（配置目录存在）
+    config_dir: Optional[Path]  # 配置目录路径
+    has_config: bool  # 是否已有配置文件
+    version: Optional[str] = None  # CLI 版本（如果可检测）
+
+
+@dataclass
+class ValidationResult:
+    """Provider 配置验证结果"""
+
+    valid: bool
+    errors: List[str]  # 错误信息列表
+    warnings: List[str]  # 警告信息列表
+
+    @staticmethod
+    def success() -> "ValidationResult":
+        """创建成功的验证结果"""
+        return ValidationResult(valid=True, errors=[], warnings=[])
+
+    @staticmethod
+    def failure(
+        errors: List[str], warnings: Optional[List[str]] = None
+    ) -> "ValidationResult":
+        """创建失败的验证结果"""
+        return ValidationResult(valid=False, errors=errors, warnings=warnings or [])
+
+
+@dataclass
+class ExportResult:
+    """单个 CLI 工具导出结果"""
+
+    success: bool
+    cli_type: str
+    backup_path: Optional[Path]
+    error_message: Optional[str]
+    files_written: List[Path]
+
+    @staticmethod
+    def ok(
+        cli_type: str, files_written: List[Path], backup_path: Optional[Path] = None
+    ) -> "ExportResult":
+        """创建成功的导出结果"""
+        return ExportResult(
+            success=True,
+            cli_type=cli_type,
+            backup_path=backup_path,
+            error_message=None,
+            files_written=files_written,
+        )
+
+    @staticmethod
+    def fail(
+        cli_type: str, error_message: str, backup_path: Optional[Path] = None
+    ) -> "ExportResult":
+        """创建失败的导出结果"""
+        return ExportResult(
+            success=False,
+            cli_type=cli_type,
+            backup_path=backup_path,
+            error_message=error_message,
+            files_written=[],
+        )
+
+
+@dataclass
+class BatchExportResult:
+    """批量导出结果"""
+
+    total: int
+    successful: int
+    failed: int
+    results: List[ExportResult]
+
+    @property
+    def all_success(self) -> bool:
+        """是否全部成功"""
+        return self.failed == 0
+
+    @property
+    def partial_success(self) -> bool:
+        """是否部分成功"""
+        return self.successful > 0 and self.failed > 0
+
+
+@dataclass
+class BackupInfo:
+    """备份信息"""
+
+    path: Path
+    cli_type: str
+    created_at: datetime
+    files: List[str]
+
+
+# ==================== CLI 导出模块异常类 ====================
+class CLIExportError(Exception):
+    """CLI 导出错误基类"""
+
+    pass
+
+
+class ProviderValidationError(CLIExportError):
+    """Provider 配置验证错误"""
+
+    def __init__(self, missing_fields: List[str]):
+        self.missing_fields = missing_fields
+        super().__init__(f"Provider 配置不完整: 缺少 {', '.join(missing_fields)}")
+
+
+class ConfigWriteError(CLIExportError):
+    """配置写入错误"""
+
+    def __init__(self, path: Path, reason: str):
+        self.path = path
+        self.reason = reason
+        super().__init__(f"写入配置失败 ({path}): {reason}")
+
+
+class ConfigParseError(CLIExportError):
+    """配置解析错误"""
+
+    def __init__(self, path: Path, format_type: str, reason: str):
+        self.path = path
+        self.format_type = format_type
+        self.reason = reason
+        super().__init__(f"解析 {format_type} 配置失败 ({path}): {reason}")
+
+
+class BackupError(CLIExportError):
+    """备份操作错误"""
+
+    def __init__(self, cli_type: str, reason: str):
+        self.cli_type = cli_type
+        self.reason = reason
+        super().__init__(f"备份 {cli_type} 配置失败: {reason}")
+
+
+class RestoreError(CLIExportError):
+    """恢复操作错误"""
+
+    def __init__(self, backup_path: Path, reason: str):
+        self.backup_path = backup_path
+        self.reason = reason
+        super().__init__(f"恢复备份失败 ({backup_path}): {reason}")
+
+
 # ==================== 原生 Provider 认证管理 ====================
 class AuthManager:
     """认证凭证管理器 - 管理 auth.json 文件的读写操作
-    
+
     auth.json 存储原生 Provider 的认证凭证，路径：
     - Windows: %LOCALAPPDATA%/opencode/auth.json 或 ~/.local/share/opencode/auth.json
     - macOS/Linux: ~/.local/share/opencode/auth.json
     """
-    
+
     def __init__(self):
         self._auth_path: Optional[Path] = None
-    
+
     @property
     def auth_path(self) -> Path:
         """获取 auth.json 路径（延迟初始化）"""
         if self._auth_path is None:
             self._auth_path = self._get_auth_path()
         return self._auth_path
-    
+
     def _get_auth_path(self) -> Path:
         """获取 auth.json 路径（跨平台支持）
-        
+
         Windows: 优先使用 %LOCALAPPDATA%/opencode，回退到 ~/.local/share/opencode
         Unix: 使用 ~/.local/share/opencode
         """
@@ -173,27 +301,27 @@ class AuthManager:
         else:
             # macOS / Linux
             base = Path.home() / ".local" / "share" / "opencode"
-        
+
         return base / "auth.json"
-    
+
     def _ensure_parent_dir(self) -> None:
         """确保 auth.json 的父目录存在"""
         parent = self.auth_path.parent
         if not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
-    
+
     def read_auth(self) -> Dict[str, Any]:
         """读取 auth.json 文件
-        
+
         Returns:
             认证配置字典，文件不存在时返回空字典
-            
+
         Raises:
             json.JSONDecodeError: 当文件格式错误时（由调用方处理）
         """
         if not self.auth_path.exists():
             return {}
-        
+
         try:
             with open(self.auth_path, "r", encoding="utf-8") as f:
                 content = f.read().strip()
@@ -206,32 +334,32 @@ class AuthManager:
         except Exception:
             # 其他读取错误，返回空字典
             return {}
-    
+
     def write_auth(self, auth_data: Dict[str, Any]) -> None:
         """写入 auth.json 文件
-        
+
         Args:
             auth_data: 要写入的认证配置字典
         """
         self._ensure_parent_dir()
         with open(self.auth_path, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, indent=2, ensure_ascii=False)
-    
+
     def get_provider_auth(self, provider_id: str) -> Optional[Dict[str, Any]]:
         """获取指定 Provider 的认证信息
-        
+
         Args:
             provider_id: Provider 标识符（如 'anthropic', 'openai'）
-            
+
         Returns:
             Provider 的认证配置字典，不存在时返回 None
         """
         auth_data = self.read_auth()
         return auth_data.get(provider_id)
-    
+
     def set_provider_auth(self, provider_id: str, auth_config: Dict[str, Any]) -> None:
         """设置指定 Provider 的认证信息
-        
+
         Args:
             provider_id: Provider 标识符
             auth_config: 认证配置字典（如 {'apiKey': 'sk-xxx'}）
@@ -239,13 +367,13 @@ class AuthManager:
         auth_data = self.read_auth()
         auth_data[provider_id] = auth_config
         self.write_auth(auth_data)
-    
+
     def delete_provider_auth(self, provider_id: str) -> bool:
         """删除指定 Provider 的认证信息
-        
+
         Args:
             provider_id: Provider 标识符
-            
+
         Returns:
             是否成功删除（Provider 不存在时返回 False）
         """
@@ -255,14 +383,14 @@ class AuthManager:
             self.write_auth(auth_data)
             return True
         return False
-    
+
     @staticmethod
     def mask_api_key(api_key: str) -> str:
         """遮蔽 API Key，只显示首尾字符
-        
+
         Args:
             api_key: 原始 API Key
-            
+
         Returns:
             遮蔽后的字符串：
             - 长度 > 8: 显示首 4 字符 + ... + 尾 4 字符
@@ -279,33 +407,36 @@ class AuthManager:
 @dataclass
 class AuthField:
     """认证字段定义"""
-    key: str           # 字段键名（如 'apiKey', 'accessKeyId'）
-    label: str         # 显示标签（如 'API Key', 'Access Key ID'）
-    field_type: str    # 字段类型: text, password, file
-    required: bool     # 是否必填
-    placeholder: str   # 占位符文本
+
+    key: str  # 字段键名（如 'apiKey', 'accessKeyId'）
+    label: str  # 显示标签（如 'API Key', 'Access Key ID'）
+    field_type: str  # 字段类型: text, password, file
+    required: bool  # 是否必填
+    placeholder: str  # 占位符文本
 
 
 @dataclass
 class OptionField:
     """选项字段定义"""
-    key: str                    # 字段键名（如 'baseURL', 'region'）
-    label: str                  # 显示标签
-    field_type: str             # 字段类型: text, select
-    options: List[str]          # 可选值（select 类型时使用）
-    default: str                # 默认值
+
+    key: str  # 字段键名（如 'baseURL', 'region'）
+    label: str  # 显示标签
+    field_type: str  # 字段类型: text, select
+    options: List[str]  # 可选值（select 类型时使用）
+    default: str  # 默认值
 
 
 @dataclass
 class NativeProviderConfig:
     """原生 Provider 配置定义"""
-    id: str                              # Provider ID（如 'anthropic', 'openai'）
-    name: str                            # 显示名称（如 'Anthropic (Claude)'）
-    sdk: str                             # SDK 包名（如 '@ai-sdk/anthropic'）
-    auth_fields: List[AuthField]         # 认证字段列表
-    option_fields: List[OptionField]     # 选项字段列表
-    env_vars: List[str]                  # 相关环境变量
-    test_endpoint: Optional[str]         # 测试端点（用于连接测试）
+
+    id: str  # Provider ID（如 'anthropic', 'openai'）
+    name: str  # 显示名称（如 'Anthropic (Claude)'）
+    sdk: str  # SDK 包名（如 '@ai-sdk/anthropic'）
+    auth_fields: List[AuthField]  # 认证字段列表
+    option_fields: List[OptionField]  # 选项字段列表
+    env_vars: List[str]  # 相关环境变量
+    test_endpoint: Optional[str]  # 测试端点（用于连接测试）
 
 
 # 所有支持的原生 Provider 配置
@@ -359,11 +490,21 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
             AuthField("profile", "AWS Profile", "text", False, "default"),
         ],
         option_fields=[
-            OptionField("region", "Region", "select",
-                       ["us-east-1", "us-west-2", "eu-west-1", "ap-northeast-1"], "us-east-1"),
+            OptionField(
+                "region",
+                "Region",
+                "select",
+                ["us-east-1", "us-west-2", "eu-west-1", "ap-northeast-1"],
+                "us-east-1",
+            ),
             OptionField("endpoint", "VPC Endpoint", "text", [], ""),
         ],
-        env_vars=["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE", "AWS_REGION"],
+        env_vars=[
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_PROFILE",
+            "AWS_REGION",
+        ],
         test_endpoint=None,
     ),
     NativeProviderConfig(
@@ -425,7 +566,9 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
             AuthField("apiKey", "API Key", "password", True, "sk-or-..."),
         ],
         option_fields=[
-            OptionField("baseURL", "Base URL", "text", [], "https://openrouter.ai/api/v1"),
+            OptionField(
+                "baseURL", "Base URL", "text", [], "https://openrouter.ai/api/v1"
+            ),
         ],
         env_vars=["OPENROUTER_API_KEY"],
         test_endpoint="/models",
@@ -439,10 +582,19 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
             AuthField("projectId", "Project ID", "text", True, ""),
         ],
         option_fields=[
-            OptionField("location", "Location", "select",
-                       ["global", "us-central1", "us-east1", "europe-west1", "asia-east1"], "global"),
+            OptionField(
+                "location",
+                "Location",
+                "select",
+                ["global", "us-central1", "us-east1", "europe-west1", "asia-east1"],
+                "global",
+            ),
         ],
-        env_vars=["GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "VERTEX_LOCATION"],
+        env_vars=[
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "GOOGLE_CLOUD_PROJECT",
+            "VERTEX_LOCATION",
+        ],
         test_endpoint=None,
     ),
     NativeProviderConfig(
@@ -466,7 +618,9 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
             AuthField("apiKey", "API Key", "password", True, ""),
         ],
         option_fields=[
-            OptionField("baseURL", "Base URL", "text", [], "https://api.opencode.ai/v1"),
+            OptionField(
+                "baseURL", "Base URL", "text", [], "https://api.opencode.ai/v1"
+            ),
         ],
         env_vars=[],
         test_endpoint="/models",
@@ -485,21 +639,30 @@ def get_native_provider(provider_id: str) -> Optional[NativeProviderConfig]:
 # ==================== 环境变量检测器 ====================
 class EnvVarDetector:
     """环境变量检测器 - 检测系统中已设置的 Provider 相关环境变量"""
-    
+
     # Provider 与环境变量的映射
     PROVIDER_ENV_VARS: Dict[str, List[str]] = {
         "anthropic": ["ANTHROPIC_API_KEY"],
         "openai": ["OPENAI_API_KEY"],
         "gemini": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-        "amazon-bedrock": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE", "AWS_REGION"],
+        "amazon-bedrock": [
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_PROFILE",
+            "AWS_REGION",
+        ],
         "azure": ["AZURE_OPENAI_API_KEY", "AZURE_RESOURCE_NAME"],
         "xai": ["XAI_API_KEY"],
         "groq": ["GROQ_API_KEY"],
         "openrouter": ["OPENROUTER_API_KEY"],
-        "vertexai": ["GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "VERTEX_LOCATION"],
+        "vertexai": [
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "GOOGLE_CLOUD_PROJECT",
+            "VERTEX_LOCATION",
+        ],
         "deepseek": ["DEEPSEEK_API_KEY"],
     }
-    
+
     # 环境变量到认证字段的映射
     ENV_TO_AUTH_FIELD: Dict[str, str] = {
         "ANTHROPIC_API_KEY": "apiKey",
@@ -518,13 +681,13 @@ class EnvVarDetector:
         "GOOGLE_CLOUD_PROJECT": "projectId",
         "DEEPSEEK_API_KEY": "apiKey",
     }
-    
+
     def detect_env_vars(self, provider_id: str) -> Dict[str, str]:
         """检测指定 Provider 的环境变量
-        
+
         Args:
             provider_id: Provider 标识符
-            
+
         Returns:
             已设置的环境变量字典 {变量名: 值}
         """
@@ -535,10 +698,10 @@ class EnvVarDetector:
             if value:
                 detected[var] = value
         return detected
-    
+
     def detect_all_env_vars(self) -> Dict[str, Dict[str, str]]:
         """检测所有 Provider 的环境变量
-        
+
         Returns:
             {provider_id: {变量名: 值}}
         """
@@ -548,25 +711,25 @@ class EnvVarDetector:
             if detected:
                 result[provider_id] = detected
         return result
-    
+
     @staticmethod
     def format_env_reference(var_name: str) -> str:
         """格式化环境变量引用
-        
+
         Args:
             var_name: 环境变量名
-            
+
         Returns:
             格式化的引用字符串 {env:VARIABLE_NAME}
         """
         return f"{{env:{var_name}}}"
-    
+
     def get_auth_field_for_env(self, env_var: str) -> Optional[str]:
         """获取环境变量对应的认证字段名
-        
+
         Args:
             env_var: 环境变量名
-            
+
         Returns:
             对应的认证字段名，未找到时返回 None
         """
@@ -681,6 +844,7 @@ from PyQt5.QtWidgets import (
     QTextEdit,
     QListWidgetItem,
     QGroupBox,
+    QComboBox as QNativeComboBox,
 )
 
 from qfluentwidgets import (
@@ -693,6 +857,7 @@ from qfluentwidgets import (
     PushButton,
     PrimaryPushButton,
     TransparentPushButton,
+    HyperlinkButton,
     ToolButton,
     LineEdit,
     TextEdit,
@@ -746,11 +911,11 @@ class UIConfig:
     COLOR_SUCCESS = "#4CAF50"  # 成功
     COLOR_WARNING = "#FF9800"  # 警告
     COLOR_ERROR = "#F44336"  # 错误
-    
+
     # 深色主题颜色 (GitHub Dark 风格 - 接近纯黑)
-    DARK_BG = "#0d1117"           # 主背景
-    DARK_CARD = "#161b22"         # 卡片背景
-    DARK_BORDER = "#30363d"       # 边框
+    DARK_BG = "#0d1117"  # 主背景
+    DARK_CARD = "#161b22"  # 卡片背景
+    DARK_BORDER = "#30363d"  # 边框
 
     # 布局
     WINDOW_WIDTH = 1200
@@ -833,7 +998,7 @@ class UIConfig:
         """
 
 
-APP_VERSION = "1.1.6"
+APP_VERSION = "1.1.7"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -2576,6 +2741,845 @@ class BackupManager:
             return False
 
 
+# ==================== CLI 导出模块 ====================
+class CLIConfigWriter:
+    """CLI 配置写入器 - 原子写入配置文件"""
+
+    @staticmethod
+    def get_claude_dir() -> Path:
+        """获取 Claude 配置目录 (~/.claude/)"""
+        return Path.home() / ".claude"
+
+    @staticmethod
+    def get_codex_dir() -> Path:
+        """获取 Codex 配置目录 (~/.codex/)"""
+        return Path.home() / ".codex"
+
+    @staticmethod
+    def get_gemini_dir() -> Path:
+        """获取 Gemini 配置目录 (~/.gemini/)"""
+        return Path.home() / ".gemini"
+
+    @staticmethod
+    def get_cli_dir(cli_type: str) -> Path:
+        """根据 CLI 类型获取配置目录"""
+        if cli_type == "claude":
+            return CLIConfigWriter.get_claude_dir()
+        elif cli_type == "codex":
+            return CLIConfigWriter.get_codex_dir()
+        elif cli_type == "gemini":
+            return CLIConfigWriter.get_gemini_dir()
+        else:
+            raise ValueError(f"Unknown CLI type: {cli_type}")
+
+    def atomic_write_json(self, path: Path, data: Dict) -> None:
+        """原子写入 JSON 文件
+
+        1. 写入临时文件 (path.tmp.timestamp)
+        2. 验证 JSON 格式
+        3. 重命名替换原文件
+
+        Raises:
+            ConfigWriteError: 写入失败时抛出
+        """
+        # 确保父目录存在
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 生成临时文件路径
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        temp_path = path.parent / f"{path.name}.tmp.{timestamp}"
+
+        try:
+            # 写入临时文件
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            # 验证写入的 JSON 格式
+            with open(temp_path, "r", encoding="utf-8") as f:
+                json.load(f)
+
+            # 原子替换（Windows 需要先删除目标文件）
+            if sys.platform == "win32" and path.exists():
+                path.unlink()
+            temp_path.rename(path)
+
+        except json.JSONDecodeError as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise ConfigWriteError(path, f"JSON 格式验证失败: {e}")
+        except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise ConfigWriteError(path, str(e))
+
+    def atomic_write_text(self, path: Path, content: str) -> None:
+        """原子写入文本文件 (用于 TOML/.env)
+
+        Raises:
+            ConfigWriteError: 写入失败时抛出
+        """
+        # 确保父目录存在
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 生成临时文件路径
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        temp_path = path.parent / f"{path.name}.tmp.{timestamp}"
+
+        try:
+            # 写入临时文件
+            with open(temp_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            # 原子替换
+            if sys.platform == "win32" and path.exists():
+                path.unlink()
+            temp_path.rename(path)
+
+        except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise ConfigWriteError(path, str(e))
+
+    def set_file_permissions(self, path: Path, mode: int = 0o600) -> None:
+        """设置文件权限 (Unix only)
+
+        Args:
+            path: 文件路径
+            mode: 权限模式，默认 600 (仅所有者可读写)
+        """
+        if sys.platform != "win32" and path.exists():
+            try:
+                path.chmod(mode)
+            except Exception as e:
+                print(f"设置文件权限失败 ({path}): {e}")
+
+    def write_claude_settings(self, config: Dict, merge: bool = True) -> None:
+        """写入 Claude settings.json
+
+        Args:
+            config: 要写入的配置（包含 env 字段）
+            merge: 是否与现有配置合并 (保留非 env 字段)
+        """
+        settings_path = self.get_claude_dir() / "settings.json"
+
+        if merge and settings_path.exists():
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                # 合并配置：保留现有字段，更新 env
+                existing["env"] = config.get("env", {})
+                config = existing
+            except (json.JSONDecodeError, Exception):
+                # 现有文件无效，直接覆盖
+                pass
+
+        self.atomic_write_json(settings_path, config)
+
+    def write_codex_auth(self, auth: Dict) -> None:
+        """写入 Codex auth.json"""
+        auth_path = self.get_codex_dir() / "auth.json"
+        self.atomic_write_json(auth_path, auth)
+
+    def write_codex_config(self, config_toml: str, merge: bool = True) -> None:
+        """写入 Codex config.toml
+
+        Args:
+            config_toml: TOML 格式配置字符串
+            merge: 是否保留现有的 MCP 配置等
+        """
+        config_path = self.get_codex_dir() / "config.toml"
+
+        if merge and config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    existing_content = f.read()
+                # 简单合并：保留 [mcp] 段
+                mcp_section = self._extract_toml_section(existing_content, "mcp")
+                if mcp_section:
+                    config_toml = config_toml.rstrip() + "\n\n" + mcp_section
+            except Exception:
+                pass
+
+        self.atomic_write_text(config_path, config_toml)
+
+    def _extract_toml_section(self, content: str, section_name: str) -> Optional[str]:
+        """从 TOML 内容中提取指定段落"""
+        lines = content.split("\n")
+        result = []
+        in_section = False
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(f"[{section_name}"):
+                in_section = True
+                result.append(line)
+            elif in_section:
+                if stripped.startswith("[") and not stripped.startswith(
+                    f"[{section_name}"
+                ):
+                    break
+                result.append(line)
+
+        return "\n".join(result) if result else None
+
+    def write_gemini_env(self, env_map: Dict[str, str]) -> None:
+        """写入 Gemini .env 文件
+
+        格式: KEY=VALUE (每行一个)
+        """
+        env_path = self.get_gemini_dir() / ".env"
+
+        # 生成 .env 内容
+        lines = [f"{key}={value}" for key, value in env_map.items()]
+        content = "\n".join(lines) + "\n"
+
+        self.atomic_write_text(env_path, content)
+
+        # 设置文件权限 (Unix: 600)
+        self.set_file_permissions(env_path, 0o600)
+
+    def write_gemini_settings(self, security_config: Dict, merge: bool = True) -> None:
+        """写入 Gemini settings.json
+
+        Args:
+            security_config: security.auth.selectedType 配置
+            merge: 是否保留现有的 mcpServers 等字段
+        """
+        settings_path = self.get_gemini_dir() / "settings.json"
+
+        config = {"security": security_config.get("security", security_config)}
+
+        if merge and settings_path.exists():
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                # 合并配置：保留 mcpServers 等字段
+                for key, value in existing.items():
+                    if key != "security":
+                        config[key] = value
+                # 深度合并 security 字段
+                if "security" in existing:
+                    existing_security = existing["security"]
+                    new_security = config.get("security", {})
+                    for key, value in existing_security.items():
+                        if key not in new_security:
+                            new_security[key] = value
+                    config["security"] = new_security
+            except (json.JSONDecodeError, Exception):
+                pass
+
+        self.atomic_write_json(settings_path, config)
+
+
+class CLIBackupManager:
+    """CLI 配置备份管理器"""
+
+    BACKUP_DIR = Path.home() / ".opencode-backup"
+    MAX_BACKUPS = 5
+
+    def __init__(self):
+        self.backup_dir = self.BACKUP_DIR
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
+
+    def create_backup(self, cli_type: str) -> Optional[Path]:
+        """创建指定 CLI 工具的配置备份
+
+        Args:
+            cli_type: "claude" | "codex" | "gemini"
+
+        Returns:
+            备份目录路径，如 ~/.opencode-backup/claude_20250119_143052/
+
+        Raises:
+            BackupError: 备份失败时抛出
+        """
+        try:
+            cli_dir = CLIConfigWriter.get_cli_dir(cli_type)
+            if not cli_dir.exists():
+                return None
+
+            # 创建备份目录
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = self.backup_dir / f"{cli_type}_{timestamp}"
+            backup_path.mkdir(parents=True, exist_ok=True)
+
+            # 复制所有配置文件
+            files_backed_up = []
+            for item in cli_dir.iterdir():
+                if item.is_file():
+                    dest = backup_path / item.name
+                    shutil.copy2(item, dest)
+                    files_backed_up.append(item.name)
+
+            if not files_backed_up:
+                # 没有文件需要备份，删除空目录
+                backup_path.rmdir()
+                return None
+
+            # 清理旧备份
+            self.cleanup_old_backups(cli_type)
+
+            return backup_path
+
+        except Exception as e:
+            raise BackupError(cli_type, str(e))
+
+    def restore_backup(self, backup_path: Path, cli_type: str) -> bool:
+        """从备份恢复配置
+
+        Args:
+            backup_path: 备份目录路径
+            cli_type: CLI 类型
+
+        Returns:
+            是否恢复成功
+
+        Raises:
+            RestoreError: 恢复失败时抛出
+        """
+        try:
+            if not backup_path.exists():
+                raise RestoreError(backup_path, "备份目录不存在")
+
+            cli_dir = CLIConfigWriter.get_cli_dir(cli_type)
+            cli_dir.mkdir(parents=True, exist_ok=True)
+
+            # 先备份当前配置
+            self.create_backup(cli_type)
+
+            # 恢复备份文件
+            for item in backup_path.iterdir():
+                if item.is_file():
+                    dest = cli_dir / item.name
+                    shutil.copy2(item, dest)
+
+            return True
+
+        except RestoreError:
+            raise
+        except Exception as e:
+            raise RestoreError(backup_path, str(e))
+
+    def list_backups(self, cli_type: str) -> List[BackupInfo]:
+        """列出指定 CLI 工具的所有备份
+
+        Args:
+            cli_type: CLI 类型
+
+        Returns:
+            备份信息列表，按时间倒序
+        """
+        backups = []
+        prefix = f"{cli_type}_"
+
+        try:
+            for item in self.backup_dir.iterdir():
+                if item.is_dir() and item.name.startswith(prefix):
+                    # 解析时间戳
+                    timestamp_str = item.name[len(prefix) :]
+                    try:
+                        created_at = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                    except ValueError:
+                        continue
+
+                    # 获取备份文件列表
+                    files = [f.name for f in item.iterdir() if f.is_file()]
+
+                    backups.append(
+                        BackupInfo(
+                            path=item,
+                            cli_type=cli_type,
+                            created_at=created_at,
+                            files=files,
+                        )
+                    )
+
+            # 按时间倒序排序
+            backups.sort(key=lambda x: x.created_at, reverse=True)
+
+        except Exception as e:
+            print(f"列出备份失败: {e}")
+
+        return backups
+
+    def cleanup_old_backups(self, cli_type: str) -> None:
+        """清理旧备份，保留最近 MAX_BACKUPS 个
+
+        Args:
+            cli_type: CLI 类型
+        """
+        backups = self.list_backups(cli_type)
+
+        # 删除超出限制的旧备份
+        for backup in backups[self.MAX_BACKUPS :]:
+            try:
+                shutil.rmtree(backup.path)
+            except Exception as e:
+                print(f"删除旧备份失败 ({backup.path}): {e}")
+
+
+class CLIConfigGenerator:
+    """CLI 配置生成器 - 将 OpenCode 配置转换为各 CLI 工具格式"""
+
+    def generate_claude_config(self, provider: Dict, model: str = None) -> Dict:
+        """生成 Claude Code settings.json 配置
+
+        Args:
+            provider: OpenCode Provider 配置，包含 baseURL 和 apiKey
+            model: 默认模型 ID，如果为 None 或空字符串则不包含 ANTHROPIC_MODEL
+
+        Returns:
+            Claude settings.json 配置字典
+        """
+        base_url = provider.get("baseURL", "") or provider.get("options", {}).get(
+            "baseURL", ""
+        )
+        api_key = provider.get("apiKey", "") or provider.get("options", {}).get(
+            "apiKey", ""
+        )
+
+        env = {
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_AUTH_TOKEN": api_key,
+        }
+
+        # 仅当 model 有值时才添加
+        if model:
+            env["ANTHROPIC_MODEL"] = model
+
+        # 添加模型映射（如果有）
+        model_mappings = provider.get("modelMappings", {})
+        if model_mappings.get("haiku"):
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model_mappings["haiku"]
+        if model_mappings.get("sonnet"):
+            env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model_mappings["sonnet"]
+        if model_mappings.get("opus"):
+            env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model_mappings["opus"]
+
+        return {"env": env}
+
+    def generate_codex_auth(self, provider: Dict) -> Dict:
+        """生成 Codex auth.json 配置
+
+        Args:
+            provider: OpenCode Provider 配置
+
+        Returns:
+            Codex auth.json 配置字典
+        """
+        api_key = provider.get("apiKey", "") or provider.get("options", {}).get(
+            "apiKey", ""
+        )
+        return {"OPENAI_API_KEY": api_key}
+
+    def generate_codex_config(self, provider: Dict, model: str) -> str:
+        """生成 Codex config.toml 配置
+
+        Args:
+            provider: OpenCode Provider 配置
+            model: 默认模型 ID
+
+        Returns:
+            TOML 格式配置字符串
+        """
+        base_url = provider.get("baseURL", "") or provider.get("options", {}).get(
+            "baseURL", ""
+        )
+
+        # 确保 base_url 以 /v1 结尾
+        if base_url and not base_url.rstrip("/").endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
+
+        provider_name = provider.get("name", "newapi")
+
+        lines = [
+            f'model_provider = "{provider_name}"',
+            f'model = "{model}"',
+            'model_reasoning_effort = "high"',
+            "disable_response_storage = true",
+            "",
+            f"[model_providers.{provider_name}]",
+            f'name = "{provider_name}"',
+            f'base_url = "{base_url}"',
+            'wire_api = "responses"',
+            "requires_openai_auth = true",
+        ]
+
+        return "\n".join(lines) + "\n"
+
+    def generate_gemini_env(self, provider: Dict, model: str) -> Dict[str, str]:
+        """生成 Gemini .env 配置
+
+        Args:
+            provider: OpenCode Provider 配置
+            model: 默认模型 ID
+
+        Returns:
+            环境变量字典
+        """
+        base_url = provider.get("baseURL", "") or provider.get("options", {}).get(
+            "baseURL", ""
+        )
+        api_key = provider.get("apiKey", "") or provider.get("options", {}).get(
+            "apiKey", ""
+        )
+
+        return {
+            "GOOGLE_GEMINI_BASE_URL": base_url,
+            "GEMINI_API_KEY": api_key,
+            "GEMINI_MODEL": model,
+        }
+
+    def generate_gemini_settings(self, auth_type: str = "gemini-api-key") -> Dict:
+        """生成 Gemini settings.json 中的 security 配置
+
+        Args:
+            auth_type: 认证类型，默认 "gemini-api-key"
+
+        Returns:
+            security 配置字典
+        """
+        return {"security": {"auth": {"selectedType": auth_type}}}
+
+
+class CLIExportManager:
+    """CLI 工具导出管理器"""
+
+    def __init__(self):
+        self.config_generator = CLIConfigGenerator()
+        self.config_writer = CLIConfigWriter()
+        self.backup_manager = CLIBackupManager()
+
+    def detect_cli_tools(self) -> Dict[str, CLIToolStatus]:
+        """检测已安装的 CLI 工具
+
+        Returns:
+            {cli_type: CLIToolStatus} 字典
+        """
+        result = {}
+
+        for cli_type in ["claude", "codex", "gemini"]:
+            cli_dir = CLIConfigWriter.get_cli_dir(cli_type)
+            installed = cli_dir.exists()
+
+            # 检查是否有配置文件
+            has_config = False
+            if installed:
+                if cli_type == "claude":
+                    has_config = (cli_dir / "settings.json").exists()
+                elif cli_type == "codex":
+                    has_config = (cli_dir / "config.toml").exists() or (
+                        cli_dir / "auth.json"
+                    ).exists()
+                elif cli_type == "gemini":
+                    has_config = (cli_dir / "settings.json").exists() or (
+                        cli_dir / ".env"
+                    ).exists()
+
+            result[cli_type] = CLIToolStatus(
+                cli_type=cli_type,
+                installed=installed,
+                config_dir=cli_dir if installed else None,
+                has_config=has_config,
+                version=None,  # 版本检测暂不实现
+            )
+
+        return result
+
+    def validate_provider(self, provider: Dict) -> ValidationResult:
+        """验证 Provider 配置完整性
+
+        Args:
+            provider: OpenCode Provider 配置
+
+        Returns:
+            ValidationResult
+        """
+        errors = []
+        warnings = []
+
+        # 检查 baseURL
+        base_url = provider.get("baseURL", "") or provider.get("options", {}).get(
+            "baseURL", ""
+        )
+        if not base_url or not base_url.strip():
+            errors.append("缺少 API 地址 (baseURL)")
+
+        # 检查 apiKey
+        api_key = provider.get("apiKey", "") or provider.get("options", {}).get(
+            "apiKey", ""
+        )
+        if not api_key or not api_key.strip():
+            errors.append("缺少 API 密钥 (apiKey)")
+
+        # 检查 Model 配置
+        models = provider.get("models", {})
+        if not models:
+            warnings.append("未配置任何模型")
+
+        if errors:
+            return ValidationResult.failure(errors, warnings)
+        return ValidationResult(valid=True, errors=[], warnings=warnings)
+
+    def export_to_claude(self, provider: Dict, model: str) -> ExportResult:
+        """导出到 Claude Code
+
+        Args:
+            provider: OpenCode Provider 配置
+            model: 默认模型 ID
+
+        Returns:
+            ExportResult
+        """
+        cli_type = "claude"
+        backup_path = None
+
+        try:
+            # 验证 Provider
+            validation = self.validate_provider(provider)
+            if not validation.valid:
+                return ExportResult.fail(cli_type, "; ".join(validation.errors))
+
+            # 创建备份
+            backup_path = self.backup_manager.create_backup(cli_type)
+
+            # 生成配置
+            config = self.config_generator.generate_claude_config(provider, model)
+
+            # 写入配置
+            self.config_writer.write_claude_settings(config)
+
+            settings_path = CLIConfigWriter.get_claude_dir() / "settings.json"
+            return ExportResult.ok(cli_type, [settings_path], backup_path)
+
+        except CLIExportError as e:
+            return ExportResult.fail(cli_type, str(e), backup_path)
+        except Exception as e:
+            return ExportResult.fail(cli_type, f"导出失败: {e}", backup_path)
+
+    def export_to_codex(self, provider: Dict, model: str) -> ExportResult:
+        """导出到 Codex CLI
+
+        Args:
+            provider: OpenCode Provider 配置
+            model: 默认模型 ID
+
+        Returns:
+            ExportResult
+        """
+        cli_type = "codex"
+        backup_path = None
+
+        try:
+            # 验证 Provider
+            validation = self.validate_provider(provider)
+            if not validation.valid:
+                return ExportResult.fail(cli_type, "; ".join(validation.errors))
+
+            # 创建备份
+            backup_path = self.backup_manager.create_backup(cli_type)
+
+            # 生成配置
+            auth = self.config_generator.generate_codex_auth(provider)
+            config_toml = self.config_generator.generate_codex_config(provider, model)
+
+            # 写入配置
+            self.config_writer.write_codex_auth(auth)
+            self.config_writer.write_codex_config(config_toml)
+
+            codex_dir = CLIConfigWriter.get_codex_dir()
+            return ExportResult.ok(
+                cli_type,
+                [codex_dir / "auth.json", codex_dir / "config.toml"],
+                backup_path,
+            )
+
+        except CLIExportError as e:
+            return ExportResult.fail(cli_type, str(e), backup_path)
+        except Exception as e:
+            return ExportResult.fail(cli_type, f"导出失败: {e}", backup_path)
+
+    def export_to_gemini(self, provider: Dict, model: str) -> ExportResult:
+        """导出到 Gemini CLI
+
+        Args:
+            provider: OpenCode Provider 配置
+            model: 默认模型 ID
+
+        Returns:
+            ExportResult
+        """
+        cli_type = "gemini"
+        backup_path = None
+
+        try:
+            # 验证 Provider
+            validation = self.validate_provider(provider)
+            if not validation.valid:
+                return ExportResult.fail(cli_type, "; ".join(validation.errors))
+
+            # 创建备份
+            backup_path = self.backup_manager.create_backup(cli_type)
+
+            # 生成配置
+            env_map = self.config_generator.generate_gemini_env(provider, model)
+            settings = self.config_generator.generate_gemini_settings()
+
+            # 写入配置
+            self.config_writer.write_gemini_env(env_map)
+            self.config_writer.write_gemini_settings(settings)
+
+            gemini_dir = CLIConfigWriter.get_gemini_dir()
+            return ExportResult.ok(
+                cli_type,
+                [gemini_dir / ".env", gemini_dir / "settings.json"],
+                backup_path,
+            )
+
+        except CLIExportError as e:
+            return ExportResult.fail(cli_type, str(e), backup_path)
+        except Exception as e:
+            return ExportResult.fail(cli_type, f"导出失败: {e}", backup_path)
+
+    def batch_export(
+        self, provider: Dict, models: Dict[str, str], targets: List[str]
+    ) -> BatchExportResult:
+        """批量导出到多个 CLI 工具
+
+        Args:
+            provider: OpenCode Provider 配置
+            models: {cli_type: model_id} 字典
+            targets: 要导出的 CLI 类型列表
+
+        Returns:
+            BatchExportResult
+        """
+        results = []
+
+        for cli_type in targets:
+            model = models.get(cli_type, "")
+
+            try:
+                if cli_type == "claude":
+                    result = self.export_to_claude(provider, model)
+                elif cli_type == "codex":
+                    result = self.export_to_codex(provider, model)
+                elif cli_type == "gemini":
+                    result = self.export_to_gemini(provider, model)
+                else:
+                    result = ExportResult.fail(cli_type, f"未知的 CLI 类型: {cli_type}")
+            except Exception as e:
+                result = ExportResult.fail(cli_type, f"导出异常: {e}")
+
+            results.append(result)
+
+        successful = sum(1 for r in results if r.success)
+        failed = len(results) - successful
+
+        return BatchExportResult(
+            total=len(results), successful=successful, failed=failed, results=results
+        )
+
+    def validate_exported_config(self, cli_type: str) -> ValidationResult:
+        """验证导出后的配置
+
+        Args:
+            cli_type: CLI 类型
+
+        Returns:
+            ValidationResult
+        """
+        errors = []
+        warnings = []
+
+        cli_dir = CLIConfigWriter.get_cli_dir(cli_type)
+
+        if cli_type == "claude":
+            settings_path = cli_dir / "settings.json"
+            if not settings_path.exists():
+                errors.append("settings.json 文件不存在")
+            else:
+                try:
+                    with open(settings_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                    if "env" not in config:
+                        errors.append("settings.json 缺少 env 字段")
+                    else:
+                        env = config["env"]
+                        if "ANTHROPIC_BASE_URL" not in env:
+                            errors.append("缺少 ANTHROPIC_BASE_URL")
+                        if "ANTHROPIC_AUTH_TOKEN" not in env:
+                            errors.append("缺少 ANTHROPIC_AUTH_TOKEN")
+                except json.JSONDecodeError as e:
+                    errors.append(f"settings.json 格式错误: {e}")
+                except Exception as e:
+                    errors.append(f"读取 settings.json 失败: {e}")
+
+        elif cli_type == "codex":
+            auth_path = cli_dir / "auth.json"
+            config_path = cli_dir / "config.toml"
+
+            if not auth_path.exists():
+                errors.append("auth.json 文件不存在")
+            else:
+                try:
+                    with open(auth_path, "r", encoding="utf-8") as f:
+                        auth = json.load(f)
+                    if "OPENAI_API_KEY" not in auth:
+                        errors.append("auth.json 缺少 OPENAI_API_KEY")
+                except json.JSONDecodeError as e:
+                    errors.append(f"auth.json 格式错误: {e}")
+                except Exception as e:
+                    errors.append(f"读取 auth.json 失败: {e}")
+
+            if not config_path.exists():
+                errors.append("config.toml 文件不存在")
+            else:
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    if "model_provider" not in content:
+                        errors.append("config.toml 缺少 model_provider")
+                    if "model =" not in content:
+                        errors.append("config.toml 缺少 model")
+                except Exception as e:
+                    errors.append(f"读取 config.toml 失败: {e}")
+
+        elif cli_type == "gemini":
+            env_path = cli_dir / ".env"
+            settings_path = cli_dir / "settings.json"
+
+            if not env_path.exists():
+                errors.append(".env 文件不存在")
+            else:
+                try:
+                    with open(env_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    if "GEMINI_API_KEY" not in content:
+                        errors.append(".env 缺少 GEMINI_API_KEY")
+                    if "GOOGLE_GEMINI_BASE_URL" not in content:
+                        errors.append(".env 缺少 GOOGLE_GEMINI_BASE_URL")
+                except Exception as e:
+                    errors.append(f"读取 .env 失败: {e}")
+
+            if not settings_path.exists():
+                warnings.append("settings.json 文件不存在")
+            else:
+                try:
+                    with open(settings_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                    if "security" not in config:
+                        warnings.append("settings.json 缺少 security 字段")
+                except json.JSONDecodeError as e:
+                    errors.append(f"settings.json 格式错误: {e}")
+                except Exception as e:
+                    errors.append(f"读取 settings.json 失败: {e}")
+
+        if errors:
+            return ValidationResult.failure(errors, warnings)
+        return ValidationResult(valid=True, errors=[], warnings=warnings)
+
+
 class ConfigValidator:
     """配置文件验证器 - 检查 OpenCode 配置格式是否正确"""
 
@@ -3109,7 +4113,11 @@ class ConfigValidator:
 class ModelRegistry:
     """模型注册表 - 管理所有已配置的模型"""
 
-    def __init__(self, opencode_config: Optional[Dict], auth_manager: Optional[AuthManager] = None):
+    def __init__(
+        self,
+        opencode_config: Optional[Dict],
+        auth_manager: Optional[AuthManager] = None,
+    ):
         self.config = opencode_config or {}
         self.auth_manager = auth_manager or AuthManager()
         self.models: Dict[str, bool] = {}
@@ -3119,7 +4127,7 @@ class ModelRegistry:
     def refresh(self):
         self.models = {}
         self.native_providers = {}
-        
+
         # 获取自定义 Provider 的模型
         providers = self.config.get("provider", {})
         for provider_name, provider_data in providers.items():
@@ -3129,7 +4137,7 @@ class ModelRegistry:
             for model_id in models.keys():
                 full_ref = f"{provider_name}/{model_id}"
                 self.models[full_ref] = True
-        
+
         # 获取已配置的原生 Provider
         try:
             auth_data = self.auth_manager.read_auth()
@@ -3141,11 +4149,11 @@ class ModelRegistry:
 
     def get_all_models(self) -> List[str]:
         return list(self.models.keys())
-    
+
     def get_configured_native_providers(self) -> List[str]:
         """获取已配置的原生 Provider ID 列表"""
         return list(self.native_providers.keys())
-    
+
     def is_native_provider_configured(self, provider_id: str) -> bool:
         """检查原生 Provider 是否已配置"""
         return provider_id in self.native_providers
@@ -4133,15 +5141,15 @@ class HomePage(BasePage):
             layout = QHBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.setSpacing(6)
-            
+
             label = CaptionLabel(label_text, container)
             label.setStyleSheet("color: #7d8590;")
             layout.addWidget(label)
-            
+
             value = StrongBodyLabel("0", container)
             value.setStyleSheet("font-size: 14px; color: #58a6ff;")
             layout.addWidget(value)
-            
+
             return container, value
 
         self.provider_count_label = None
@@ -4671,6 +5679,10 @@ class ProviderPage(BasePage):
         self.fetch_models_btn.clicked.connect(self._on_fetch_models)
         toolbar.addWidget(self.fetch_models_btn)
 
+        self.export_cli_btn = PushButton(FIF.SEND, "导出到 CLI", self)
+        self.export_cli_btn.clicked.connect(self._on_export_to_cli)
+        toolbar.addWidget(self.export_cli_btn)
+
         toolbar.addStretch()
         self._layout.addLayout(toolbar)
 
@@ -4782,6 +5794,26 @@ class ProviderPage(BasePage):
 
         self.show_warning("提示", f"正在获取 {provider_name} 模型列表...")
         self._model_fetch_service.fetch_async(provider_name, options)
+
+    def _on_export_to_cli(self):
+        """导出到 CLI 工具"""
+        row = self.table.currentRow()
+        if row < 0:
+            self.show_warning("提示", "请先选择一个 Provider")
+            return
+
+        provider_name = self.table.item(row, 0).text()
+
+        # 切换到 CLI 导出页面
+        if hasattr(self.main_window, "cli_export_page"):
+            self.main_window.switchTo(self.main_window.cli_export_page)
+            # 预选当前 Provider
+            cli_page = self.main_window.cli_export_page
+            index = cli_page.provider_combo.findText(provider_name)
+            if index >= 0:
+                cli_page.provider_combo.setCurrentIndex(index)
+        else:
+            self.show_warning("提示", "CLI 导出页面不可用")
 
 
 class ModelPresetCustomDialog(BaseDialog):
@@ -5554,7 +6586,7 @@ class NativeProviderPage(BasePage):
         self.table = TableWidget(self)
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Provider", "SDK", "状态", "环境变量"])
-        
+
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         header.resizeSection(0, 160)
@@ -5562,7 +6594,7 @@ class NativeProviderPage(BasePage):
         header.setSectionResizeMode(2, QHeaderView.Fixed)
         header.resizeSection(2, 80)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
-        
+
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -5572,7 +6604,7 @@ class NativeProviderPage(BasePage):
     def _load_data(self):
         """加载 Provider 数据"""
         self.table.setRowCount(0)
-        
+
         # 读取已配置的认证
         auth_data = {}
         try:
@@ -5583,15 +6615,15 @@ class NativeProviderPage(BasePage):
         for provider in NATIVE_PROVIDERS:
             row = self.table.rowCount()
             self.table.insertRow(row)
-            
+
             # Provider 名称
             name_item = QTableWidgetItem(provider.name)
             name_item.setData(Qt.UserRole, provider.id)
             self.table.setItem(row, 0, name_item)
-            
+
             # SDK
             self.table.setItem(row, 1, QTableWidgetItem(provider.sdk))
-            
+
             # 状态
             is_configured = provider.id in auth_data and auth_data[provider.id]
             status_text = "已配置" if is_configured else "未配置"
@@ -5601,7 +6633,7 @@ class NativeProviderPage(BasePage):
             else:
                 status_item.setForeground(QColor("#9E9E9E"))
             self.table.setItem(row, 2, status_item)
-            
+
             # 环境变量
             env_vars = ", ".join(provider.env_vars) if provider.env_vars else "-"
             env_item = QTableWidgetItem(env_vars)
@@ -5622,13 +6654,13 @@ class NativeProviderPage(BasePage):
         if not provider:
             self.show_warning("提示", "请先选择一个 Provider")
             return
-        
+
         dialog = NativeProviderDialog(
-            self.main_window, 
-            provider, 
-            self.auth_manager, 
+            self.main_window,
+            provider,
+            self.auth_manager,
             self.env_detector,
-            parent=self
+            parent=self,
         )
         if dialog.exec_():
             self._load_data()
@@ -5640,30 +6672,32 @@ class NativeProviderPage(BasePage):
         if not provider:
             self.show_warning("提示", "请先选择一个 Provider")
             return
-        
+
         if not provider.test_endpoint:
             self.show_warning("提示", "此 Provider 不支持连接测试")
             return
-        
+
         # 获取认证信息
         auth_data = self.auth_manager.get_provider_auth(provider.id)
         if not auth_data:
             self.show_error("测试失败", "请先配置此 Provider")
             return
-        
+
         api_key = auth_data.get("apiKey", "")
         if api_key:
             api_key = _resolve_env_value(api_key)
-        
+
         if not api_key:
             self.show_error("测试失败", "未找到 API Key")
             return
-        
+
         # 获取 baseURL
         config = self.main_window.opencode_config or {}
-        provider_options = config.get("provider", {}).get(provider.id, {}).get("options", {})
+        provider_options = (
+            config.get("provider", {}).get(provider.id, {}).get("options", {})
+        )
         base_url = provider_options.get("baseURL", "")
-        
+
         if not base_url:
             default_urls = {
                 "anthropic": "https://api.anthropic.com",
@@ -5676,16 +6710,16 @@ class NativeProviderPage(BasePage):
                 "opencode": "https://api.opencode.ai",
             }
             base_url = default_urls.get(provider.id, "")
-        
+
         if not base_url:
             self.show_error("测试失败", "无法确定 API 地址")
             return
-        
+
         test_url = base_url.rstrip("/") + provider.test_endpoint
-        
+
         # 执行测试
         self.show_warning("测试中", "正在测试连接...")
-        
+
         start_time = time.time()
         try:
             req = urllib.request.Request(test_url)
@@ -5705,29 +6739,29 @@ class NativeProviderPage(BasePage):
         if not provider:
             self.show_warning("提示", "请先选择一个 Provider")
             return
-        
+
         # 检查是否已配置
         auth_data = self.auth_manager.get_provider_auth(provider.id)
         if not auth_data:
             self.show_warning("提示", "此 Provider 尚未配置")
             return
-        
+
         # 确认删除
         msg_box = FluentMessageBox(
             "确认删除",
             f"确定要删除 {provider.name} 的配置吗？\n这将删除认证信息和选项配置。",
-            self
+            self,
         )
         if msg_box.exec_() != QMessageBox.Yes:
             return
-        
+
         # 删除认证
         try:
             self.auth_manager.delete_provider_auth(provider.id)
         except Exception as e:
             self.show_error("删除失败", f"无法删除认证配置: {e}")
             return
-        
+
         # 删除选项
         config = self.main_window.opencode_config or {}
         if "provider" in config and provider.id in config["provider"]:
@@ -5737,16 +6771,22 @@ class NativeProviderPage(BasePage):
                     del config["provider"][provider.id]
                 self.main_window.opencode_config = config
                 self.main_window.save_opencode_config()
-        
+
         self.show_success("删除成功", f"{provider.name} 配置已删除")
         self._load_data()
 
 
 class NativeProviderDialog(QDialog):
     """原生 Provider 配置对话框"""
-    
-    def __init__(self, main_window, provider: NativeProviderConfig, 
-                 auth_manager: AuthManager, env_detector: EnvVarDetector, parent=None):
+
+    def __init__(
+        self,
+        main_window,
+        provider: NativeProviderConfig,
+        auth_manager: AuthManager,
+        env_detector: EnvVarDetector,
+        parent=None,
+    ):
         super().__init__(parent)
         self.main_window = main_window
         self.provider = provider
@@ -5755,13 +6795,13 @@ class NativeProviderDialog(QDialog):
         self.auth_inputs: Dict[str, QWidget] = {}
         self.option_inputs: Dict[str, QWidget] = {}
         self._setup_ui()
-    
+
     def _setup_ui(self):
         """初始化对话框 UI"""
         self.setWindowTitle(f"配置 {self.provider.name}")
         self.setMinimumWidth(500)
         self.setMinimumHeight(400)
-        
+
         # 设置深色背景样式
         self.setStyleSheet("""
             QDialog {
@@ -5783,87 +6823,92 @@ class NativeProviderDialog(QDialog):
                 color: #e0e0e0;
             }
         """)
-        
+
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
-        
+
         # Provider 信息
         info_label = CaptionLabel(f"SDK: {self.provider.sdk}", self)
         layout.addWidget(info_label)
-        
+
         # 环境变量检测提示
         detected_env = self.env_detector.detect_env_vars(self.provider.id)
         if detected_env:
             env_hint = CaptionLabel(
-                f"✓ 检测到环境变量: {', '.join(detected_env.keys())}",
-                self
+                f"✓ 检测到环境变量: {', '.join(detected_env.keys())}", self
             )
             env_hint.setStyleSheet("color: #4CAF50;")
             layout.addWidget(env_hint)
-        
+
         # 认证配置卡片
         auth_card = SimpleCardWidget(self)
         auth_card_layout = QVBoxLayout(auth_card)
         auth_card_layout.setContentsMargins(16, 16, 16, 16)
         auth_card_layout.setSpacing(12)
-        
+
         auth_title = StrongBodyLabel("认证配置", auth_card)
         auth_card_layout.addWidget(auth_title)
-        
+
         current_auth = self.auth_manager.get_provider_auth(self.provider.id) or {}
-        
+
         for field in self.provider.auth_fields:
             field_layout = QHBoxLayout()
-            
-            label = BodyLabel(f"{field.label}{'*' if field.required else ''}", auth_card)
+
+            label = BodyLabel(
+                f"{field.label}{'*' if field.required else ''}", auth_card
+            )
             label.setMinimumWidth(120)
             field_layout.addWidget(label)
-            
+
             if field.field_type == "password":
                 input_widget = LineEdit(auth_card)
                 input_widget.setEchoMode(LineEdit.Password)
             else:
                 input_widget = LineEdit(auth_card)
-            
+
             input_widget.setPlaceholderText(field.placeholder)
             if field.key in current_auth:
                 input_widget.setText(str(current_auth[field.key]))
-            
+
             field_layout.addWidget(input_widget, 1)
-            
+
             # 环境变量导入按钮
             env_var = self._get_env_var_for_field(field.key)
             if env_var and env_var in detected_env:
                 import_btn = ToolButton(FIF.DOWNLOAD, auth_card)
                 import_btn.setToolTip(f"导入 {env_var}")
-                import_btn.clicked.connect(partial(self._import_env_var, input_widget, env_var))
+                import_btn.clicked.connect(
+                    partial(self._import_env_var, input_widget, env_var)
+                )
                 field_layout.addWidget(import_btn)
-            
+
             self.auth_inputs[field.key] = input_widget
             auth_card_layout.addLayout(field_layout)
-        
+
         layout.addWidget(auth_card)
-        
+
         # 选项配置卡片
         if self.provider.option_fields:
             option_card = SimpleCardWidget(self)
             option_card_layout = QVBoxLayout(option_card)
             option_card_layout.setContentsMargins(16, 16, 16, 16)
             option_card_layout.setSpacing(12)
-            
+
             option_title = StrongBodyLabel("Provider 选项", option_card)
             option_card_layout.addWidget(option_title)
-            
+
             config = self.main_window.opencode_config or {}
-            current_options = config.get("provider", {}).get(self.provider.id, {}).get("options", {})
-            
+            current_options = (
+                config.get("provider", {}).get(self.provider.id, {}).get("options", {})
+            )
+
             for field in self.provider.option_fields:
                 field_layout = QHBoxLayout()
-                
+
                 label = BodyLabel(field.label, option_card)
                 label.setMinimumWidth(120)
                 field_layout.addWidget(label)
-                
+
                 if field.field_type == "select" and field.options:
                     input_widget = ComboBox(option_card)
                     input_widget.addItems(field.options)
@@ -5874,43 +6919,45 @@ class NativeProviderDialog(QDialog):
                     input_widget = LineEdit(option_card)
                     input_widget.setPlaceholderText(field.default or "可选")
                     input_widget.setText(str(current_options.get(field.key, "")))
-                
+
                 field_layout.addWidget(input_widget, 1)
                 self.option_inputs[field.key] = input_widget
                 option_card_layout.addLayout(field_layout)
-            
+
             layout.addWidget(option_card)
-        
+
         layout.addStretch()
-        
+
         # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        
+
         cancel_btn = PushButton("取消", self)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
-        
+
         save_btn = PrimaryPushButton("保存", self)
         save_btn.clicked.connect(self._on_save)
         btn_layout.addWidget(save_btn)
-        
+
         layout.addLayout(btn_layout)
-    
+
     def _get_env_var_for_field(self, field_key: str) -> Optional[str]:
         """获取字段对应的环境变量名"""
         for env_var, auth_field in self.env_detector.ENV_TO_AUTH_FIELD.items():
             if auth_field == field_key:
-                provider_vars = self.env_detector.PROVIDER_ENV_VARS.get(self.provider.id, [])
+                provider_vars = self.env_detector.PROVIDER_ENV_VARS.get(
+                    self.provider.id, []
+                )
                 if env_var in provider_vars:
                     return env_var
         return None
-    
+
     def _import_env_var(self, input_widget: LineEdit, env_var: str):
         """导入环境变量引用"""
         ref = self.env_detector.format_env_reference(env_var)
         input_widget.setText(ref)
-    
+
     def _on_save(self):
         """保存配置"""
         # 检查重复
@@ -5921,11 +6968,11 @@ class NativeProviderDialog(QDialog):
                 msg_box = FluentMessageBox(
                     "配置冲突",
                     f"已存在同名的自定义 Provider '{self.provider.id}'。\n继续保存？",
-                    self
+                    self,
                 )
                 if msg_box.exec_() != QMessageBox.Yes:
                     return
-        
+
         # 收集认证数据
         auth_data = {}
         for field in self.provider.auth_fields:
@@ -5937,14 +6984,14 @@ class NativeProviderDialog(QDialog):
                 elif field.required:
                     QMessageBox.warning(self, "验证失败", f"{field.label} 是必填项")
                     return
-        
+
         # 保存认证
         try:
             self.auth_manager.set_provider_auth(self.provider.id, auth_data)
         except Exception as e:
             QMessageBox.critical(self, "保存失败", f"无法保存认证配置: {e}")
             return
-        
+
         # 保存选项
         if self.option_inputs:
             options = {}
@@ -5957,7 +7004,7 @@ class NativeProviderDialog(QDialog):
                         value = input_widget.text().strip()
                     if value:
                         options[field.key] = value
-            
+
             if options:
                 if "provider" not in config:
                     config["provider"] = {}
@@ -5966,7 +7013,7 @@ class NativeProviderDialog(QDialog):
                 config["provider"][self.provider.id]["options"] = options
                 self.main_window.opencode_config = config
                 self.main_window.save_opencode_config()
-        
+
         self.accept()
 
 
@@ -8440,20 +9487,25 @@ class HelpPage(BasePage):
         # 右侧信息
         right_layout = QVBoxLayout()
         right_layout.setSpacing(6)
-        
+
         # 标题行
         title_layout = QHBoxLayout()
         occm_label = TitleLabel("OCCM", about_card)
         occm_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #9B59B6;")
         title_layout.addWidget(occm_label)
-        
-        version_label = SubtitleLabel(f"OpenCode Config Manager v{APP_VERSION}", about_card)
+
+        version_label = SubtitleLabel(
+            f"OpenCode Config Manager v{APP_VERSION}", about_card
+        )
         title_layout.addWidget(version_label)
         title_layout.addStretch()
         right_layout.addLayout(title_layout)
 
         right_layout.addWidget(
-            BodyLabel("一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件", about_card)
+            BodyLabel(
+                "一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件",
+                about_card,
+            )
         )
 
         # 按钮行
@@ -8467,7 +9519,7 @@ class HelpPage(BasePage):
         link_layout.addWidget(author_btn)
         link_layout.addStretch()
         right_layout.addLayout(link_layout)
-        
+
         about_card_layout.addLayout(right_layout, 1)
         self._layout.addWidget(about_card)
 
@@ -8723,10 +9775,27 @@ class MainWindow(FluentWindow):
         self.setWindowTitle(f"OCCM - OpenCode Config Manager v{APP_VERSION}")
         self.setMinimumSize(900, 600)  # 减小最小高度
         self.resize(UIConfig.WINDOW_WIDTH, UIConfig.WINDOW_HEIGHT)
-        
+
+        # 将窗口移动到主屏幕中央
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geometry = screen.availableGeometry()
+            x = (screen_geometry.width() - self.width()) // 2 + screen_geometry.x()
+            y = (screen_geometry.height() - self.height()) // 2 + screen_geometry.y()
+            # 确保窗口在屏幕范围内
+            x = max(
+                screen_geometry.x(),
+                min(x, screen_geometry.x() + screen_geometry.width() - self.width()),
+            )
+            y = max(
+                screen_geometry.y(),
+                min(y, screen_geometry.y() + screen_geometry.height() - self.height()),
+            )
+            self.move(x, y)
+
         # 立即应用深色背景
         self._apply_dark_background()
-        
+
         # 监听主题变化
         qconfig.themeChanged.connect(self._apply_dark_background)
 
@@ -8750,45 +9819,60 @@ class MainWindow(FluentWindow):
         self.navigationInterface.setExpandWidth(180)
         self.navigationInterface.setCollapsible(True)  # 允许折叠
 
+        # 设置导航栏字体加粗
+        nav_font = QFont()
+        nav_font.setBold(True)
+        nav_font.setWeight(QFont.Black)  # 最粗的字体
+        self.navigationInterface.setFont(nav_font)
+
         # 导航栏样式 - 紧凑布局
         self._update_nav_style()
-        
+
     def _update_nav_style(self):
         """根据窗口高度更新导航栏样式"""
         height = self.height()
         # 根据窗口高度计算菜单项高度 (600px -> 24px, 900px -> 32px)
         item_height = max(24, min(32, int(height / 28)))
         font_size = max(11, min(13, int(height / 70)))
-        
+
         self.navigationInterface.setStyleSheet(f"""
+            * {{
+                font-weight: 900;
+            }}
             NavigationTreeWidget {{
                 font-family: "{UIConfig.FONT_FAMILY}", "Consolas", monospace;
                 font-size: {font_size}px;
-                font-weight: bold;
+                font-weight: 900;
             }}
             NavigationTreeWidget::item {{
                 height: {item_height}px;
                 margin: 0px 4px;
                 padding: 0px 6px;
                 border-radius: 4px;
-                font-weight: 500;
+                font-weight: 900;
+            }}
+            NavigationTreeWidget::item QLabel {{
+                font-weight: 900;
+            }}
+            QLabel {{
+                font-weight: 900;
             }}
             NavigationSeparator {{
                 height: 1px;
                 margin: 1px 8px;
             }}
         """)
-    
+
     def resizeEvent(self, event):
         """窗口大小改变时更新导航栏"""
         super().resizeEvent(event)
         self._update_nav_style()
-    
+
     def _apply_dark_background(self):
         """应用自定义背景样式"""
         if isDarkTheme():
             # 深色主题 - 应用自定义深黑色背景
-            if hasattr(self, 'stackedWidget'):
+            if hasattr(self, "stackedWidget"):
                 self.stackedWidget.setStyleSheet(f"""
                     StackedWidget {{
                         background-color: {UIConfig.DARK_BG};
@@ -8798,19 +9882,21 @@ class MainWindow(FluentWindow):
                         border-top-left-radius: 10px;
                     }}
                 """)
-            
+
             # 导航栏背景
-            if hasattr(self, 'navigationInterface'):
+            if hasattr(self, "navigationInterface"):
                 self._update_nav_style()
         else:
             # 浅色主题 - 清除自定义样式，使用默认
-            if hasattr(self, 'stackedWidget'):
+            if hasattr(self, "stackedWidget"):
                 self.stackedWidget.setStyleSheet("")
-            if hasattr(self, 'navigationInterface'):
+            if hasattr(self, "navigationInterface"):
                 self._update_nav_style()
-        
+
         # 更新监控页面统计卡片样式
-        if hasattr(self, 'monitor_page') and hasattr(self.monitor_page, '_apply_stat_card_theme'):
+        if hasattr(self, "monitor_page") and hasattr(
+            self.monitor_page, "_apply_stat_card_theme"
+        ):
             self.monitor_page._apply_stat_card_theme()
 
     def _init_navigation(self):
@@ -8870,13 +9956,17 @@ class MainWindow(FluentWindow):
         self.import_page = ImportPage(self)
         self.addSubInterface(self.import_page, FIF.DOWNLOAD, "外部导入")
 
+        # CLI 导出页面
+        self.cli_export_page = CLIExportPage(self)
+        self.addSubInterface(self.cli_export_page, FIF.SEND, "CLI 工具导出")
+
         # 监控页面
         self.monitor_page = MonitorPage(self)
         self.addSubInterface(self.monitor_page, FIF.SPEED_HIGH, "监控")
 
         # ===== 工具菜单 =====
         self.navigationInterface.addSeparator()
-        
+
         # 主题切换按钮
         self.navigationInterface.addItem(
             routeKey="theme",
@@ -10093,10 +11183,13 @@ class PresetCategoryDialog(BaseDialog):
 @dataclass
 class DiscoveredSkill:
     """发现的 Skill 信息"""
+
     name: str
     description: str
     path: Path
-    source: str  # 'opencode-global', 'opencode-project', 'claude-global', 'claude-project'
+    source: (
+        str  # 'opencode-global', 'opencode-project', 'claude-global', 'claude-project'
+    )
     license_info: Optional[str] = None
     compatibility: Optional[str] = None
     metadata: Optional[Dict[str, str]] = None
@@ -10105,13 +11198,13 @@ class DiscoveredSkill:
 
 class SkillDiscovery:
     """Skill 发现器 - 扫描所有路径发现已有的 Skill"""
-    
+
     # Skill 搜索路径配置
     SKILL_PATHS = {
         "opencode-global": Path.home() / ".config" / "opencode" / "skills",
         "claude-global": Path.home() / ".claude" / "skills",
     }
-    
+
     @staticmethod
     def get_project_paths() -> Dict[str, Path]:
         """获取项目级别的 Skill 路径"""
@@ -10120,17 +11213,17 @@ class SkillDiscovery:
             "opencode-project": cwd / ".opencode" / "skills",
             "claude-project": cwd / ".claude" / "skills",
         }
-    
+
     @staticmethod
     def validate_skill_name(name: str) -> Tuple[bool, str]:
         """验证 Skill 名称是否符合规范
-        
+
         规则：
         - 1-64 字符
         - 小写字母数字 + 单连字符分隔
         - 不能以 - 开头或结尾
         - 不能有连续 --
-        
+
         Returns:
             (是否有效, 错误信息)
         """
@@ -10141,11 +11234,11 @@ class SkillDiscovery:
         if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", name):
             return False, "名称格式错误：只能使用小写字母、数字、单连字符分隔"
         return True, ""
-    
+
     @staticmethod
     def validate_description(desc: str) -> Tuple[bool, str]:
         """验证描述是否符合规范
-        
+
         规则：1-1024 字符
         """
         if not desc:
@@ -10153,29 +11246,29 @@ class SkillDiscovery:
         if len(desc) > 1024:
             return False, "描述不能超过 1024 字符"
         return True, ""
-    
+
     @staticmethod
     def parse_skill_file(skill_path: Path) -> Optional[DiscoveredSkill]:
         """解析 SKILL.md 文件
-        
+
         Args:
             skill_path: SKILL.md 文件路径
-            
+
         Returns:
             解析后的 DiscoveredSkill 对象，解析失败返回 None
         """
         if not skill_path.exists():
             return None
-        
+
         try:
             content = skill_path.read_text(encoding="utf-8")
         except Exception:
             return None
-        
+
         # 解析 frontmatter
         frontmatter = {}
         body = content
-        
+
         if content.startswith("---"):
             parts = content.split("---", 2)
             if len(parts) >= 3:
@@ -10200,13 +11293,13 @@ class SkillDiscovery:
                     body = parts[2].strip()
                 except Exception:
                     pass
-        
+
         name = frontmatter.get("name", "")
         description = frontmatter.get("description", "")
-        
+
         if not name or not description:
             return None
-        
+
         # 确定来源
         skill_dir = skill_path.parent
         source = "unknown"
@@ -10217,7 +11310,7 @@ class SkillDiscovery:
                     break
             except (ValueError, TypeError):
                 pass
-        
+
         if source == "unknown":
             for src, base_path in SkillDiscovery.get_project_paths().items():
                 try:
@@ -10226,7 +11319,7 @@ class SkillDiscovery:
                         break
                 except (ValueError, TypeError):
                     pass
-        
+
         return DiscoveredSkill(
             name=name,
             description=description,
@@ -10234,46 +11327,48 @@ class SkillDiscovery:
             source=source,
             license_info=frontmatter.get("license"),
             compatibility=frontmatter.get("compatibility"),
-            metadata=frontmatter.get("metadata") if isinstance(frontmatter.get("metadata"), dict) else None,
+            metadata=frontmatter.get("metadata")
+            if isinstance(frontmatter.get("metadata"), dict)
+            else None,
             content=body,
         )
-    
+
     @classmethod
     def discover_all(cls) -> List[DiscoveredSkill]:
         """发现所有 Skill
-        
+
         Returns:
             发现的 Skill 列表
         """
         skills = []
         seen_names = set()
-        
+
         # 合并所有搜索路径
         all_paths = {**cls.SKILL_PATHS, **cls.get_project_paths()}
-        
+
         for source, base_path in all_paths.items():
             if not base_path.exists():
                 continue
-            
+
             # 遍历 skills 目录下的子目录
             try:
                 for skill_dir in base_path.iterdir():
                     if not skill_dir.is_dir():
                         continue
-                    
+
                     skill_file = skill_dir / "SKILL.md"
                     if not skill_file.exists():
                         continue
-                    
+
                     skill = cls.parse_skill_file(skill_file)
                     if skill and skill.name not in seen_names:
                         skills.append(skill)
                         seen_names.add(skill.name)
             except Exception:
                 continue
-        
+
         return skills
-    
+
     @classmethod
     def get_skill_by_name(cls, name: str) -> Optional[DiscoveredSkill]:
         """根据名称获取 Skill"""
@@ -10286,7 +11381,7 @@ class SkillDiscovery:
 # ==================== Skill 页面 ====================
 class SkillPage(BasePage):
     """Skill 管理页面 - 增强版
-    
+
     功能：
     1. Skill 发现与浏览 - 扫描所有路径显示已有 skill（包括 Claude 兼容路径）
     2. 完整的 frontmatter 编辑 - 支持 license、compatibility、metadata
@@ -10316,31 +11411,43 @@ class SkillPage(BasePage):
         # 使用 Pivot 实现标签页切换
         self.pivot = Pivot(self)
         self._layout.addWidget(self.pivot)
-        
+
         # 内容区域
         self.stacked_widget = QStackedWidget(self)
         self._layout.addWidget(self.stacked_widget, 1)
-        
+
         # 创建各个标签页
         self._create_browse_tab()
         self._create_create_tab()
         self._create_permission_tab()
-        
+
         # 添加标签页到 Pivot
-        self.pivot.addItem(routeKey="browse", text="浏览 Skill", onClick=lambda: self.stacked_widget.setCurrentIndex(0))
-        self.pivot.addItem(routeKey="create", text="创建 Skill", onClick=lambda: self.stacked_widget.setCurrentIndex(1))
-        self.pivot.addItem(routeKey="permission", text="权限配置", onClick=lambda: self.stacked_widget.setCurrentIndex(2))
-        
+        self.pivot.addItem(
+            routeKey="browse",
+            text="浏览 Skill",
+            onClick=lambda: self.stacked_widget.setCurrentIndex(0),
+        )
+        self.pivot.addItem(
+            routeKey="create",
+            text="创建 Skill",
+            onClick=lambda: self.stacked_widget.setCurrentIndex(1),
+        )
+        self.pivot.addItem(
+            routeKey="permission",
+            text="权限配置",
+            onClick=lambda: self.stacked_widget.setCurrentIndex(2),
+        )
+
         self.pivot.setCurrentItem("browse")
 
     def _load_all_data(self):
         """加载所有数据"""
         self._refresh_skill_list()
         self._load_permission_data()
-    
+
     def _refresh_skill_list(self):
         """刷新 Skill 列表"""
-        if hasattr(self, 'skill_list'):
+        if hasattr(self, "skill_list"):
             self.skill_list.clear()
             skills = SkillDiscovery.discover_all()
             for skill in skills:
@@ -10348,14 +11455,14 @@ class SkillPage(BasePage):
                 item = QListWidgetItem(f"{skill.name} ({source_label})")
                 item.setData(Qt.UserRole, skill)
                 self.skill_list.addItem(item)
-    
+
     def _load_permission_data(self):
         """加载权限数据"""
-        if hasattr(self, 'perm_table'):
+        if hasattr(self, "perm_table"):
             self.perm_table.setRowCount(0)
             config = self.main_window.opencode_config or {}
             permissions = config.get("permission", {}).get("skill", {})
-            
+
             if isinstance(permissions, dict):
                 for pattern, perm in permissions.items():
                     row = self.perm_table.rowCount()
@@ -10368,7 +11475,7 @@ class SkillPage(BasePage):
         browse_widget = QWidget()
         browse_layout = QVBoxLayout(browse_widget)
         browse_layout.setContentsMargins(0, 16, 0, 0)
-        
+
         # 使用 QSplitter 实现左右分栏
         splitter = QSplitter(Qt.Orientation.Horizontal, browse_widget)
 
@@ -10398,7 +11505,7 @@ class SkillPage(BasePage):
         self.skill_list = ListWidget(left_widget)
         self.skill_list.itemClicked.connect(self._on_skill_selected)
         left_layout.addWidget(self.skill_list, 1)
-        
+
         # 路径说明
         path_info = CaptionLabel(
             "搜索路径:\n"
@@ -10406,31 +11513,31 @@ class SkillPage(BasePage):
             "• ~/.claude/skills/\n"
             "• .opencode/skills/\n"
             "• .claude/skills/",
-            left_widget
+            left_widget,
         )
         left_layout.addWidget(path_info)
-        
+
         # ===== 右侧：Skill 详情预览 =====
         right_widget = QWidget()
         right_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(8, 0, 0, 0)
-        
+
         right_layout.addWidget(SubtitleLabel("Skill 详情", right_widget))
-        
+
         # 详情卡片
         detail_card = SimpleCardWidget(right_widget)
         detail_layout = QVBoxLayout(detail_card)
         detail_layout.setContentsMargins(16, 12, 16, 12)
         detail_layout.setSpacing(8)
-        
+
         self.detail_name = StrongBodyLabel("选择一个 Skill 查看详情", detail_card)
         detail_layout.addWidget(self.detail_name)
-        
+
         self.detail_desc = CaptionLabel("", detail_card)
         self.detail_desc.setWordWrap(True)
         detail_layout.addWidget(self.detail_desc)
-        
+
         # 元信息
         meta_layout = QHBoxLayout()
         self.detail_source = CaptionLabel("", detail_card)
@@ -10441,37 +11548,37 @@ class SkillPage(BasePage):
         meta_layout.addWidget(self.detail_compat)
         meta_layout.addStretch()
         detail_layout.addLayout(meta_layout)
-        
+
         self.detail_path = CaptionLabel("", detail_card)
         self.detail_path.setWordWrap(True)
         detail_layout.addWidget(self.detail_path)
-        
+
         right_layout.addWidget(detail_card)
-        
+
         # 内容预览
         right_layout.addWidget(BodyLabel("内容预览:", right_widget))
         self.detail_content = TextEdit(right_widget)
         self.detail_content.setReadOnly(True)
         self.detail_content.setPlaceholderText("选择 Skill 后显示内容")
         right_layout.addWidget(self.detail_content, 1)
-        
+
         # 操作按钮
         btn_layout = QHBoxLayout()
         self.edit_skill_btn = PushButton(FIF.EDIT, "编辑", right_widget)
         self.edit_skill_btn.clicked.connect(self._on_edit_skill)
         self.edit_skill_btn.setEnabled(False)
         btn_layout.addWidget(self.edit_skill_btn)
-        
+
         self.delete_skill_btn = PushButton(FIF.DELETE, "删除", right_widget)
         self.delete_skill_btn.clicked.connect(self._on_delete_skill)
         self.delete_skill_btn.setEnabled(False)
         btn_layout.addWidget(self.delete_skill_btn)
-        
+
         self.open_folder_btn = PushButton(FIF.FOLDER, "打开目录", right_widget)
         self.open_folder_btn.clicked.connect(self._on_open_skill_folder)
         self.open_folder_btn.setEnabled(False)
         btn_layout.addWidget(self.open_folder_btn)
-        
+
         btn_layout.addStretch()
         right_layout.addLayout(btn_layout)
 
@@ -10479,45 +11586,51 @@ class SkillPage(BasePage):
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
         splitter.setSizes([350, 450])
-        
+
         browse_layout.addWidget(splitter, 1)
         self.stacked_widget.addWidget(browse_widget)
-    
+
     def _on_skill_selected(self, item):
         """选中 Skill 时显示详情"""
         skill = item.data(Qt.UserRole)
         if not skill:
             return
-        
+
         self._current_skill = skill
         self.detail_name.setText(skill.name)
         self.detail_desc.setText(skill.description)
-        self.detail_source.setText(f"来源: {self.SOURCE_LABELS.get(skill.source, skill.source)}")
-        self.detail_license.setText(f"许可: {skill.license_info}" if skill.license_info else "")
-        self.detail_compat.setText(f"兼容: {skill.compatibility}" if skill.compatibility else "")
+        self.detail_source.setText(
+            f"来源: {self.SOURCE_LABELS.get(skill.source, skill.source)}"
+        )
+        self.detail_license.setText(
+            f"许可: {skill.license_info}" if skill.license_info else ""
+        )
+        self.detail_compat.setText(
+            f"兼容: {skill.compatibility}" if skill.compatibility else ""
+        )
         self.detail_path.setText(f"路径: {skill.path}")
         self.detail_content.setText(skill.content)
-        
+
         # 启用操作按钮
         self.edit_skill_btn.setEnabled(True)
         self.delete_skill_btn.setEnabled(True)
         self.open_folder_btn.setEnabled(True)
-    
+
     def _on_edit_skill(self):
         """编辑选中的 Skill"""
         if not self._current_skill:
             return
-        
+
         # 切换到创建标签页并填充数据
         self.pivot.setCurrentItem("create")
         self.stacked_widget.setCurrentIndex(1)
-        
+
         self.create_name_edit.setText(self._current_skill.name)
         self.create_desc_edit.setText(self._current_skill.description)
         self.create_license_edit.setText(self._current_skill.license_info or "")
         self.create_compat_edit.setText(self._current_skill.compatibility or "")
         self.create_content_edit.setText(self._current_skill.content)
-        
+
         # 根据路径设置保存位置
         path_str = str(self._current_skill.path)
         if ".claude" in path_str:
@@ -10527,19 +11640,23 @@ class SkillPage(BasePage):
                 self.create_loc_combo.setCurrentText("Claude 项目 (.claude/skills/)")
         else:
             if str(Path.home()) in path_str:
-                self.create_loc_combo.setCurrentText("OpenCode 全局 (~/.config/opencode/skills/)")
+                self.create_loc_combo.setCurrentText(
+                    "OpenCode 全局 (~/.config/opencode/skills/)"
+                )
             else:
-                self.create_loc_combo.setCurrentText("OpenCode 项目 (.opencode/skills/)")
-    
+                self.create_loc_combo.setCurrentText(
+                    "OpenCode 项目 (.opencode/skills/)"
+                )
+
     def _on_delete_skill(self):
         """删除选中的 Skill"""
         if not self._current_skill:
             return
-        
+
         w = FluentMessageBox(
             "确认删除",
             f'确定要删除 Skill "{self._current_skill.name}" 吗？\n路径: {self._current_skill.path}',
-            self
+            self,
         )
         if w.exec_():
             try:
@@ -10551,16 +11668,16 @@ class SkillPage(BasePage):
                 self._clear_detail()
             except Exception as e:
                 self.show_error("错误", f"删除失败: {e}")
-    
+
     def _on_open_skill_folder(self):
         """打开 Skill 所在目录"""
         if not self._current_skill:
             return
-        
+
         folder = self._current_skill.path.parent
         if folder.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
-    
+
     def _clear_detail(self):
         """清空详情显示"""
         self.detail_name.setText("选择一个 Skill 查看详情")
@@ -10579,28 +11696,32 @@ class SkillPage(BasePage):
         create_widget = QWidget()
         create_layout = QVBoxLayout(create_widget)
         create_layout.setContentsMargins(0, 16, 0, 0)
-        
+
         create_layout.addWidget(SubtitleLabel("创建/编辑 SKILL.md", create_widget))
-        create_layout.addWidget(CaptionLabel(
-            "创建新的 Skill 或编辑现有 Skill。支持完整的 frontmatter 字段。",
-            create_widget
-        ))
-        
+        create_layout.addWidget(
+            CaptionLabel(
+                "创建新的 Skill 或编辑现有 Skill。支持完整的 frontmatter 字段。",
+                create_widget,
+            )
+        )
+
         # 基本信息卡片
         basic_card = SimpleCardWidget(create_widget)
         basic_layout = QVBoxLayout(basic_card)
         basic_layout.setContentsMargins(16, 12, 16, 12)
         basic_layout.setSpacing(12)
-        
+
         # Skill 名称
         name_layout = QHBoxLayout()
         name_layout.addWidget(BodyLabel("名称 *:", basic_card))
         self.create_name_edit = LineEdit(basic_card)
-        self.create_name_edit.setPlaceholderText("小写字母、数字、连字符，如: git-release")
+        self.create_name_edit.setPlaceholderText(
+            "小写字母、数字、连字符，如: git-release"
+        )
         self.create_name_edit.setToolTip(get_tooltip("skill_name"))
         name_layout.addWidget(self.create_name_edit)
         basic_layout.addLayout(name_layout)
-        
+
         # 描述
         desc_layout = QHBoxLayout()
         desc_layout.addWidget(BodyLabel("描述 *:", basic_card))
@@ -10608,7 +11729,7 @@ class SkillPage(BasePage):
         self.create_desc_edit.setPlaceholderText("描述 Skill 的功能 (1-1024 字符)")
         basic_layout.addLayout(desc_layout)
         desc_layout.addWidget(self.create_desc_edit)
-        
+
         # License
         license_layout = QHBoxLayout()
         license_layout.addWidget(BodyLabel("许可证:", basic_card))
@@ -10616,7 +11737,7 @@ class SkillPage(BasePage):
         self.create_license_edit.setPlaceholderText("如: MIT, Apache-2.0 (可选)")
         license_layout.addWidget(self.create_license_edit)
         basic_layout.addLayout(license_layout)
-        
+
         # Compatibility
         compat_layout = QHBoxLayout()
         compat_layout.addWidget(BodyLabel("兼容性:", basic_card))
@@ -10624,23 +11745,25 @@ class SkillPage(BasePage):
         self.create_compat_edit.setPlaceholderText("如: opencode, claude (可选)")
         compat_layout.addWidget(self.create_compat_edit)
         basic_layout.addLayout(compat_layout)
-        
+
         # 保存位置
         loc_layout = QHBoxLayout()
         loc_layout.addWidget(BodyLabel("保存位置:", basic_card))
         self.create_loc_combo = ComboBox(basic_card)
-        self.create_loc_combo.addItems([
-            "OpenCode 全局 (~/.config/opencode/skills/)",
-            "OpenCode 项目 (.opencode/skills/)",
-            "Claude 全局 (~/.claude/skills/)",
-            "Claude 项目 (.claude/skills/)",
-        ])
+        self.create_loc_combo.addItems(
+            [
+                "OpenCode 全局 (~/.config/opencode/skills/)",
+                "OpenCode 项目 (.opencode/skills/)",
+                "Claude 全局 (~/.claude/skills/)",
+                "Claude 项目 (.claude/skills/)",
+            ]
+        )
         loc_layout.addWidget(self.create_loc_combo)
         loc_layout.addStretch()
         basic_layout.addLayout(loc_layout)
-        
+
         create_layout.addWidget(basic_card)
-        
+
         # 内容编辑
         create_layout.addWidget(BodyLabel("Skill 内容 (Markdown):", create_widget))
         self.create_content_edit = TextEdit(create_widget)
@@ -10650,22 +11773,22 @@ class SkillPage(BasePage):
             "## Instructions\n\n- 具体指令 1\n- 具体指令 2"
         )
         create_layout.addWidget(self.create_content_edit, 1)
-        
+
         # 按钮
         btn_layout = QHBoxLayout()
         save_btn = PrimaryPushButton(FIF.SAVE, "保存 Skill", create_widget)
         save_btn.clicked.connect(self._on_save_skill)
         btn_layout.addWidget(save_btn)
-        
+
         clear_btn = PushButton(FIF.DELETE, "清空", create_widget)
         clear_btn.clicked.connect(self._on_clear_create_form)
         btn_layout.addWidget(clear_btn)
-        
+
         btn_layout.addStretch()
         create_layout.addLayout(btn_layout)
-        
+
         self.stacked_widget.addWidget(create_widget)
-    
+
     def _on_save_skill(self):
         """保存 Skill"""
         name = self.create_name_edit.text().strip()
@@ -10673,18 +11796,18 @@ class SkillPage(BasePage):
         license_info = self.create_license_edit.text().strip()
         compat = self.create_compat_edit.text().strip()
         content = self.create_content_edit.toPlainText().strip()
-        
+
         # 验证
         valid, msg = SkillDiscovery.validate_skill_name(name)
         if not valid:
             self.show_error("名称错误", msg)
             return
-        
+
         valid, msg = SkillDiscovery.validate_description(desc)
         if not valid:
             self.show_error("描述错误", msg)
             return
-        
+
         # 确定保存路径
         loc_text = self.create_loc_combo.currentText()
         if "OpenCode 全局" in loc_text:
@@ -10695,10 +11818,10 @@ class SkillPage(BasePage):
             base_path = Path.home() / ".claude" / "skills"
         else:
             base_path = Path.cwd() / ".claude" / "skills"
-        
+
         skill_dir = base_path / name
         skill_file = skill_dir / "SKILL.md"
-        
+
         # 构建 frontmatter
         frontmatter_lines = [
             f"name: {name}",
@@ -10708,26 +11831,26 @@ class SkillPage(BasePage):
             frontmatter_lines.append(f"license: {license_info}")
         if compat:
             frontmatter_lines.append(f"compatibility: {compat}")
-        
+
         frontmatter = "\n".join(frontmatter_lines)
-        
+
         # 默认内容
         if not content:
             content = "## What I do\n\n- 描述功能\n\n## Instructions\n\n- 具体指令"
-        
+
         skill_content = f"---\n{frontmatter}\n---\n\n{content}\n"
-        
+
         try:
             skill_dir.mkdir(parents=True, exist_ok=True)
             with open(skill_file, "w", encoding="utf-8") as f:
                 f.write(skill_content)
-            
+
             self.show_success("成功", f"Skill 已保存: {skill_file}")
             self._refresh_skill_list()
             self._on_clear_create_form()
         except Exception as e:
             self.show_error("错误", f"保存失败: {e}")
-    
+
     def _on_clear_create_form(self):
         """清空创建表单"""
         self.create_name_edit.clear()
@@ -10736,40 +11859,41 @@ class SkillPage(BasePage):
         self.create_compat_edit.clear()
         self.create_content_edit.clear()
         self._current_skill = None
-    
+
     def _create_permission_tab(self):
         """创建权限配置标签页"""
         perm_widget = QWidget()
         perm_layout = QVBoxLayout(perm_widget)
         perm_layout.setContentsMargins(0, 16, 0, 0)
-        
+
         # 使用 QSplitter 实现左右分栏
         splitter = QSplitter(Qt.Orientation.Horizontal, perm_widget)
-        
+
         # ===== 左侧：全局权限配置 =====
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 8, 0)
-        
+
         left_layout.addWidget(SubtitleLabel("全局 Skill 权限", left_widget))
-        left_layout.addWidget(CaptionLabel(
-            "配置 permission.skill 权限，控制 Skill 的加载行为",
-            left_widget
-        ))
-        
+        left_layout.addWidget(
+            CaptionLabel(
+                "配置 permission.skill 权限，控制 Skill 的加载行为", left_widget
+            )
+        )
+
         # 工具栏
         toolbar = QHBoxLayout()
         add_perm_btn = PrimaryPushButton(FIF.ADD, "添加", left_widget)
         add_perm_btn.clicked.connect(self._on_add_permission)
         toolbar.addWidget(add_perm_btn)
-        
+
         del_perm_btn = PushButton(FIF.DELETE, "删除", left_widget)
         del_perm_btn.clicked.connect(self._on_delete_permission)
         toolbar.addWidget(del_perm_btn)
-        
+
         toolbar.addStretch()
         left_layout.addLayout(toolbar)
-        
+
         # 权限表格
         self.perm_table = TableWidget(left_widget)
         self.perm_table.setColumnCount(2)
@@ -10780,12 +11904,12 @@ class SkillPage(BasePage):
         self.perm_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.perm_table.itemSelectionChanged.connect(self._on_perm_selected)
         left_layout.addWidget(self.perm_table, 1)
-        
+
         # 编辑区域
         edit_card = SimpleCardWidget(left_widget)
         edit_layout = QVBoxLayout(edit_card)
         edit_layout.setContentsMargins(12, 8, 12, 8)
-        
+
         pattern_layout = QHBoxLayout()
         pattern_layout.addWidget(BodyLabel("模式:", edit_card))
         self.perm_pattern_edit = LineEdit(edit_card)
@@ -10793,7 +11917,7 @@ class SkillPage(BasePage):
         self.perm_pattern_edit.setToolTip(get_tooltip("skill_pattern"))
         pattern_layout.addWidget(self.perm_pattern_edit)
         edit_layout.addLayout(pattern_layout)
-        
+
         perm_sel_layout = QHBoxLayout()
         perm_sel_layout.addWidget(BodyLabel("权限:", edit_card))
         self.perm_level_combo = ComboBox(edit_card)
@@ -10802,24 +11926,23 @@ class SkillPage(BasePage):
         perm_sel_layout.addWidget(self.perm_level_combo)
         perm_sel_layout.addStretch()
         edit_layout.addLayout(perm_sel_layout)
-        
+
         save_perm_btn = PrimaryPushButton("保存权限", edit_card)
         save_perm_btn.clicked.connect(self._on_save_permission)
         edit_layout.addWidget(save_perm_btn)
-        
+
         left_layout.addWidget(edit_card)
-        
+
         # ===== 右侧：Agent 级别配置 =====
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(8, 0, 0, 0)
-        
+
         right_layout.addWidget(SubtitleLabel("Agent 级别配置", right_widget))
-        right_layout.addWidget(CaptionLabel(
-            "为特定 Agent 配置 Skill 权限或禁用 Skill 工具",
-            right_widget
-        ))
-        
+        right_layout.addWidget(
+            CaptionLabel("为特定 Agent 配置 Skill 权限或禁用 Skill 工具", right_widget)
+        )
+
         # Agent 选择
         agent_layout = QHBoxLayout()
         agent_layout.addWidget(BodyLabel("选择 Agent:", right_widget))
@@ -10829,34 +11952,38 @@ class SkillPage(BasePage):
         agent_layout.addWidget(self.agent_combo)
         agent_layout.addStretch()
         right_layout.addLayout(agent_layout)
-        
+
         # 禁用 Skill 工具
-        self.disable_skill_check = CheckBox("禁用 Skill 工具 (tools.skill: false)", right_widget)
+        self.disable_skill_check = CheckBox(
+            "禁用 Skill 工具 (tools.skill: false)", right_widget
+        )
         self.disable_skill_check.stateChanged.connect(self._on_disable_skill_changed)
         right_layout.addWidget(self.disable_skill_check)
-        
+
         # Agent 权限覆盖
         right_layout.addWidget(BodyLabel("Agent 权限覆盖:", right_widget))
         self.agent_perm_table = TableWidget(right_widget)
         self.agent_perm_table.setColumnCount(2)
         self.agent_perm_table.setHorizontalHeaderLabels(["模式", "权限"])
-        self.agent_perm_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.agent_perm_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
         self.agent_perm_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.agent_perm_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         right_layout.addWidget(self.agent_perm_table, 1)
-        
+
         # Agent 权限编辑
         agent_edit_card = SimpleCardWidget(right_widget)
         agent_edit_layout = QVBoxLayout(agent_edit_card)
         agent_edit_layout.setContentsMargins(12, 8, 12, 8)
-        
+
         agent_pattern_layout = QHBoxLayout()
         agent_pattern_layout.addWidget(BodyLabel("模式:", agent_edit_card))
         self.agent_perm_pattern_edit = LineEdit(agent_edit_card)
         self.agent_perm_pattern_edit.setPlaceholderText("如: documents-*, internal-*")
         agent_pattern_layout.addWidget(self.agent_perm_pattern_edit)
         agent_edit_layout.addLayout(agent_pattern_layout)
-        
+
         agent_perm_layout = QHBoxLayout()
         agent_perm_layout.addWidget(BodyLabel("权限:", agent_edit_card))
         self.agent_perm_level_combo = ComboBox(agent_edit_card)
@@ -10864,39 +11991,39 @@ class SkillPage(BasePage):
         agent_perm_layout.addWidget(self.agent_perm_level_combo)
         agent_perm_layout.addStretch()
         agent_edit_layout.addLayout(agent_perm_layout)
-        
+
         agent_btn_layout = QHBoxLayout()
         add_agent_perm_btn = PushButton(FIF.ADD, "添加", agent_edit_card)
         add_agent_perm_btn.clicked.connect(self._on_add_agent_permission)
         agent_btn_layout.addWidget(add_agent_perm_btn)
-        
+
         del_agent_perm_btn = PushButton(FIF.DELETE, "删除", agent_edit_card)
         del_agent_perm_btn.clicked.connect(self._on_delete_agent_permission)
         agent_btn_layout.addWidget(del_agent_perm_btn)
         agent_btn_layout.addStretch()
         agent_edit_layout.addLayout(agent_btn_layout)
-        
+
         right_layout.addWidget(agent_edit_card)
-        
+
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
         splitter.setSizes([400, 400])
-        
+
         perm_layout.addWidget(splitter, 1)
         self.stacked_widget.addWidget(perm_widget)
-    
+
     def _on_add_permission(self):
         """添加新权限"""
         self.perm_pattern_edit.clear()
         self.perm_level_combo.setCurrentText("ask")
-    
+
     def _on_delete_permission(self):
         """删除选中的权限"""
         row = self.perm_table.currentRow()
         if row < 0:
             self.show_warning("提示", "请先选择一个权限")
             return
-        
+
         pattern = self.perm_table.item(row, 0).text()
         w = FluentMessageBox("确认删除", f'确定要删除权限 "{pattern}" 吗？', self)
         if w.exec_():
@@ -10907,7 +12034,7 @@ class SkillPage(BasePage):
                 self.main_window.save_opencode_config()
                 self._load_permission_data()
                 self.show_success("成功", f'权限 "{pattern}" 已删除')
-    
+
     def _on_perm_selected(self):
         """选中权限时填充编辑区"""
         row = self.perm_table.currentRow()
@@ -10918,43 +12045,45 @@ class SkillPage(BasePage):
                 self.perm_pattern_edit.setText(pattern_item.text())
             if perm_item:
                 self.perm_level_combo.setCurrentText(perm_item.text())
-    
+
     def _on_save_permission(self):
         """保存权限"""
         pattern = self.perm_pattern_edit.text().strip()
         if not pattern:
             self.show_warning("提示", "请输入模式")
             return
-        
+
         config = self.main_window.opencode_config
         if config is None:
             config = {}
             self.main_window.opencode_config = config
-        
+
         if "permission" not in config:
             config["permission"] = {}
-        if "skill" not in config["permission"] or not isinstance(config["permission"]["skill"], dict):
+        if "skill" not in config["permission"] or not isinstance(
+            config["permission"]["skill"], dict
+        ):
             config["permission"]["skill"] = {}
-        
+
         config["permission"]["skill"][pattern] = self.perm_level_combo.currentText()
         self.main_window.save_opencode_config()
         self._load_permission_data()
         self.show_success("成功", f'权限 "{pattern}" 已保存')
-    
+
     def _on_agent_changed(self, agent_name: str):
         """切换 Agent 时加载其配置"""
         self._load_agent_skill_config(agent_name)
-    
+
     def _load_agent_skill_config(self, agent_name: str):
         """加载指定 Agent 的 Skill 配置"""
         config = self.main_window.opencode_config or {}
         agent_config = config.get("agent", {}).get(agent_name, {})
-        
+
         # 加载 tools.skill 状态
         tools = agent_config.get("tools", {})
         skill_enabled = tools.get("skill", True)
         self.disable_skill_check.setChecked(skill_enabled is False)
-        
+
         # 加载 Agent 权限覆盖
         self.agent_perm_table.setRowCount(0)
         agent_perms = agent_config.get("permission", {}).get("skill", {})
@@ -10964,7 +12093,7 @@ class SkillPage(BasePage):
                 self.agent_perm_table.insertRow(row)
                 self.agent_perm_table.setItem(row, 0, QTableWidgetItem(pattern))
                 self.agent_perm_table.setItem(row, 1, QTableWidgetItem(perm))
-    
+
     def _on_disable_skill_changed(self, state):
         """禁用 Skill 工具状态变化"""
         agent_name = self.agent_combo.currentText()
@@ -10972,36 +12101,36 @@ class SkillPage(BasePage):
         if config is None:
             config = {}
             self.main_window.opencode_config = config
-        
+
         if "agent" not in config:
             config["agent"] = {}
         if agent_name not in config["agent"]:
             config["agent"][agent_name] = {}
         if "tools" not in config["agent"][agent_name]:
             config["agent"][agent_name]["tools"] = {}
-        
+
         if state == Qt.Checked:
             config["agent"][agent_name]["tools"]["skill"] = False
         else:
             # 移除配置，使用默认值
             if "skill" in config["agent"][agent_name]["tools"]:
                 del config["agent"][agent_name]["tools"]["skill"]
-        
+
         self.main_window.save_opencode_config()
-    
+
     def _on_add_agent_permission(self):
         """添加 Agent 权限覆盖"""
         pattern = self.agent_perm_pattern_edit.text().strip()
         if not pattern:
             self.show_warning("提示", "请输入模式")
             return
-        
+
         agent_name = self.agent_combo.currentText()
         config = self.main_window.opencode_config
         if config is None:
             config = {}
             self.main_window.opencode_config = config
-        
+
         if "agent" not in config:
             config["agent"] = {}
         if agent_name not in config["agent"]:
@@ -11010,25 +12139,32 @@ class SkillPage(BasePage):
             config["agent"][agent_name]["permission"] = {}
         if "skill" not in config["agent"][agent_name]["permission"]:
             config["agent"][agent_name]["permission"]["skill"] = {}
-        
-        config["agent"][agent_name]["permission"]["skill"][pattern] = self.agent_perm_level_combo.currentText()
+
+        config["agent"][agent_name]["permission"]["skill"][pattern] = (
+            self.agent_perm_level_combo.currentText()
+        )
         self.main_window.save_opencode_config()
         self._load_agent_skill_config(agent_name)
         self.show_success("成功", f'Agent "{agent_name}" 权限 "{pattern}" 已添加')
-    
+
     def _on_delete_agent_permission(self):
         """删除 Agent 权限覆盖"""
         row = self.agent_perm_table.currentRow()
         if row < 0:
             self.show_warning("提示", "请先选择一个权限")
             return
-        
+
         pattern = self.agent_perm_table.item(row, 0).text()
         agent_name = self.agent_combo.currentText()
-        
+
         config = self.main_window.opencode_config or {}
-        agent_perms = config.get("agent", {}).get(agent_name, {}).get("permission", {}).get("skill", {})
-        
+        agent_perms = (
+            config.get("agent", {})
+            .get(agent_name, {})
+            .get("permission", {})
+            .get("skill", {})
+        )
+
         if isinstance(agent_perms, dict) and pattern in agent_perms:
             del agent_perms[pattern]
             self.main_window.save_opencode_config()
@@ -11376,10 +12512,11 @@ class MonitorPage(BasePage):
         self._pending_targets: Dict[str, float] = {}
         self._timeout_timer: Optional[QTimer] = None
         self._request_timeout_sec = 15
-        # 是否启用对话延迟测试
-        self._chat_test_enabled = True
+        # 是否启用对话延迟测试 - 默认关闭，需要手动启动
+        self._chat_test_enabled = False
         self._setup_ui()
         self._load_targets()
+        # 自动启动轮询（Ping 检测始终运行，对话延迟测试由按钮控制）
         self._start_polling()
         # 连接配置变更信号
         self.main_window.config_changed.connect(self._on_config_changed)
@@ -11391,14 +12528,31 @@ class MonitorPage(BasePage):
         self._refresh_ui()
 
     def _toggle_chat_test(self):
-        """切换对话延迟测试状态"""
+        """切换对话延迟测试状态 - 启动/停止按钮（只控制对话延迟，不影响其他监控）"""
         self._chat_test_enabled = not self._chat_test_enabled
         if self._chat_test_enabled:
-            self.stop_monitor_btn.setText("停止")
-            self.stop_monitor_btn.setIcon(FIF.PAUSE)
+            # 启动对话延迟测试
+            self.monitor_toggle_btn.setText("停止")
+            self.monitor_toggle_btn.setIcon(FIF.PAUSE)
+            self.monitor_toggle_btn.setToolTip(
+                "停止对话延迟自动检测（Ping 检测不受影响）"
+            )
         else:
-            self.stop_monitor_btn.setText("恢复")
-            self.stop_monitor_btn.setIcon(FIF.PLAY)
+            # 停止对话延迟测试
+            self.monitor_toggle_btn.setText("启动")
+            self.monitor_toggle_btn.setIcon(FIF.PLAY)
+            self.monitor_toggle_btn.setToolTip("启动对话延迟自动检测")
+        # 立即执行一次检测以反映状态变化
+        self._do_poll()
+
+    def _stop_polling(self):
+        """停止轮询"""
+        if self._poll_timer:
+            self._poll_timer.stop()
+        if self._timeout_timer:
+            self._timeout_timer.stop()
+        self._is_polling = False
+        self.poll_status_label.setText("")
 
     def _setup_ui(self):
         """构建监控页面 UI"""
@@ -11426,58 +12580,70 @@ class MonitorPage(BasePage):
             card.setFrameShape(QFrame.StyledPanel)
             card.setFixedSize(95, 50)
             self._stat_cards.append(card)
-            
+
             layout = QVBoxLayout(card)
             layout.setContentsMargins(8, 4, 8, 4)
             layout.setSpacing(2)
-            
+
             # 数值行（带图标）
             value_row = QHBoxLayout()
             value_row.setSpacing(4)
-            
+
             icon_label = QLabel()
             icon_label.setPixmap(icon.icon().pixmap(12, 12))
             value_row.addWidget(icon_label)
-            
+
             value = StrongBodyLabel(value_text)
             value.setStyleSheet(f"color: {color}; font-size: 14px;")
             value_row.addWidget(value)
             value_row.addStretch()
             layout.addLayout(value_row)
-            
+
             # 标签
             label = CaptionLabel(label_text)
             label.setStyleSheet("font-size: 10px;")
             self._stat_labels.append(label)
             layout.addWidget(label)
-            
+
             return card, value
 
         # 可用率
-        card, self.availability_value = create_stat_card(FIF.ACCEPT, "可用率", "—", "#3fb950")
+        card, self.availability_value = create_stat_card(
+            FIF.ACCEPT, "可用率", "—", "#3fb950"
+        )
         stats_row.addWidget(card)
 
         # 异常数
-        card, self.error_count_value = create_stat_card(FIF.CANCEL, "异常", "0", "#f85149")
+        card, self.error_count_value = create_stat_card(
+            FIF.CANCEL, "异常", "0", "#f85149"
+        )
         stats_row.addWidget(card)
 
         # 对话延迟
-        card, self.chat_latency_value = create_stat_card(FIF.CHAT, "对话延迟", "—", "#58a6ff")
+        card, self.chat_latency_value = create_stat_card(
+            FIF.CHAT, "对话延迟", "—", "#58a6ff"
+        )
         stats_row.addWidget(card)
 
         # Ping 延迟
-        card, self.ping_latency_value = create_stat_card(FIF.WIFI, "Ping", "—", "#58a6ff")
+        card, self.ping_latency_value = create_stat_card(
+            FIF.WIFI, "Ping", "—", "#58a6ff"
+        )
         stats_row.addWidget(card)
 
         # 目标数
-        card, self.target_count_value = create_stat_card(FIF.TAG, "目标", "0", "#e6edf3")
+        card, self.target_count_value = create_stat_card(
+            FIF.TAG, "目标", "0", "#e6edf3"
+        )
         stats_row.addWidget(card)
 
         # 最近检测
-        card, self.last_checked_value = create_stat_card(FIF.HISTORY, "最近", "—", "#7d8590")
+        card, self.last_checked_value = create_stat_card(
+            FIF.HISTORY, "最近", "—", "#7d8590"
+        )
         card.setFixedSize(110, 50)
         stats_row.addWidget(card)
-        
+
         # 应用初始主题样式
         self._apply_stat_card_theme()
 
@@ -11489,11 +12655,12 @@ class MonitorPage(BasePage):
         self.manual_check_btn.clicked.connect(self._do_poll)
         stats_row.addWidget(self.manual_check_btn)
 
-        self.stop_monitor_btn = PushButton(FIF.PAUSE, "停止", wrapper)
-        self.stop_monitor_btn.setFixedSize(80, 32)
-        self.stop_monitor_btn.setToolTip("停止/恢复对话延迟测试")
-        self.stop_monitor_btn.clicked.connect(self._toggle_chat_test)
-        stats_row.addWidget(self.stop_monitor_btn)
+        # 启动/停止按钮 - 默认显示"启动"
+        self.monitor_toggle_btn = PushButton(FIF.PLAY, "启动", wrapper)
+        self.monitor_toggle_btn.setFixedSize(80, 32)
+        self.monitor_toggle_btn.setToolTip("启动/停止对话延迟自动检测")
+        self.monitor_toggle_btn.clicked.connect(self._toggle_chat_test)
+        stats_row.addWidget(self.monitor_toggle_btn)
 
         self.poll_status_label = CaptionLabel("", wrapper)
         self.poll_status_label.setStyleSheet("color: #f0883e; font-weight: bold;")
@@ -11882,10 +13049,10 @@ class MonitorPage(BasePage):
                 }
             """
             label_color = "#57606a"
-        
+
         for card in self._stat_cards:
             card.setStyleSheet(card_style)
-        
+
         for label in self._stat_labels:
             label.setStyleSheet(f"color: {label_color}; font-size: 10px;")
 
@@ -12225,6 +13392,1413 @@ def apply_bracket_match_highlight(text_edit: QTextEdit, is_dark: bool) -> None:
     text_edit.setExtraSelections(selections)
 
 
+# ==================== 语法高亮器 ====================
+class ConfigSyntaxHighlighter(QSyntaxHighlighter):
+    """配置文件语法高亮器 - 支持 JSON/TOML/ENV 格式"""
+
+    def __init__(self, parent=None, language: str = "json"):
+        super().__init__(parent)
+        self.language = language
+        self._setup_formats()
+        self._setup_rules()
+
+    def _setup_formats(self):
+        """设置高亮格式"""
+        # 检测暗色主题
+        is_dark = isDarkTheme()
+
+        # 字符串格式 (绿色)
+        self.string_format = QTextCharFormat()
+        self.string_format.setForeground(
+            QColor("#98C379") if is_dark else QColor("#50A14F")
+        )
+
+        # 数字格式 (橙色)
+        self.number_format = QTextCharFormat()
+        self.number_format.setForeground(
+            QColor("#D19A66") if is_dark else QColor("#986801")
+        )
+
+        # 关键字格式 (紫色) - true/false/null
+        self.keyword_format = QTextCharFormat()
+        self.keyword_format.setForeground(
+            QColor("#C678DD") if is_dark else QColor("#A626A4")
+        )
+
+        # 键名格式 (蓝色)
+        self.key_format = QTextCharFormat()
+        self.key_format.setForeground(
+            QColor("#61AFEF") if is_dark else QColor("#4078F2")
+        )
+
+        # 注释格式 (灰色)
+        self.comment_format = QTextCharFormat()
+        self.comment_format.setForeground(
+            QColor("#5C6370") if is_dark else QColor("#A0A1A7")
+        )
+        self.comment_format.setFontItalic(True)
+
+        # 括号格式 (黄色)
+        self.bracket_format = QTextCharFormat()
+        self.bracket_format.setForeground(
+            QColor("#E5C07B") if is_dark else QColor("#C18401")
+        )
+
+        # 等号/冒号格式 (白色/黑色)
+        self.operator_format = QTextCharFormat()
+        self.operator_format.setForeground(
+            QColor("#ABB2BF") if is_dark else QColor("#383A42")
+        )
+
+    def _setup_rules(self):
+        """设置高亮规则"""
+        self.rules = []
+
+        if self.language == "json":
+            # JSON 键名 "key":
+            self.rules.append((r'"[^"]*"\s*:', self.key_format))
+            # JSON 字符串值
+            self.rules.append((r':\s*"[^"]*"', self.string_format))
+            # 数字
+            self.rules.append((r"\b-?\d+\.?\d*\b", self.number_format))
+            # 关键字
+            self.rules.append((r"\b(true|false|null)\b", self.keyword_format))
+            # 括号
+            self.rules.append((r"[\[\]{}]", self.bracket_format))
+
+        elif self.language == "toml":
+            # TOML 注释
+            self.rules.append((r"#.*$", self.comment_format))
+            # TOML 节名 [section]
+            self.rules.append((r"\[[\w.]+\]", self.key_format))
+            # TOML 键名
+            self.rules.append((r"^[\w_]+\s*=", self.key_format))
+            # TOML 字符串
+            self.rules.append((r'"[^"]*"', self.string_format))
+            # 数字
+            self.rules.append((r"\b-?\d+\.?\d*\b", self.number_format))
+            # 关键字
+            self.rules.append((r"\b(true|false)\b", self.keyword_format))
+
+        elif self.language == "env":
+            # ENV 注释
+            self.rules.append((r"#.*$", self.comment_format))
+            # ENV 键名
+            self.rules.append((r"^[A-Z_][A-Z0-9_]*(?==)", self.key_format))
+            # ENV 值
+            self.rules.append((r"=.*$", self.string_format))
+
+    def highlightBlock(self, text: str):
+        """高亮文本块"""
+        for pattern, fmt in self.rules:
+            for match in re.finditer(pattern, text, re.MULTILINE):
+                start = match.start()
+                length = match.end() - start
+                self.setFormat(start, length, fmt)
+
+
+# ==================== CLI 导出页面 ====================
+class CLIExportPage(BasePage):
+    """CLI 工具导出页面 - 将 OpenCode 配置导出到 Claude Code、Codex CLI、Gemini CLI"""
+
+    def __init__(self, main_window, parent=None):
+        super().__init__("CLI 工具导出", parent)
+        self.main_window = main_window
+        self.export_manager = CLIExportManager()
+        self._selected_provider = None
+        self._selected_provider_name = None
+        # Claude 有 4 个模型字段
+        self._claude_models = {
+            "main": "",  # ANTHROPIC_MODEL
+            "haiku": "",  # ANTHROPIC_DEFAULT_HAIKU_MODEL
+            "sonnet": "",  # ANTHROPIC_DEFAULT_SONNET_MODEL
+            "opus": "",  # ANTHROPIC_DEFAULT_OPUS_MODEL
+        }
+        self._selected_models = {"claude": "", "codex": "", "gemini": ""}
+        self._cli_status = {}  # 缓存 CLI 状态
+        self._use_common_config = {"codex": False, "gemini": False}
+        self._common_config_snippets = {"codex": "", "gemini": ""}
+        self._highlighters = {}  # 语法高亮器缓存
+        self._setup_ui_v2()
+        # 延迟刷新 CLI 状态，避免在初始化时阻塞
+        QTimer.singleShot(100, self._refresh_cli_status)
+        # 连接配置变更信号
+        self.main_window.config_changed.connect(self._on_config_changed)
+
+    def _on_config_changed(self):
+        """配置变更时刷新页面"""
+        self._refresh_providers()
+        self._refresh_cli_status()
+        self._update_preview()
+
+    def _setup_ui_v2(self):
+        """设置 UI 布局 - 紧凑标签页设计"""
+        # ===== 顶部区域：标题 + Provider 选择 + CLI 状态 =====
+        top_card = self.add_card("")
+        top_layout = top_card.layout()
+
+        # 介绍文字
+        intro_label = CaptionLabel(
+            "将 OpenCode 中的 Provider 配置一键导出到 Claude Code / Codex CLI / Gemini CLI 使用",
+            top_card,
+        )
+        intro_label.setStyleSheet("color: #888; margin-bottom: 4px;")
+        top_layout.addWidget(intro_label)
+
+        # Provider 选择行 + CLI 状态
+        provider_row = QHBoxLayout()
+        provider_row.setSpacing(12)
+
+        provider_label = BodyLabel("Provider:", top_card)
+        provider_row.addWidget(provider_label)
+
+        self.provider_combo = ComboBox(top_card)
+        self.provider_combo.setFixedWidth(180)
+        self.provider_combo.setFixedHeight(32)
+        self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
+        provider_row.addWidget(self.provider_combo)
+
+        # 配置状态
+        self.config_status_label = BodyLabel("", top_card)
+        provider_row.addWidget(self.config_status_label)
+
+        self.fix_config_btn = PushButton(FIF.EDIT, "修复", top_card)
+        self.fix_config_btn.setFixedHeight(28)
+        self.fix_config_btn.clicked.connect(self._go_to_provider_edit)
+        self.fix_config_btn.setVisible(False)
+        provider_row.addWidget(self.fix_config_btn)
+
+        provider_row.addStretch()
+
+        # CLI 状态标签 (紧凑显示)
+        cli_label = CaptionLabel("CLI:", top_card)
+        provider_row.addWidget(cli_label)
+
+        self.claude_chip = QLabel("Claude ⏳", top_card)
+        self.claude_chip.setStyleSheet(
+            "padding: 2px 6px; border-radius: 8px; background: rgba(128,128,128,0.2); font-size: 11px;"
+        )
+        provider_row.addWidget(self.claude_chip)
+
+        self.codex_chip = QLabel("Codex ⏳", top_card)
+        self.codex_chip.setStyleSheet(
+            "padding: 2px 6px; border-radius: 8px; background: rgba(128,128,128,0.2); font-size: 11px;"
+        )
+        provider_row.addWidget(self.codex_chip)
+
+        self.gemini_chip = QLabel("Gemini ⏳", top_card)
+        self.gemini_chip.setStyleSheet(
+            "padding: 2px 6px; border-radius: 8px; background: rgba(128,128,128,0.2); font-size: 11px;"
+        )
+        provider_row.addWidget(self.gemini_chip)
+
+        refresh_btn = ToolButton(FIF.SYNC, top_card)
+        refresh_btn.setToolTip("刷新检测")
+        refresh_btn.clicked.connect(self._refresh_cli_status)
+        provider_row.addWidget(refresh_btn)
+
+        top_layout.addLayout(provider_row)
+
+        # ===== 主标签页：按 CLI 工具分组 =====
+        main_card = self.add_card("")
+        main_layout = main_card.layout()
+
+        # 主标签页切换
+        self.main_pivot = Pivot(main_card)
+        self.main_pivot.addItem(routeKey="claude", text="Claude Code")
+        self.main_pivot.addItem(routeKey="codex", text="Codex CLI")
+        self.main_pivot.addItem(routeKey="gemini", text="Gemini CLI")
+        self.main_pivot.setCurrentItem("claude")
+        self.main_pivot.currentItemChanged.connect(self._on_main_tab_changed)
+        main_layout.addWidget(self.main_pivot)
+
+        # 堆叠窗口
+        self.main_stack = QStackedWidget(main_card)
+
+        # Claude 页面
+        self.claude_tab = self._create_claude_tab_widget(main_card)
+        self.main_stack.addWidget(self.claude_tab)
+
+        # Codex 页面
+        self.codex_tab = self._create_codex_tab_widget(main_card)
+        self.main_stack.addWidget(self.codex_tab)
+
+        # Gemini 页面
+        self.gemini_tab = self._create_gemini_tab_widget(main_card)
+        self.main_stack.addWidget(self.gemini_tab)
+
+        main_layout.addWidget(self.main_stack, 1)
+
+        # ===== 底部操作栏 =====
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(12)
+
+        self.batch_export_btn = PrimaryPushButton(FIF.SEND, "一键导出全部", main_card)
+        self.batch_export_btn.clicked.connect(self._on_batch_export)
+        bottom_row.addWidget(self.batch_export_btn)
+
+        bottom_row.addStretch()
+
+        self.backup_info_label = CaptionLabel("最近备份: 无", main_card)
+        bottom_row.addWidget(self.backup_info_label)
+
+        view_backup_btn = PushButton(FIF.FOLDER, "查看备份", main_card)
+        view_backup_btn.clicked.connect(self._view_backups)
+        bottom_row.addWidget(view_backup_btn)
+
+        restore_btn = PushButton(FIF.HISTORY, "恢复备份", main_card)
+        restore_btn.clicked.connect(self._restore_backup)
+        bottom_row.addWidget(restore_btn)
+
+        main_layout.addLayout(bottom_row)
+
+        # 初始化数据
+        self._refresh_providers()
+
+    def _create_claude_tab_widget(self, parent) -> QWidget:
+        """创建 Claude Code 标签页"""
+        widget = QWidget(parent)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
+        # 模型配置区域 (紧凑)
+        model_frame = QFrame(widget)
+        model_frame.setStyleSheet(
+            "QFrame { background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 6px; }"
+        )
+        model_layout = QVBoxLayout(model_frame)
+        model_layout.setContentsMargins(12, 8, 12, 8)
+        model_layout.setSpacing(6)
+
+        model_title = StrongBodyLabel(
+            "导出配置 (仅用于导出，不修改 OpenCode 配置)", model_frame
+        )
+        model_layout.addWidget(model_title)
+
+        # Base URL 行
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
+        url_row.addWidget(CaptionLabel("Base URL:", model_frame))
+        self.claude_base_url_edit = LineEdit(model_frame)
+        self.claude_base_url_edit.setPlaceholderText("从 Provider 配置获取")
+        self.claude_base_url_edit.setFixedHeight(28)
+        self.claude_base_url_edit.textChanged.connect(lambda: self._update_preview())
+        url_row.addWidget(self.claude_base_url_edit, 1)
+        model_layout.addLayout(url_row)
+
+        # 可编辑下拉框样式
+        editable_combo_style = """
+            QComboBox {
+                background-color: rgba(128, 128, 128, 0.1);
+                border: 1px solid rgba(128, 128, 128, 0.2);
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+                color: #e6edf3;
+            }
+            QComboBox:hover {
+                border-color: rgba(128, 128, 128, 0.4);
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                border: 1px solid rgba(128, 128, 128, 0.3);
+                selection-background-color: rgba(33, 150, 243, 0.3);
+                color: #e6edf3;
+            }
+            QComboBox QAbstractItemView::item {
+                color: #e6edf3;
+                padding: 4px 8px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: rgba(128, 128, 128, 0.2);
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: rgba(33, 150, 243, 0.3);
+            }
+        """
+
+        # 2x2 网格 - 模型选择 (使用原生 QComboBox 支持编辑)
+        grid = QGridLayout()
+        grid.setSpacing(8)
+
+        grid.addWidget(CaptionLabel("主模型:", model_frame), 0, 0)
+        self.claude_main_model_combo = QNativeComboBox(model_frame)
+        self.claude_main_model_combo.setFixedSize(200, 30)
+        self.claude_main_model_combo.setEditable(True)
+        self.claude_main_model_combo.setStyleSheet(editable_combo_style)
+        self.claude_main_model_combo.currentTextChanged.connect(
+            lambda t: self._on_claude_model_changed("main", t)
+        )
+        grid.addWidget(self.claude_main_model_combo, 0, 1)
+
+        grid.addWidget(CaptionLabel("Haiku:", model_frame), 0, 2)
+        self.claude_haiku_combo = QNativeComboBox(model_frame)
+        self.claude_haiku_combo.setFixedSize(200, 30)
+        self.claude_haiku_combo.setEditable(True)
+        self.claude_haiku_combo.setStyleSheet(editable_combo_style)
+        self.claude_haiku_combo.currentTextChanged.connect(
+            lambda t: self._on_claude_model_changed("haiku", t)
+        )
+        grid.addWidget(self.claude_haiku_combo, 0, 3)
+
+        grid.addWidget(CaptionLabel("Sonnet:", model_frame), 1, 0)
+        self.claude_sonnet_combo = QNativeComboBox(model_frame)
+        self.claude_sonnet_combo.setFixedSize(200, 30)
+        self.claude_sonnet_combo.setEditable(True)
+        self.claude_sonnet_combo.setStyleSheet(editable_combo_style)
+        self.claude_sonnet_combo.currentTextChanged.connect(
+            lambda t: self._on_claude_model_changed("sonnet", t)
+        )
+        grid.addWidget(self.claude_sonnet_combo, 1, 1)
+
+        grid.addWidget(CaptionLabel("Opus:", model_frame), 1, 2)
+        self.claude_opus_combo = QNativeComboBox(model_frame)
+        self.claude_opus_combo.setFixedSize(200, 30)
+        self.claude_opus_combo.setEditable(True)
+        self.claude_opus_combo.setStyleSheet(editable_combo_style)
+        self.claude_opus_combo.currentTextChanged.connect(
+            lambda t: self._on_claude_model_changed("opus", t)
+        )
+        grid.addWidget(self.claude_opus_combo, 1, 3)
+
+        grid.setColumnStretch(4, 1)
+        model_layout.addLayout(grid)
+
+        hint = CaptionLabel(
+            "💡 可下拉选择或直接输入自定义模型名称，留空使用默认", model_frame
+        )
+        hint.setStyleSheet("color: #666;")
+        model_layout.addWidget(hint)
+
+        layout.addWidget(model_frame)
+
+        # 配置预览
+        preview_frame = QFrame(widget)
+        preview_frame.setStyleSheet(
+            "QFrame { background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 6px; }"
+        )
+        preview_layout = QVBoxLayout(preview_frame)
+        preview_layout.setContentsMargins(12, 8, 12, 8)
+        preview_layout.setSpacing(4)
+
+        header = QHBoxLayout()
+        header.addWidget(StrongBodyLabel("配置预览 - settings.json", preview_frame))
+        header.addStretch()
+
+        format_btn = ToolButton(FIF.ALIGNMENT, preview_frame)
+        format_btn.setToolTip("格式化")
+        format_btn.clicked.connect(lambda: self._format_preview_for("claude"))
+        header.addWidget(format_btn)
+
+        export_btn = PrimaryPushButton(FIF.SEND, "导出", preview_frame)
+        export_btn.setFixedWidth(80)
+        export_btn.clicked.connect(lambda: self._on_single_export("claude"))
+        header.addWidget(export_btn)
+
+        preview_layout.addLayout(header)
+
+        self.claude_preview_text = PlainTextEdit(preview_frame)
+        self.claude_preview_text.setReadOnly(True)
+        self.claude_preview_text.setStyleSheet(
+            "PlainTextEdit { font-family: Consolas, Monaco, monospace; font-size: 11px; background: rgba(20,20,20,0.9); color: #ABB2BF; border: none; border-radius: 4px; padding: 6px; }"
+        )
+        preview_layout.addWidget(self.claude_preview_text, 1)
+
+        self._highlighters["claude"] = ConfigSyntaxHighlighter(
+            self.claude_preview_text.document(), "json"
+        )
+
+        layout.addWidget(preview_frame, 1)
+        return widget
+
+    def _create_codex_tab_widget(self, parent) -> QWidget:
+        """创建 Codex CLI 标签页"""
+        widget = QWidget(parent)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
+        # 模型配置
+        model_frame = QFrame(widget)
+        model_frame.setStyleSheet(
+            "QFrame { background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 6px; }"
+        )
+        model_layout = QVBoxLayout(model_frame)
+        model_layout.setContentsMargins(12, 8, 12, 8)
+        model_layout.setSpacing(6)
+
+        model_title = StrongBodyLabel(
+            "导出配置 (仅用于导出，不修改 OpenCode 配置)", model_frame
+        )
+        model_layout.addWidget(model_title)
+
+        # Base URL 行
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
+        url_row.addWidget(CaptionLabel("Base URL:", model_frame))
+        self.codex_base_url_edit = LineEdit(model_frame)
+        self.codex_base_url_edit.setPlaceholderText("从 Provider 配置获取")
+        self.codex_base_url_edit.setFixedHeight(28)
+        self.codex_base_url_edit.textChanged.connect(lambda: self._update_preview())
+        url_row.addWidget(self.codex_base_url_edit, 1)
+        model_layout.addLayout(url_row)
+
+        # 可编辑下拉框样式
+        editable_combo_style = """
+            QComboBox {
+                background-color: rgba(128, 128, 128, 0.1);
+                border: 1px solid rgba(128, 128, 128, 0.2);
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+                color: #e6edf3;
+            }
+            QComboBox:hover {
+                border-color: rgba(128, 128, 128, 0.4);
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                border: 1px solid rgba(128, 128, 128, 0.3);
+                selection-background-color: rgba(33, 150, 243, 0.3);
+                color: #e6edf3;
+            }
+            QComboBox QAbstractItemView::item {
+                color: #e6edf3;
+                padding: 4px 8px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: rgba(128, 128, 128, 0.2);
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: rgba(33, 150, 243, 0.3);
+            }
+        """
+
+        # 模型选择行
+        model_row = QHBoxLayout()
+        model_row.setSpacing(12)
+
+        model_row.addWidget(CaptionLabel("模型:", model_frame))
+        self.codex_model_combo = QNativeComboBox(model_frame)
+        self.codex_model_combo.setFixedSize(200, 30)
+        self.codex_model_combo.setEditable(True)
+        self.codex_model_combo.setStyleSheet(editable_combo_style)
+        self.codex_model_combo.currentTextChanged.connect(
+            lambda t: self._on_model_changed("codex", t)
+        )
+        model_row.addWidget(self.codex_model_combo)
+
+        hint = CaptionLabel("💡 可下拉选择或直接输入", model_frame)
+        hint.setStyleSheet("color: #666;")
+        model_row.addWidget(hint)
+
+        model_row.addStretch()
+
+        self.codex_common_check = CheckBox("写入通用配置", model_frame)
+        self.codex_common_check.stateChanged.connect(
+            lambda s: self._on_common_config_toggle("codex", s == Qt.Checked)
+        )
+        model_row.addWidget(self.codex_common_check)
+
+        edit_btn = HyperlinkButton("", "编辑", model_frame)
+        edit_btn.clicked.connect(lambda: self._edit_common_config("codex"))
+        model_row.addWidget(edit_btn)
+
+        model_layout.addLayout(model_row)
+        layout.addWidget(model_frame)
+
+        # 配置预览 (双文件)
+        preview_frame = QFrame(widget)
+        preview_frame.setStyleSheet(
+            "QFrame { background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 6px; }"
+        )
+        preview_layout = QVBoxLayout(preview_frame)
+        preview_layout.setContentsMargins(12, 8, 12, 8)
+        preview_layout.setSpacing(4)
+
+        header = QHBoxLayout()
+        header.addWidget(StrongBodyLabel("配置预览", preview_frame))
+        header.addStretch()
+
+        format_btn = ToolButton(FIF.ALIGNMENT, preview_frame)
+        format_btn.setToolTip("格式化")
+        format_btn.clicked.connect(lambda: self._format_preview_for("codex"))
+        header.addWidget(format_btn)
+
+        export_btn = PrimaryPushButton(FIF.SEND, "导出", preview_frame)
+        export_btn.setFixedWidth(80)
+        export_btn.clicked.connect(lambda: self._on_single_export("codex"))
+        header.addWidget(export_btn)
+
+        preview_layout.addLayout(header)
+
+        # 子标签页
+        self.codex_sub_pivot = Pivot(preview_frame)
+        self.codex_sub_pivot.addItem(routeKey="auth", text="auth.json")
+        self.codex_sub_pivot.addItem(routeKey="config", text="config.toml")
+        self.codex_sub_pivot.setCurrentItem("auth")
+        preview_layout.addWidget(self.codex_sub_pivot)
+
+        self.codex_sub_stack = QStackedWidget(preview_frame)
+
+        self.codex_auth_text = PlainTextEdit(preview_frame)
+        self.codex_auth_text.setReadOnly(True)
+        self.codex_auth_text.setStyleSheet(
+            "PlainTextEdit { font-family: Consolas, Monaco, monospace; font-size: 11px; background: rgba(20,20,20,0.9); color: #ABB2BF; border: none; border-radius: 4px; padding: 6px; }"
+        )
+        self.codex_sub_stack.addWidget(self.codex_auth_text)
+
+        self.codex_config_text = PlainTextEdit(preview_frame)
+        self.codex_config_text.setReadOnly(True)
+        self.codex_config_text.setStyleSheet(
+            "PlainTextEdit { font-family: Consolas, Monaco, monospace; font-size: 11px; background: rgba(20,20,20,0.9); color: #ABB2BF; border: none; border-radius: 4px; padding: 6px; }"
+        )
+        self.codex_sub_stack.addWidget(self.codex_config_text)
+
+        self.codex_sub_pivot.currentItemChanged.connect(
+            lambda k: self.codex_sub_stack.setCurrentIndex(0 if k == "auth" else 1)
+        )
+        preview_layout.addWidget(self.codex_sub_stack, 1)
+
+        self._highlighters["codex_auth"] = ConfigSyntaxHighlighter(
+            self.codex_auth_text.document(), "json"
+        )
+        self._highlighters["codex_config"] = ConfigSyntaxHighlighter(
+            self.codex_config_text.document(), "toml"
+        )
+
+        layout.addWidget(preview_frame, 1)
+        return widget
+
+    def _create_gemini_tab_widget(self, parent) -> QWidget:
+        """创建 Gemini CLI 标签页"""
+        widget = QWidget(parent)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
+        # 模型配置
+        model_frame = QFrame(widget)
+        model_frame.setStyleSheet(
+            "QFrame { background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 6px; }"
+        )
+        model_layout = QVBoxLayout(model_frame)
+        model_layout.setContentsMargins(12, 8, 12, 8)
+        model_layout.setSpacing(6)
+
+        model_title = StrongBodyLabel(
+            "导出配置 (仅用于导出，不修改 OpenCode 配置)", model_frame
+        )
+        model_layout.addWidget(model_title)
+
+        # Base URL 行
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
+        url_row.addWidget(CaptionLabel("Base URL:", model_frame))
+        self.gemini_base_url_edit = LineEdit(model_frame)
+        self.gemini_base_url_edit.setPlaceholderText("从 Provider 配置获取")
+        self.gemini_base_url_edit.setFixedHeight(28)
+        self.gemini_base_url_edit.textChanged.connect(lambda: self._update_preview())
+        url_row.addWidget(self.gemini_base_url_edit, 1)
+        model_layout.addLayout(url_row)
+
+        # 可编辑下拉框样式
+        editable_combo_style = """
+            QComboBox {
+                background-color: rgba(128, 128, 128, 0.1);
+                border: 1px solid rgba(128, 128, 128, 0.2);
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+                color: #e6edf3;
+            }
+            QComboBox:hover {
+                border-color: rgba(128, 128, 128, 0.4);
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2d2d2d;
+                border: 1px solid rgba(128, 128, 128, 0.3);
+                selection-background-color: rgba(33, 150, 243, 0.3);
+                color: #e6edf3;
+            }
+            QComboBox QAbstractItemView::item {
+                color: #e6edf3;
+                padding: 4px 8px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: rgba(128, 128, 128, 0.2);
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: rgba(33, 150, 243, 0.3);
+            }
+        """
+
+        # 模型选择行
+        model_row = QHBoxLayout()
+        model_row.setSpacing(12)
+
+        model_row.addWidget(CaptionLabel("模型:", model_frame))
+        self.gemini_model_combo = QNativeComboBox(model_frame)
+        self.gemini_model_combo.setFixedSize(200, 30)
+        self.gemini_model_combo.setEditable(True)
+        self.gemini_model_combo.setStyleSheet(editable_combo_style)
+        self.gemini_model_combo.currentTextChanged.connect(
+            lambda t: self._on_model_changed("gemini", t)
+        )
+        model_row.addWidget(self.gemini_model_combo)
+
+        hint = CaptionLabel("💡 可下拉选择或直接输入", model_frame)
+        hint.setStyleSheet("color: #666;")
+        model_row.addWidget(hint)
+
+        model_row.addStretch()
+
+        self.gemini_common_check = CheckBox("写入通用配置", model_frame)
+        self.gemini_common_check.stateChanged.connect(
+            lambda s: self._on_common_config_toggle("gemini", s == Qt.Checked)
+        )
+        model_row.addWidget(self.gemini_common_check)
+
+        edit_btn = HyperlinkButton("", "编辑", model_frame)
+        edit_btn.clicked.connect(lambda: self._edit_common_config("gemini"))
+        model_row.addWidget(edit_btn)
+
+        model_layout.addLayout(model_row)
+        layout.addWidget(model_frame)
+
+        # 配置预览 (双文件)
+        preview_frame = QFrame(widget)
+        preview_frame.setStyleSheet(
+            "QFrame { background: rgba(128,128,128,0.05); border: 1px solid rgba(128,128,128,0.1); border-radius: 6px; }"
+        )
+        preview_layout = QVBoxLayout(preview_frame)
+        preview_layout.setContentsMargins(12, 8, 12, 8)
+        preview_layout.setSpacing(4)
+
+        header = QHBoxLayout()
+        header.addWidget(StrongBodyLabel("配置预览", preview_frame))
+        header.addStretch()
+
+        format_btn = ToolButton(FIF.ALIGNMENT, preview_frame)
+        format_btn.setToolTip("格式化")
+        format_btn.clicked.connect(lambda: self._format_preview_for("gemini"))
+        header.addWidget(format_btn)
+
+        export_btn = PrimaryPushButton(FIF.SEND, "导出", preview_frame)
+        export_btn.setFixedWidth(80)
+        export_btn.clicked.connect(lambda: self._on_single_export("gemini"))
+        header.addWidget(export_btn)
+
+        preview_layout.addLayout(header)
+
+        # 子标签页
+        self.gemini_sub_pivot = Pivot(preview_frame)
+        self.gemini_sub_pivot.addItem(routeKey="env", text=".env")
+        self.gemini_sub_pivot.addItem(routeKey="settings", text="settings.json")
+        self.gemini_sub_pivot.setCurrentItem("env")
+        preview_layout.addWidget(self.gemini_sub_pivot)
+
+        self.gemini_sub_stack = QStackedWidget(preview_frame)
+
+        self.gemini_env_text = PlainTextEdit(preview_frame)
+        self.gemini_env_text.setReadOnly(True)
+        self.gemini_env_text.setStyleSheet(
+            "PlainTextEdit { font-family: Consolas, Monaco, monospace; font-size: 11px; background: rgba(20,20,20,0.9); color: #ABB2BF; border: none; border-radius: 4px; padding: 6px; }"
+        )
+        self.gemini_sub_stack.addWidget(self.gemini_env_text)
+
+        self.gemini_settings_text = PlainTextEdit(preview_frame)
+        self.gemini_settings_text.setReadOnly(True)
+        self.gemini_settings_text.setStyleSheet(
+            "PlainTextEdit { font-family: Consolas, Monaco, monospace; font-size: 11px; background: rgba(20,20,20,0.9); color: #ABB2BF; border: none; border-radius: 4px; padding: 6px; }"
+        )
+        self.gemini_sub_stack.addWidget(self.gemini_settings_text)
+
+        self.gemini_sub_pivot.currentItemChanged.connect(
+            lambda k: self.gemini_sub_stack.setCurrentIndex(0 if k == "env" else 1)
+        )
+        preview_layout.addWidget(self.gemini_sub_stack, 1)
+
+        self._highlighters["gemini_env"] = ConfigSyntaxHighlighter(
+            self.gemini_env_text.document(), "env"
+        )
+        self._highlighters["gemini_settings"] = ConfigSyntaxHighlighter(
+            self.gemini_settings_text.document(), "json"
+        )
+
+        layout.addWidget(preview_frame, 1)
+        return widget
+
+    def _on_main_tab_changed(self, route_key: str):
+        """主标签页切换"""
+        tab_index = {"claude": 0, "codex": 1, "gemini": 2}.get(route_key, 0)
+        self.main_stack.setCurrentIndex(tab_index)
+        self._update_preview()
+
+    def _format_preview_for(self, cli_type: str):
+        """格式化指定 CLI 的预览"""
+        if cli_type == "claude":
+            text = self.claude_preview_text.toPlainText()
+            try:
+                data = json.loads(text)
+                self.claude_preview_text.setPlainText(
+                    json.dumps(data, indent=2, ensure_ascii=False)
+                )
+            except:
+                pass
+        elif cli_type == "codex":
+            text = self.codex_auth_text.toPlainText()
+            try:
+                data = json.loads(text)
+                self.codex_auth_text.setPlainText(
+                    json.dumps(data, indent=2, ensure_ascii=False)
+                )
+            except:
+                pass
+        elif cli_type == "gemini":
+            text = self.gemini_settings_text.toPlainText()
+            try:
+                data = json.loads(text)
+                self.gemini_settings_text.setPlainText(
+                    json.dumps(data, indent=2, ensure_ascii=False)
+                )
+            except:
+                pass
+
+    def _refresh_providers(self):
+        """刷新 Provider 列表"""
+        self.provider_combo.clear()
+        providers = self.main_window.opencode_config.get("provider", {})
+
+        if not providers:
+            self.provider_combo.addItem("(无可用 Provider)")
+            return
+
+        for name in providers.keys():
+            self.provider_combo.addItem(name)
+
+        # 选择第一个
+        if self.provider_combo.count() > 0:
+            self.provider_combo.setCurrentIndex(0)
+
+    def _on_provider_changed(self, provider_name: str):
+        """Provider 选择变更"""
+        if not provider_name or provider_name == "(无可用 Provider)":
+            self._selected_provider = None
+            self._selected_provider_name = None
+            self._update_config_status(None)
+            self._update_models([])
+            # 清空 base_url 输入框
+            self.claude_base_url_edit.setText("")
+            self.codex_base_url_edit.setText("")
+            self.gemini_base_url_edit.setText("")
+            return
+
+        # 显示检测中状态
+        self.config_status_label.setText("⏳ 配置检测中...")
+        self.config_status_label.setStyleSheet("color: #FFA726; font-weight: bold;")
+        self.fix_config_btn.setVisible(False)
+        # 移除 processEvents 调用，避免阻塞
+        # QApplication.processEvents()
+
+        providers = self.main_window.opencode_config.get("provider", {})
+        provider = providers.get(provider_name, {})
+        self._selected_provider = provider
+        self._selected_provider_name = provider_name
+
+        # 更新 base_url 输入框 - 从 Provider 配置获取
+        base_url = provider.get("baseURL", "") or provider.get("options", {}).get(
+            "baseURL", ""
+        )
+        self.claude_base_url_edit.setText(base_url)
+        self.codex_base_url_edit.setText(base_url)
+        self.gemini_base_url_edit.setText(base_url)
+
+        # 延迟更新配置状态（模拟检测过程）
+        QTimer.singleShot(300, lambda: self._update_config_status(provider))
+
+        # 更新 Model 列表 - 从 provider.models 中获取
+        models = provider.get("models", {})
+        model_list = []
+        for model_id, model_config in models.items():
+            model_name = model_config.get("name", model_id)
+            model_list.append((model_id, model_name))
+
+        self._update_models(model_list)
+        self._update_preview()
+
+    def _update_config_status(self, provider: Optional[Dict]):
+        """更新配置完整性状态"""
+        if provider is None:
+            self.config_status_label.setText("")
+            self.config_status_label.setStyleSheet("")
+            self.fix_config_btn.setVisible(False)
+            return
+
+        # 验证 Provider 配置
+        result = self.export_manager.validate_provider(provider)
+
+        if result.valid:
+            self.config_status_label.setText("✓ 配置完整")
+            self.config_status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+            self.fix_config_btn.setVisible(False)
+        else:
+            error_text = "✗ " + ", ".join(result.errors[:2])
+            self.config_status_label.setText(error_text)
+            self.config_status_label.setStyleSheet("color: #F44336; font-weight: bold;")
+            self.fix_config_btn.setVisible(True)
+
+    def _update_models(self, model_list: List[Tuple[str, str]]):
+        """更新所有 Model 下拉框"""
+        # 更新 Claude 的 4 个模型下拉框
+        for combo in [
+            self.claude_main_model_combo,
+            self.claude_haiku_combo,
+            self.claude_sonnet_combo,
+            self.claude_opus_combo,
+        ]:
+            combo.clear()
+            combo.addItem("(留空使用默认)", "")
+            for model_id, model_name in model_list:
+                display_text = model_name if model_name != model_id else model_id
+                combo.addItem(display_text, model_id)
+
+        # 更新 Codex 和 Gemini 的模型下拉框
+        for combo in [self.codex_model_combo, self.gemini_model_combo]:
+            combo.clear()
+            if not model_list:
+                combo.addItem("(无可用模型)", "")
+            else:
+                for model_id, model_name in model_list:
+                    display_text = model_name if model_name != model_id else model_id
+                    combo.addItem(display_text, model_id)
+
+        # 设置默认选择
+        if self.codex_model_combo.count() > 0:
+            self.codex_model_combo.setCurrentIndex(0)
+        if self.gemini_model_combo.count() > 0:
+            self.gemini_model_combo.setCurrentIndex(0)
+
+    def _on_claude_model_changed(self, field: str, text: str):
+        """Claude 模型选择变更 - 支持自定义输入"""
+        # 直接更新预览，使用 ComboBox 的当前文本
+        self._update_preview()
+
+    def _on_model_changed(self, cli_type: str, text: str):
+        """Codex/Gemini Model 选择变更 - 支持自定义输入"""
+        # 直接更新预览，使用 ComboBox 的当前文本
+        self._update_preview()
+
+    def _refresh_cli_status(self):
+        """刷新 CLI 工具检测状态"""
+        # 先显示检测中状态
+        for cli_type, chip in [
+            ("claude", self.claude_chip),
+            ("codex", self.codex_chip),
+            ("gemini", self.gemini_chip),
+        ]:
+            chip.setText(f"{cli_type.capitalize()} ⏳")
+            chip.setStyleSheet(
+                "padding: 2px 6px; border-radius: 8px; background: rgba(255,167,38,0.3); font-size: 11px; color: #FFA726;"
+            )
+
+        # 执行检测
+        self._cli_status = self.export_manager.detect_cli_tools()
+
+        # 更新状态显示
+        chip_map = {
+            "claude": self.claude_chip,
+            "codex": self.codex_chip,
+            "gemini": self.gemini_chip,
+        }
+        for cli_type, status in self._cli_status.items():
+            chip = chip_map.get(cli_type)
+            if chip:
+                if status.installed:
+                    chip.setText(f"{cli_type.capitalize()} ✓")
+                    chip.setStyleSheet(
+                        "padding: 2px 6px; border-radius: 8px; background: rgba(76,175,80,0.3); font-size: 11px; color: #4CAF50;"
+                    )
+                else:
+                    chip.setText(f"{cli_type.capitalize()} ✗")
+                    chip.setStyleSheet(
+                        "padding: 2px 6px; border-radius: 8px; background: rgba(158,158,158,0.3); font-size: 11px; color: #9E9E9E;"
+                    )
+
+        # 更新备份信息
+        self._update_backup_info()
+
+    def _update_backup_info(self):
+        """更新备份信息显示"""
+        all_backups = []
+        for cli_type in ["claude", "codex", "gemini"]:
+            backups = self.export_manager.backup_manager.list_backups(cli_type)
+            all_backups.extend(backups)
+
+        if all_backups:
+            # 按时间排序，取最新的
+            all_backups.sort(key=lambda x: x.created_at, reverse=True)
+            latest = all_backups[0]
+            time_str = latest.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            self.backup_info_label.setText(f"最近备份: {time_str} ({latest.cli_type})")
+        else:
+            self.backup_info_label.setText("最近备份: 无")
+
+    def _update_preview(self):
+        """更新配置预览"""
+        if self._selected_provider is None:
+            # 清空所有预览
+            self.claude_preview_text.setPlainText("请先选择 Provider")
+            self.codex_auth_text.setPlainText("请先选择 Provider")
+            self.codex_config_text.setPlainText("请先选择 Provider")
+            self.gemini_env_text.setPlainText("请先选择 Provider")
+            self.gemini_settings_text.setPlainText("请先选择 Provider")
+            return
+
+        try:
+            generator = self.export_manager.config_generator
+
+            # 创建临时 provider 副本，使用用户输入的 base_url
+            claude_provider = dict(self._selected_provider)
+            claude_base_url = self.claude_base_url_edit.text().strip()
+            if claude_base_url:
+                claude_provider["baseURL"] = claude_base_url
+
+            codex_provider = dict(self._selected_provider)
+            codex_base_url = self.codex_base_url_edit.text().strip()
+            if codex_base_url:
+                codex_provider["baseURL"] = codex_base_url
+
+            gemini_provider = dict(self._selected_provider)
+            gemini_base_url = self.gemini_base_url_edit.text().strip()
+            if gemini_base_url:
+                gemini_provider["baseURL"] = gemini_base_url
+
+            # 获取用户输入的模型（支持自定义输入）
+            # 如果是"(留空使用默认)"则视为空字符串
+            DEFAULT_PLACEHOLDER = "(留空使用默认)"
+            claude_main_model = self.claude_main_model_combo.currentText().strip()
+            if claude_main_model == DEFAULT_PLACEHOLDER:
+                claude_main_model = ""
+            claude_haiku_model = self.claude_haiku_combo.currentText().strip()
+            if claude_haiku_model == DEFAULT_PLACEHOLDER:
+                claude_haiku_model = ""
+            claude_sonnet_model = self.claude_sonnet_combo.currentText().strip()
+            if claude_sonnet_model == DEFAULT_PLACEHOLDER:
+                claude_sonnet_model = ""
+            claude_opus_model = self.claude_opus_combo.currentText().strip()
+            if claude_opus_model == DEFAULT_PLACEHOLDER:
+                claude_opus_model = ""
+
+            # 更新 Claude 预览
+            claude_config = generator.generate_claude_config(
+                claude_provider, claude_main_model if claude_main_model else None
+            )
+            # 添加额外的模型映射（仅当有值时才添加）
+            if claude_haiku_model:
+                claude_config["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = (
+                    claude_haiku_model
+                )
+            if claude_sonnet_model:
+                claude_config["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"] = (
+                    claude_sonnet_model
+                )
+            if claude_opus_model:
+                claude_config["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"] = claude_opus_model
+
+            claude_preview = json.dumps(claude_config, indent=2, ensure_ascii=False)
+            self.claude_preview_text.setPlainText(claude_preview)
+
+            # 获取 Codex 模型（支持自定义输入）
+            codex_model = self.codex_model_combo.currentText().strip()
+
+            # 更新 Codex 预览
+            auth = generator.generate_codex_auth(codex_provider)
+            config_toml = generator.generate_codex_config(codex_provider, codex_model)
+            self.codex_auth_text.setPlainText(
+                json.dumps(auth, indent=2, ensure_ascii=False)
+            )
+            self.codex_config_text.setPlainText(config_toml)
+
+            # 获取 Gemini 模型（支持自定义输入）
+            gemini_model = self.gemini_model_combo.currentText().strip()
+
+            # 更新 Gemini 预览
+            env_map = generator.generate_gemini_env(gemini_provider, gemini_model)
+            settings = generator.generate_gemini_settings()
+            env_content = "\n".join(f"{k}={v}" for k, v in env_map.items())
+            self.gemini_env_text.setPlainText(env_content)
+            self.gemini_settings_text.setPlainText(
+                json.dumps(settings, indent=2, ensure_ascii=False)
+            )
+
+        except Exception as e:
+            error_msg = f"生成预览失败: {e}"
+            self.claude_preview_text.setPlainText(error_msg)
+            self.codex_auth_text.setPlainText(error_msg)
+            self.codex_config_text.setPlainText(error_msg)
+            self.gemini_env_text.setPlainText(error_msg)
+            self.gemini_settings_text.setPlainText(error_msg)
+
+    def _on_common_config_toggle(self, cli_type: str, checked: bool):
+        """通用配置开关切换"""
+        self._use_common_config[cli_type] = checked
+
+    def _edit_common_config(self, cli_type: str):
+        """编辑通用配置"""
+        dialog = CommonConfigEditDialog(
+            cli_type, self._common_config_snippets.get(cli_type, ""), self
+        )
+        if dialog.exec_() == QDialog.Accepted:
+            self._common_config_snippets[cli_type] = dialog.get_config()
+            InfoBar.success(
+                title="保存成功", content="通用配置已更新", parent=self, duration=2000
+            )
+
+    def _on_single_export(self, cli_type: str):
+        """单个 CLI 工具导出"""
+        if self._selected_provider is None:
+            self.show_error("导出失败", "请先选择 Provider")
+            return
+
+        # 验证配置
+        result = self.export_manager.validate_provider(self._selected_provider)
+        if not result.valid:
+            self.show_error("配置不完整", "\n".join(result.errors))
+            return
+
+        # 创建临时 provider 副本，使用用户输入的 base_url
+        export_provider = dict(self._selected_provider)
+
+        if cli_type == "claude":
+            base_url = self.claude_base_url_edit.text().strip()
+            model = self.claude_main_model_combo.currentText().strip()
+        elif cli_type == "codex":
+            base_url = self.codex_base_url_edit.text().strip()
+            model = self.codex_model_combo.currentText().strip()
+        elif cli_type == "gemini":
+            base_url = self.gemini_base_url_edit.text().strip()
+            model = self.gemini_model_combo.currentText().strip()
+        else:
+            self.show_error("导出失败", f"未知的 CLI 类型: {cli_type}")
+            return
+
+        if base_url:
+            export_provider["baseURL"] = base_url
+
+        try:
+            if cli_type == "claude":
+                export_result = self.export_manager.export_to_claude(
+                    export_provider, model
+                )
+            elif cli_type == "codex":
+                export_result = self.export_manager.export_to_codex(
+                    export_provider, model
+                )
+            elif cli_type == "gemini":
+                export_result = self.export_manager.export_to_gemini(
+                    export_provider, model
+                )
+
+            if export_result.success:
+                files_str = ", ".join(str(f.name) for f in export_result.files_written)
+                self.show_success(
+                    "导出成功", f"已导出到 {cli_type.upper()}: {files_str}"
+                )
+                self._update_backup_info()
+            else:
+                self.show_error("导出失败", export_result.error_message or "未知错误")
+                # 尝试恢复备份
+                if export_result.backup_path:
+                    self.export_manager.backup_manager.restore_backup(
+                        export_result.backup_path, cli_type
+                    )
+                    self.show_warning("已恢复", "已自动恢复原配置")
+        except Exception as e:
+            self.show_error("导出失败", str(e))
+
+    def _on_batch_export(self):
+        """批量导出"""
+        if self._selected_provider is None:
+            self.show_error("导出失败", "请先选择 Provider")
+            return
+
+        # 验证配置
+        result = self.export_manager.validate_provider(self._selected_provider)
+        if not result.valid:
+            self.show_error("配置不完整", "\n".join(result.errors))
+            return
+
+        # 获取已安装的 CLI 工具
+        cli_status = self.export_manager.detect_cli_tools()
+        targets = [
+            cli_type for cli_type, status in cli_status.items() if status.installed
+        ]
+
+        if not targets:
+            self.show_warning("无可用目标", "没有检测到已安装的 CLI 工具")
+            return
+
+        # 为每个 CLI 工具创建带有用户输入 base_url 的 provider 副本
+        # 并获取用户输入的模型
+        models = {
+            "claude": self.claude_main_model_combo.currentText().strip(),
+            "codex": self.codex_model_combo.currentText().strip(),
+            "gemini": self.gemini_model_combo.currentText().strip(),
+        }
+
+        # 执行批量导出 - 逐个导出以使用各自的 base_url
+        results = []
+        for cli_type in targets:
+            export_provider = dict(self._selected_provider)
+            if cli_type == "claude":
+                base_url = self.claude_base_url_edit.text().strip()
+            elif cli_type == "codex":
+                base_url = self.codex_base_url_edit.text().strip()
+            elif cli_type == "gemini":
+                base_url = self.gemini_base_url_edit.text().strip()
+            else:
+                base_url = ""
+
+            if base_url:
+                export_provider["baseURL"] = base_url
+
+            try:
+                if cli_type == "claude":
+                    export_result = self.export_manager.export_to_claude(
+                        export_provider, models.get("claude", "")
+                    )
+                elif cli_type == "codex":
+                    export_result = self.export_manager.export_to_codex(
+                        export_provider, models.get("codex", "")
+                    )
+                elif cli_type == "gemini":
+                    export_result = self.export_manager.export_to_gemini(
+                        export_provider, models.get("gemini", "")
+                    )
+                else:
+                    continue
+                results.append(export_result)
+            except Exception as e:
+                results.append(ExportResult.fail(cli_type, str(e)))
+
+        # 统计结果
+        successful = sum(1 for r in results if r.success)
+        failed = len(results) - successful
+
+        # 显示结果
+        if failed == 0:
+            self.show_success("批量导出成功", f"成功导出到 {successful} 个 CLI 工具")
+        else:
+            failed_msgs = [r.error_message for r in results if not r.success]
+            self.show_warning(
+                "部分导出失败",
+                f"成功: {successful}, 失败: {failed}\n" + "\n".join(failed_msgs[:3]),
+            )
+
+        self._update_backup_info()
+
+    def _go_to_provider_edit(self):
+        """跳转到 Provider 编辑页面"""
+        # 切换到 Provider 页面
+        self.main_window.switchTo(self.main_window.provider_page)
+
+    def _view_backups(self):
+        """查看备份"""
+        backup_dir = self.export_manager.backup_manager.backup_dir
+        if backup_dir.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(backup_dir)))
+        else:
+            self.show_warning("无备份", "备份目录不存在")
+
+    def _restore_backup(self):
+        """恢复备份"""
+        # 显示备份选择对话框
+        dialog = CLIBackupRestoreDialog(self.export_manager.backup_manager, self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.show_success("恢复成功", "已恢复备份配置")
+            self._refresh_cli_status()
+
+
+class CLIBackupRestoreDialog(QDialog):
+    """CLI 备份恢复对话框"""
+
+    def __init__(self, backup_manager: CLIBackupManager, parent=None):
+        super().__init__(parent)
+        self.backup_manager = backup_manager
+        self.setWindowTitle("恢复备份")
+        self.setMinimumSize(500, 400)
+        self._setup_ui()
+        self._load_backups()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        # 说明
+        layout.addWidget(BodyLabel("选择要恢复的备份:"))
+
+        # 备份列表
+        self.backup_table = TableWidget(self)
+        self.backup_table.setColumnCount(3)
+        self.backup_table.setHorizontalHeaderLabels(["CLI 类型", "备份时间", "文件"])
+        header = self.backup_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        self.backup_table.setColumnWidth(0, 100)
+        self.backup_table.setColumnWidth(1, 160)
+        self.backup_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.backup_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.backup_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.backup_table)
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        cancel_btn = PushButton("取消", self)
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        restore_btn = PrimaryPushButton("恢复", self)
+        restore_btn.clicked.connect(self._on_restore)
+        btn_layout.addWidget(restore_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _load_backups(self):
+        """加载备份列表"""
+        all_backups = []
+        for cli_type in ["claude", "codex", "gemini"]:
+            backups = self.backup_manager.list_backups(cli_type)
+            all_backups.extend(backups)
+
+        # 按时间排序
+        all_backups.sort(key=lambda x: x.created_at, reverse=True)
+
+        self.backup_table.setRowCount(len(all_backups))
+        self._backups = all_backups
+
+        for row, backup in enumerate(all_backups):
+            self.backup_table.setItem(row, 0, QTableWidgetItem(backup.cli_type))
+            self.backup_table.setItem(
+                row,
+                1,
+                QTableWidgetItem(backup.created_at.strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            self.backup_table.setItem(row, 2, QTableWidgetItem(", ".join(backup.files)))
+
+    def _on_restore(self):
+        """执行恢复"""
+        selected = self.backup_table.selectedItems()
+        if not selected:
+            return
+
+        row = selected[0].row()
+        backup = self._backups[row]
+
+        try:
+            success = self.backup_manager.restore_backup(backup.path, backup.cli_type)
+            if success:
+                self.accept()
+            else:
+                InfoBar.error(title="恢复失败", content="无法恢复备份", parent=self)
+        except Exception as e:
+            InfoBar.error(title="恢复失败", content=str(e), parent=self)
+
+
+class CommonConfigEditDialog(QDialog):
+    """通用配置编辑对话框"""
+
+    def __init__(self, cli_type: str, initial_config: str = "", parent=None):
+        super().__init__(parent)
+        self.cli_type = cli_type
+        self.initial_config = initial_config
+        self.setWindowTitle(f"编辑 {cli_type.upper()} 通用配置")
+        self.setMinimumSize(600, 450)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        # 说明
+        if self.cli_type == "codex":
+            hint_text = (
+                "编辑 Codex 通用配置 (TOML 格式)，这些配置会合并到 config.toml 中"
+            )
+            placeholder = """# 示例通用配置
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[history]
+persistence = true
+max_entries = 1000"""
+            language = "toml"
+        else:  # gemini
+            hint_text = "编辑 Gemini 通用配置 (ENV 格式)，这些配置会合并到 .env 文件中"
+            placeholder = """# 示例通用配置
+GEMINI_TIMEOUT=30000
+GEMINI_MAX_RETRIES=3"""
+            language = "env"
+
+        layout.addWidget(BodyLabel(hint_text))
+
+        # 配置编辑器
+        self.config_edit = PlainTextEdit(self)
+        self.config_edit.setPlainText(self.initial_config or placeholder)
+        self.config_edit.setMinimumHeight(300)
+        self.config_edit.setStyleSheet("""
+            PlainTextEdit {
+                font-family: "Consolas", "Monaco", "Courier New", monospace;
+                font-size: 12px;
+                background-color: rgba(30, 30, 30, 0.9);
+                color: #ABB2BF;
+                border: 1px solid rgba(128, 128, 128, 0.3);
+                border-radius: 6px;
+                padding: 8px;
+            }
+        """)
+        layout.addWidget(self.config_edit)
+
+        # 添加语法高亮
+        self._highlighter = ConfigSyntaxHighlighter(
+            self.config_edit.document(), language
+        )
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        cancel_btn = PushButton("取消", self)
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        save_btn = PrimaryPushButton("保存", self)
+        save_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(save_btn)
+
+        layout.addLayout(btn_layout)
+
+    def get_config(self) -> str:
+        """获取编辑后的配置"""
+        return self.config_edit.toPlainText()
+
+
 # ==================== Import 页面 ====================
 class ImportPage(BasePage):
     """外部配置导入页面"""
@@ -12239,7 +14813,9 @@ class ImportPage(BasePage):
     def _setup_ui(self):
         # 检测到的配置卡片
         detect_card = self.add_card("检测到的外部配置")
-        detect_card.setStyleSheet("SimpleCardWidget { background-color: transparent; border: none; }")
+        detect_card.setStyleSheet(
+            "SimpleCardWidget { background-color: transparent; border: none; }"
+        )
         detect_layout = detect_card.layout()
 
         # 刷新按钮
@@ -12289,7 +14865,9 @@ class ImportPage(BasePage):
 
         # 预览卡片
         preview_card = self.add_card("配置预览与转换结果")
-        preview_card.setStyleSheet("SimpleCardWidget { background-color: transparent; border: none; }")
+        preview_card.setStyleSheet(
+            "SimpleCardWidget { background-color: transparent; border: none; }"
+        )
         preview_layout = preview_card.layout()
         preview_layout.addWidget(
             BodyLabel("点击“预览转换”在弹窗中查看左右对照。", preview_card)
@@ -12885,7 +15463,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("OpenCode Config Manager")
     app.setApplicationVersion(APP_VERSION)
-    
+
     # 在创建窗口前设置深色主题，避免启动闪烁
     setTheme(Theme.DARK)
     setThemeColor("#2979FF")
@@ -12903,7 +15481,10 @@ def main():
 
     window = MainWindow()
 
+    # 确保窗口显示在屏幕上
     window.show()
+    window.raise_()
+    window.activateWindow()
 
     sys.exit(app.exec_())
 

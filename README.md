@@ -26,28 +26,35 @@
 
 ## ✨ 核心亮点
 
-> **告别手写 JSON，一键配置 AI 编程助手！**
+> **告别手写 JSON 一键配置 AI 编程助手！**
 
-- 🎨 **Fluent Design 风格** - 微软设计语言，现代化卡片布局，深浅色主题自动切换
-- 🚀 **零门槛上手** - 可视化操作，无需记忆 JSON 结构，小白也能轻松配置
-- 🔧 **一站式管理** - Provider、Model、MCP、Agent、权限，全部搞定
-- 🛡️ **智能配置验证** - 启动时自动检测配置问题，一键修复格式错误
+- 🎨 **Fluent Design 风格** - 微软设计语言 现代化卡片布局 深浅色主题自动切换
+- 🚀 **零门槛上手** - 可视化操作 无需记忆 JSON 结构 小白也能轻松配置
+- 🔧 **一站式管理** - Provider、Model、MCP、Agent、权限 全部搞定
+- 🛡️ **智能配置验证** - 启动时自动检测配置问题 一键修复格式错误
 - 📦 **跨平台支持** - Windows / macOS / Linux 三平台原生支持
 - 🔄 **外部导入** - 一键导入 Claude Code、Codex、Gemini 等配置
 
 ---
 
-## 🎯 v1.1.6 最新版本
+## 🎯 v1.1.7 最新版本
 
-### 🆕 新功能
-- **Skill 发现与浏览** - 扫描 OpenCode 和 Claude 兼容路径，显示已有 Skill
-- **完整 SKILL.md 编辑** - 支持 license、compatibility 等完整 frontmatter
-- **Agent 级别权限** - 为特定 Agent 配置 Skill 权限或禁用 Skill 工具
-- **Claude 兼容路径** - 完整支持 `.claude/skills/` 路径
+### 🆕 CLI 工具导出功能
+- **Claude Code 多模型配置** - 支持 4 个模型字段 (主模型、Haiku、Sonnet、Opus)
+- **Codex/Gemini 双文件预览** - 双文件标签页预览 (auth.json + config.toml / .env + settings.json)
+- **Base URL 临时修改** - 可临时修改用于导出 不影响原始配置
+- **模型自定义输入** - 支持手动输入自定义模型名称
+- **语法高亮与格式化** - JSON/TOML/ENV 格式语法高亮 + 格式化按钮
+- **通用配置功能** - 写入通用配置复选框 + 编辑通用配置对话框
 
-### 🔧 优化
-- Skill 页面重构为 3 标签页布局
-- 新增 SkillDiscovery 类统一管理 Skill 发现
+### 🎨 UI 优化
+- **导航菜单字体加粗** - 提升菜单可读性和视觉层次
+- **CLI 导出页面标签页布局** - 采用主标签页设计更清晰直观
+- **监控页面启动/停止切换** - 默认不启动 需手动点击启动按钮
+
+### 🐛 Bug 修复
+- 模型留空处理优化
+- 外部导入功能修复
 
 ---
 
@@ -71,7 +78,7 @@
 - ✅ **Local 类型** - 配置启动命令和环境变量
 - ✅ **Remote 类型** - 配置服务器 URL 和请求头
 - ✅ 支持启用/禁用、超时设置
-- ✅ 预设常用 MCP 服务器（Context7、Sentry 等）
+- ✅ 预设常用 MCP 服务器 (Context7、Sentry 等）
 
 ### OpenCode Agent 配置
 - ✅ **模式设置** - primary / subagent / all
@@ -89,7 +96,7 @@
 - ✅ **自动修复** - 一键修复缺失字段和格式错误
 - ✅ **JSONC 支持** - 完美兼容带注释的配置文件
 - ✅ **外部导入** - 支持 Claude Code、Codex、Gemini、cc-switch
-- ✅ **备份恢复** - 多版本备份管理，一键恢复
+- ✅ **备份恢复** - 多版本备份管理 一键恢复
 
 ### 其他特性
 - ✅ **GitHub 版本检查** - 自动检测最新版本
@@ -101,14 +108,14 @@
 
 ## 📦 安装使用
 
-### 方式一：下载预编译版本（推荐）
+### 方式一：下载预编译版本 (推荐）
 
 从 [Releases](https://github.com/icysaintdx/OpenCode-Config-Manager/releases) 下载对应平台的可执行文件：
 
 | 平台 | 文件 | 说明 |
 |------|------|------|
-| Windows | `OpenCodeConfigManager_windows.exe` | 单文件版，双击运行 |
-| macOS | `OpenCode-Config-Manager-MacOS.dmg` | DMG 镜像，拖入应用程序 |
+| Windows | `OpenCodeConfigManager_windows.exe` | 单文件版 双击运行 |
+| macOS | `OpenCode-Config-Manager-MacOS.dmg` | DMG 镜像 拖入应用程序 |
 | Linux | `OpenCode-Config-Manager-Linux-x64.tar.gz` | 解压后运行 |
 
 ### 方式二：从源码运行
@@ -139,7 +146,7 @@ python opencode_config_manager_fluent.py
 | Oh My OpenCode | `~/.config/opencode/oh-my-opencode.json` |
 | 备份目录 | `~/.config/opencode/backups/` |
 
-### 配置优先级（从高到低）
+### 配置优先级 (从高到低）
 
 1. **远程配置** - 通过 `.well-known/opencode` 获取
 2. **全局配置** - `~/.config/opencode/opencode.json`
@@ -151,8 +158,8 @@ python opencode_config_manager_fluent.py
 
 根据 [OpenCode 官方文档](https://opencode.ai/docs/models/)：
 
-- **options**: 模型的默认配置参数，每次调用都会使用
-- **variants**: 可切换的变体配置，通过 `variant_cycle` 快捷键切换
+- **options**: 模型的默认配置参数 每次调用都会使用
+- **variants**: 可切换的变体配置 通过 `variant_cycle` 快捷键切换
 
 ```json
 {
@@ -180,13 +187,20 @@ python opencode_config_manager_fluent.py
 
 详见 [CHANGELOG.md](CHANGELOG.md)
 
-### v1.1.6 (最新)
-- 🆕 Skill 发现与浏览（支持 Claude 兼容路径）
+### v1.1.7 (最新)
+- 🆕 CLI 工具导出功能 (Claude Code 4 模型配置、Codex/Gemini 双文件预览)
+- 🎨 导航菜单字体加粗显示
+- 🆕 Base URL 临时修改、模型自定义输入、语法高亮与格式化
+- 🔧 监控页面启动/停止按钮切换
+- 🐛 模型留空处理优化、外部导入功能修复
+
+### v1.1.6
+- 🆕 Skill 发现与浏览 (支持 Claude 兼容路径）
 - 🆕 完整 SKILL.md 创建/编辑
 - 🆕 Agent 级别 Skill 权限配置
 
 ### v1.0.9
-- 🆕 配置文件冲突检测（.json vs .jsonc）
+- 🆕 配置文件冲突检测 (.json vs .jsonc）
 - 🐛 修复 Category 和 Agent 描述丢失问题
 
 [查看完整更新日志 →](CHANGELOG.md)
