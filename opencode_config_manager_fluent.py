@@ -995,15 +995,55 @@ class LanguageManager:
             print(f"Failed to save language preference: {e}")
 
     def _load_language_preference(self) -> str:
-        """从配置文件加载语言偏好"""
+        """从配置文件加载语言偏好，如果没有则自动识别系统语言"""
         config_file = Path.home() / ".config" / "opencode" / "ui_config.json"
         if config_file.exists():
             try:
                 with open(config_file, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                    return config.get("language", "zh_CN")
+                    saved_lang = config.get("language")
+                    if saved_lang:
+                        return saved_lang
             except Exception:
                 pass
+
+        # 自动识别系统语言
+        return self._detect_system_language()
+
+    def _detect_system_language(self) -> str:
+        """自动识别系统语言
+
+        Returns:
+            语言代码，zh_CN 或 en_US
+        """
+        try:
+            # 方法1: 使用 PyQt5 的 QLocale
+            from PyQt5.QtCore import QLocale
+
+            system_locale = QLocale.system()
+            locale_name = system_locale.name()  # 例如: "zh_CN", "en_US", "ja_JP"
+
+            # 判断是否为中文
+            if locale_name.startswith("zh"):
+                return "zh_CN"
+            else:
+                return "en_US"
+        except Exception:
+            pass
+
+        try:
+            # 方法2: 使用 Python 的 locale 模块
+            import locale
+
+            system_locale = locale.getdefaultlocale()[0]  # 例如: "zh_CN", "en_US"
+            if system_locale and system_locale.startswith("zh"):
+                return "zh_CN"
+            else:
+                return "en_US"
+        except Exception:
+            pass
+
+        # 默认返回中文
         return "zh_CN"
 
 
@@ -10288,8 +10328,13 @@ class MainWindow(FluentWindow):
         self.lang_button.setToolTip(tr("settings.language"))
         self.lang_button.clicked.connect(self._on_language_switch)
 
-        # 添加到标题栏
-        self.titleBar.hBoxLayout.insertWidget(0, self.lang_button)
+        # 添加到标题栏右侧（在最小化按钮之前）
+        # 获取标题栏布局中的控件数量，插入到倒数第4个位置（最小化、最大化、关闭按钮之前）
+        layout = self.titleBar.hBoxLayout
+        count = layout.count()
+        # 通常标题栏右侧有：最小化、最大化、关闭按钮（3个），所以插入到 count-3 位置
+        insert_pos = max(0, count - 3)
+        layout.insertWidget(insert_pos, self.lang_button)
 
     def _on_language_switch(self):
         """切换语言"""
@@ -10315,66 +10360,76 @@ class MainWindow(FluentWindow):
         # ===== 顶部工具栏区域 =====
         # 添加首页/状态页面
         self.home_page = HomePage(self)
-        self.addSubInterface(self.home_page, FIF.HOME, "首页")
+        self.addSubInterface(self.home_page, FIF.HOME, tr("menu.home"))
 
         # ===== OpenCode 配置分组 =====
         # Provider 页面
         self.provider_page = ProviderPage(self)
-        self.addSubInterface(self.provider_page, FIF.PEOPLE, "Provider 管理")
+        self.addSubInterface(self.provider_page, FIF.PEOPLE, tr("menu.provider"))
 
         # 原生 Provider 页面
         self.native_provider_page = NativeProviderPage(self)
-        self.addSubInterface(self.native_provider_page, FIF.GLOBE, "原生 Provider")
+        self.addSubInterface(
+            self.native_provider_page, FIF.GLOBE, tr("menu.native_provider")
+        )
 
         # Model 页面
         self.model_page = ModelPage(self)
-        self.addSubInterface(self.model_page, FIF.ROBOT, "Model 管理")
+        self.addSubInterface(self.model_page, FIF.ROBOT, tr("menu.model"))
 
         # MCP 页面
         self.mcp_page = MCPPage(self)
-        self.addSubInterface(self.mcp_page, FIF.CLOUD, "MCP 服务器")
+        self.addSubInterface(self.mcp_page, FIF.CLOUD, tr("menu.mcp"))
 
         # OpenCode Agent 页面
         self.opencode_agent_page = OpenCodeAgentPage(self)
-        self.addSubInterface(self.opencode_agent_page, FIF.COMMAND_PROMPT, "Agent 配置")
+        self.addSubInterface(
+            self.opencode_agent_page, FIF.COMMAND_PROMPT, tr("menu.agent")
+        )
 
         # Permission 页面
         self.permission_page = PermissionPage(self)
-        self.addSubInterface(self.permission_page, FIF.CERTIFICATE, "权限管理")
+        self.addSubInterface(
+            self.permission_page, FIF.CERTIFICATE, tr("menu.permission")
+        )
 
         # Skill 页面
         self.skill_page = SkillPage(self)
-        self.addSubInterface(self.skill_page, FIF.BOOK_SHELF, "Skill 管理")
+        self.addSubInterface(self.skill_page, FIF.BOOK_SHELF, tr("menu.skill"))
 
         # Rules 页面
         self.rules_page = RulesPage(self)
-        self.addSubInterface(self.rules_page, FIF.DOCUMENT, "Rules 管理")
+        self.addSubInterface(self.rules_page, FIF.DOCUMENT, tr("menu.rules"))
 
         # Compaction 页面
         self.compaction_page = CompactionPage(self)
-        self.addSubInterface(self.compaction_page, FIF.ZIP_FOLDER, "上下文压缩")
+        self.addSubInterface(
+            self.compaction_page, FIF.ZIP_FOLDER, tr("menu.compaction")
+        )
 
         # ===== Oh My OpenCode 配置分组 =====
         # Oh My Agent 页面
         self.ohmy_agent_page = OhMyAgentPage(self)
-        self.addSubInterface(self.ohmy_agent_page, FIF.EMOJI_TAB_SYMBOLS, "Oh My Agent")
+        self.addSubInterface(
+            self.ohmy_agent_page, FIF.EMOJI_TAB_SYMBOLS, tr("menu.ohmyagent")
+        )
 
         # Category 页面
         self.category_page = CategoryPage(self)
-        self.addSubInterface(self.category_page, FIF.TAG, "Category 管理")
+        self.addSubInterface(self.category_page, FIF.TAG, tr("menu.category"))
 
         # ===== 工具分组 =====
         # Import 页面
         self.import_page = ImportPage(self)
-        self.addSubInterface(self.import_page, FIF.DOWNLOAD, "外部导入")
+        self.addSubInterface(self.import_page, FIF.DOWNLOAD, tr("menu.import"))
 
         # CLI 导出页面
         self.cli_export_page = CLIExportPage(self)
-        self.addSubInterface(self.cli_export_page, FIF.SEND, "CLI 工具导出")
+        self.addSubInterface(self.cli_export_page, FIF.SEND, tr("menu.export"))
 
         # 监控页面
         self.monitor_page = MonitorPage(self)
-        self.addSubInterface(self.monitor_page, FIF.SPEED_HIGH, "监控")
+        self.addSubInterface(self.monitor_page, FIF.SPEED_HIGH, tr("menu.monitor"))
 
         # ===== 工具菜单 =====
         self.navigationInterface.addSeparator()
@@ -10383,7 +10438,7 @@ class MainWindow(FluentWindow):
         self.navigationInterface.addItem(
             routeKey="theme",
             icon=FIF.CONSTRACT,
-            text="切换主题",
+            text=tr("menu.theme"),
             onClick=self._toggle_theme,
         )
 
@@ -10391,13 +10446,13 @@ class MainWindow(FluentWindow):
         self.navigationInterface.addItem(
             routeKey="backup",
             icon=FIF.HISTORY,
-            text="备份管理",
+            text=tr("menu.backup"),
             onClick=self._show_backup_dialog,
         )
 
         # Help 页面
         self.help_page = HelpPage(self)
-        self.addSubInterface(self.help_page, FIF.HELP, "帮助说明")
+        self.addSubInterface(self.help_page, FIF.HELP, tr("menu.help"))
 
     def _show_backup_dialog(self):
         """显示备份管理对话框"""
