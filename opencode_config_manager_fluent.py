@@ -741,7 +741,7 @@ STATUS_LABELS = {
     "degraded": "延迟",
     "failed": "异常",
     "error": "错误",
-    "no_config": tr("native_provider.not_configured"),
+    "no_config": "未配置",
 }
 
 # 状态颜色 - 与 UIConfig 配色方案一致
@@ -6801,15 +6801,21 @@ class NativeProviderPage(BasePage):
         # 工具栏
         toolbar = QHBoxLayout()
 
-        self.config_btn = PrimaryPushButton(FIF.SETTING, tr("native_provider.config_provider"), self)
+        self.config_btn = PrimaryPushButton(
+            FIF.SETTING, tr("native_provider.config_provider"), self
+        )
         self.config_btn.clicked.connect(self._on_config)
         toolbar.addWidget(self.config_btn)
 
-        self.test_btn = PushButton(FIF.WIFI, tr("native_provider.test_connection"), self)
+        self.test_btn = PushButton(
+            FIF.WIFI, tr("native_provider.test_connection"), self
+        )
         self.test_btn.clicked.connect(self._on_test)
         toolbar.addWidget(self.test_btn)
 
-        self.delete_btn = PushButton(FIF.DELETE, tr("native_provider.delete_config"), self)
+        self.delete_btn = PushButton(
+            FIF.DELETE, tr("native_provider.delete_config"), self
+        )
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
@@ -6819,7 +6825,14 @@ class NativeProviderPage(BasePage):
         # Provider 列表表格
         self.table = TableWidget(self)
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels([tr("native_provider.provider"), tr("native_provider.sdk"), tr("native_provider.status"), tr("native_provider.env_vars")])
+        self.table.setHorizontalHeaderLabels(
+            [
+                tr("native_provider.provider"),
+                tr("native_provider.sdk"),
+                tr("native_provider.status"),
+                tr("native_provider.env_vars"),
+            ]
+        )
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -6860,7 +6873,11 @@ class NativeProviderPage(BasePage):
 
             # 状态
             is_configured = provider.id in auth_data and auth_data[provider.id]
-            status_text = tr("native_provider.configured") if is_configured else tr("native_provider.not_configured")
+            status_text = (
+                tr("native_provider.configured")
+                if is_configured
+                else tr("native_provider.not_configured")
+            )
             status_item = QTableWidgetItem(status_text)
             if is_configured:
                 status_item.setForeground(QColor("#4CAF50"))
@@ -6886,7 +6903,9 @@ class NativeProviderPage(BasePage):
         """配置 Provider"""
         provider = self._get_selected_provider()
         if not provider:
-            self.show_warning(tr("common.warning"), tr("native_provider.select_provider_first"))
+            self.show_warning(
+                tr("common.warning"), tr("native_provider.select_provider_first")
+            )
             return
 
         dialog = NativeProviderDialog(
@@ -6904,7 +6923,9 @@ class NativeProviderPage(BasePage):
         """测试连接"""
         provider = self._get_selected_provider()
         if not provider:
-            self.show_warning(tr("common.warning"), tr("native_provider.select_provider_first"))
+            self.show_warning(
+                tr("common.warning"), tr("native_provider.select_provider_first")
+            )
             return
 
         if not provider.test_endpoint:
@@ -6971,7 +6992,9 @@ class NativeProviderPage(BasePage):
         """删除配置"""
         provider = self._get_selected_provider()
         if not provider:
-            self.show_warning(tr("common.warning"), tr("native_provider.select_provider_first"))
+            self.show_warning(
+                tr("common.warning"), tr("native_provider.select_provider_first")
+            )
             return
 
         # 检查是否已配置
@@ -11108,7 +11131,9 @@ class OhMyAgentPage(BasePage):
         # Agent 列表
         self.table = TableWidget(self)
         self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels([tr("common.name"), tr("ohmyagent.model"), tr("common.description")])
+        self.table.setHorizontalHeaderLabels(
+            [tr("common.name"), tr("ohmyagent.model"), tr("common.description")]
+        )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -11634,7 +11659,9 @@ class CategoryDialog(BaseDialog):
         self.category_name = category_name
         self.is_edit = category_name is not None
 
-        self.setWindowTitle("编辑 Category" if self.is_edit else tr("category.add_category"))
+        self.setWindowTitle(
+            "编辑 Category" if self.is_edit else tr("category.add_category")
+        )
         self.setMinimumWidth(450)
         self._setup_ui()
 
@@ -13202,7 +13229,9 @@ class SkillPage(BasePage):
         # 工具栏
         toolbar = QHBoxLayout()
 
-        market_btn = PrimaryPushButton(FIF.MARKET, tr("skill.skill_market"), left_widget)
+        market_btn = PrimaryPushButton(
+            FIF.MARKET, tr("skill.skill_market"), left_widget
+        )
         market_btn.clicked.connect(self._on_open_market)
         toolbar.addWidget(market_btn)
 
@@ -13276,7 +13305,9 @@ class SkillPage(BasePage):
         right_layout.addWidget(detail_card)
 
         # 内容预览
-        right_layout.addWidget(BodyLabel(tr("skill.content_preview") + ":", right_widget))
+        right_layout.addWidget(
+            BodyLabel(tr("skill.content_preview") + ":", right_widget)
+        )
         self.detail_content = TextEdit(right_widget)
         self.detail_content.setReadOnly(True)
         self.detail_content.setPlaceholderText("选择 Skill 后显示内容")
@@ -13289,7 +13320,9 @@ class SkillPage(BasePage):
         self.edit_skill_btn.setEnabled(False)
         btn_layout.addWidget(self.edit_skill_btn)
 
-        self.scan_skill_btn = PushButton(FIF.CERTIFICATE, tr("skill.scan_security"), right_widget)
+        self.scan_skill_btn = PushButton(
+            FIF.CERTIFICATE, tr("skill.scan_security"), right_widget
+        )
         self.scan_skill_btn.clicked.connect(self._on_scan_skill)
         self.scan_skill_btn.setEnabled(False)
         btn_layout.addWidget(self.scan_skill_btn)
@@ -13299,7 +13332,9 @@ class SkillPage(BasePage):
         self.delete_skill_btn.setEnabled(False)
         btn_layout.addWidget(self.delete_skill_btn)
 
-        self.open_folder_btn = PushButton(FIF.FOLDER, tr("skill.open_directory"), right_widget)
+        self.open_folder_btn = PushButton(
+            FIF.FOLDER, tr("skill.open_directory"), right_widget
+        )
         self.open_folder_btn.clicked.connect(self._on_open_skill_folder)
         self.open_folder_btn.setEnabled(False)
         btn_layout.addWidget(self.open_folder_btn)
@@ -13624,7 +13659,9 @@ class SkillPage(BasePage):
         # 权限表格
         self.perm_table = TableWidget(left_widget)
         self.perm_table.setColumnCount(2)
-        self.perm_table.setHorizontalHeaderLabels([tr("skill.pattern"), tr("skill.permission")])
+        self.perm_table.setHorizontalHeaderLabels(
+            [tr("skill.pattern"), tr("skill.permission")]
+        )
         self.perm_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.perm_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.perm_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -13691,7 +13728,9 @@ class SkillPage(BasePage):
         right_layout.addWidget(BodyLabel("Agent 权限覆盖:", right_widget))
         self.agent_perm_table = TableWidget(right_widget)
         self.agent_perm_table.setColumnCount(2)
-        self.agent_perm_table.setHorizontalHeaderLabels([tr("skill.pattern"), tr("skill.permission")])
+        self.agent_perm_table.setHorizontalHeaderLabels(
+            [tr("skill.pattern"), tr("skill.permission")]
+        )
         self.agent_perm_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.Stretch
         )
@@ -14578,7 +14617,9 @@ class MonitorPage(BasePage):
         stats_row.addStretch()
 
         # 按钮和状态放在统计行右侧
-        self.manual_check_btn = PrimaryPushButton(FIF.SYNC, tr("monitor.check"), wrapper)
+        self.manual_check_btn = PrimaryPushButton(
+            FIF.SYNC, tr("monitor.check"), wrapper
+        )
         self.manual_check_btn.setFixedSize(80, 32)
         self.manual_check_btn.clicked.connect(self._do_poll)
         stats_row.addWidget(self.manual_check_btn)
@@ -15533,7 +15574,9 @@ class CLIExportPage(BasePage):
 
         # 主标签页切换
         self.main_pivot = Pivot(main_card)
-        self.main_pivot.addItem(routeKey="claude", text=tr("cli_export.tab_claude_code"))
+        self.main_pivot.addItem(
+            routeKey="claude", text=tr("cli_export.tab_claude_code")
+        )
         self.main_pivot.addItem(routeKey="codex", text=tr("cli_export.tab_codex"))
         self.main_pivot.addItem(routeKey="gemini", text=tr("cli_export.tab_gemini"))
         self.main_pivot.setCurrentItem("claude")
@@ -15561,20 +15604,28 @@ class CLIExportPage(BasePage):
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(12)
 
-        self.batch_export_btn = PrimaryPushButton(FIF.SEND, tr("cli_export.batch_export_all"), main_card)
+        self.batch_export_btn = PrimaryPushButton(
+            FIF.SEND, tr("cli_export.batch_export_all"), main_card
+        )
         self.batch_export_btn.clicked.connect(self._on_batch_export)
         bottom_row.addWidget(self.batch_export_btn)
 
         bottom_row.addStretch()
 
-        self.backup_info_label = CaptionLabel(tr("cli_export.latest_backup_none"), main_card)
+        self.backup_info_label = CaptionLabel(
+            tr("cli_export.latest_backup_none"), main_card
+        )
         bottom_row.addWidget(self.backup_info_label)
 
-        view_backup_btn = PushButton(FIF.FOLDER, tr("cli_export.view_backup"), main_card)
+        view_backup_btn = PushButton(
+            FIF.FOLDER, tr("cli_export.view_backup"), main_card
+        )
         view_backup_btn.clicked.connect(self._view_backups)
         bottom_row.addWidget(view_backup_btn)
 
-        restore_btn = PushButton(FIF.HISTORY, tr("cli_export.restore_backup"), main_card)
+        restore_btn = PushButton(
+            FIF.HISTORY, tr("cli_export.restore_backup"), main_card
+        )
         restore_btn.clicked.connect(self._restore_backup)
         bottom_row.addWidget(restore_btn)
 
@@ -15599,9 +15650,7 @@ class CLIExportPage(BasePage):
         model_layout.setContentsMargins(12, 8, 12, 8)
         model_layout.setSpacing(6)
 
-        model_title = StrongBodyLabel(
-            tr("cli_export.export_config_title"), model_frame
-        )
+        model_title = StrongBodyLabel(tr("cli_export.export_config_title"), model_frame)
         model_layout.addWidget(model_title)
 
         # Base URL 行
@@ -15609,7 +15658,9 @@ class CLIExportPage(BasePage):
         url_row.setSpacing(8)
         url_row.addWidget(CaptionLabel(tr("cli_export.base_url") + ":", model_frame))
         self.claude_base_url_edit = LineEdit(model_frame)
-        self.claude_base_url_edit.setPlaceholderText(tr("cli_export.from_provider_config"))
+        self.claude_base_url_edit.setPlaceholderText(
+            tr("cli_export.from_provider_config")
+        )
         self.claude_base_url_edit.setFixedHeight(28)
         self.claude_base_url_edit.textChanged.connect(lambda: self._update_preview())
         url_row.addWidget(self.claude_base_url_edit, 1)
@@ -15654,7 +15705,9 @@ class CLIExportPage(BasePage):
         grid = QGridLayout()
         grid.setSpacing(8)
 
-        grid.addWidget(CaptionLabel(tr("cli_export.main_model") + ":", model_frame), 0, 0)
+        grid.addWidget(
+            CaptionLabel(tr("cli_export.main_model") + ":", model_frame), 0, 0
+        )
         self.claude_main_model_combo = QNativeComboBox(model_frame)
         self.claude_main_model_combo.setFixedSize(200, 30)
         self.claude_main_model_combo.setEditable(True)
@@ -15697,9 +15750,7 @@ class CLIExportPage(BasePage):
         grid.setColumnStretch(4, 1)
         model_layout.addLayout(grid)
 
-        hint = CaptionLabel(
-            tr("cli_export.model_hint_full"), model_frame
-        )
+        hint = CaptionLabel(tr("cli_export.model_hint_full"), model_frame)
         hint.setStyleSheet("color: #666;")
         model_layout.addWidget(hint)
 
@@ -15715,7 +15766,9 @@ class CLIExportPage(BasePage):
         preview_layout.setSpacing(4)
 
         header = QHBoxLayout()
-        header.addWidget(StrongBodyLabel(tr("cli_export.preview_title_claude"), preview_frame))
+        header.addWidget(
+            StrongBodyLabel(tr("cli_export.preview_title_claude"), preview_frame)
+        )
         header.addStretch()
 
         format_btn = ToolButton(FIF.ALIGNMENT, preview_frame)
@@ -15760,9 +15813,7 @@ class CLIExportPage(BasePage):
         model_layout.setContentsMargins(12, 8, 12, 8)
         model_layout.setSpacing(6)
 
-        model_title = StrongBodyLabel(
-            tr("cli_export.export_config_title"), model_frame
-        )
+        model_title = StrongBodyLabel(tr("cli_export.export_config_title"), model_frame)
         model_layout.addWidget(model_title)
 
         # Base URL 行
@@ -15770,7 +15821,9 @@ class CLIExportPage(BasePage):
         url_row.setSpacing(8)
         url_row.addWidget(CaptionLabel(tr("cli_export.base_url") + ":", model_frame))
         self.codex_base_url_edit = LineEdit(model_frame)
-        self.codex_base_url_edit.setPlaceholderText(tr("cli_export.from_provider_config"))
+        self.codex_base_url_edit.setPlaceholderText(
+            tr("cli_export.from_provider_config")
+        )
         self.codex_base_url_edit.setFixedHeight(28)
         self.codex_base_url_edit.textChanged.connect(lambda: self._update_preview())
         url_row.addWidget(self.codex_base_url_edit, 1)
@@ -15831,7 +15884,9 @@ class CLIExportPage(BasePage):
 
         model_row.addStretch()
 
-        self.codex_common_check = CheckBox(tr("cli_export.write_common_config"), model_frame)
+        self.codex_common_check = CheckBox(
+            tr("cli_export.write_common_config"), model_frame
+        )
         self.codex_common_check.stateChanged.connect(
             lambda s: self._on_common_config_toggle("codex", s == Qt.Checked)
         )
@@ -15854,7 +15909,9 @@ class CLIExportPage(BasePage):
         preview_layout.setSpacing(4)
 
         header = QHBoxLayout()
-        header.addWidget(StrongBodyLabel(tr("cli_export.preview_title_codex"), preview_frame))
+        header.addWidget(
+            StrongBodyLabel(tr("cli_export.preview_title_codex"), preview_frame)
+        )
         header.addStretch()
 
         format_btn = ToolButton(FIF.ALIGNMENT, preview_frame)
@@ -15923,9 +15980,7 @@ class CLIExportPage(BasePage):
         model_layout.setContentsMargins(12, 8, 12, 8)
         model_layout.setSpacing(6)
 
-        model_title = StrongBodyLabel(
-            tr("cli_export.export_config_title"), model_frame
-        )
+        model_title = StrongBodyLabel(tr("cli_export.export_config_title"), model_frame)
         model_layout.addWidget(model_title)
 
         # Base URL 行
@@ -15933,7 +15988,9 @@ class CLIExportPage(BasePage):
         url_row.setSpacing(8)
         url_row.addWidget(CaptionLabel(tr("cli_export.base_url") + ":", model_frame))
         self.gemini_base_url_edit = LineEdit(model_frame)
-        self.gemini_base_url_edit.setPlaceholderText(tr("cli_export.from_provider_config"))
+        self.gemini_base_url_edit.setPlaceholderText(
+            tr("cli_export.from_provider_config")
+        )
         self.gemini_base_url_edit.setFixedHeight(28)
         self.gemini_base_url_edit.textChanged.connect(lambda: self._update_preview())
         url_row.addWidget(self.gemini_base_url_edit, 1)
@@ -15994,7 +16051,9 @@ class CLIExportPage(BasePage):
 
         model_row.addStretch()
 
-        self.gemini_common_check = CheckBox(tr("cli_export.write_common_config"), model_frame)
+        self.gemini_common_check = CheckBox(
+            tr("cli_export.write_common_config"), model_frame
+        )
         self.gemini_common_check.stateChanged.connect(
             lambda s: self._on_common_config_toggle("gemini", s == Qt.Checked)
         )
@@ -16017,7 +16076,9 @@ class CLIExportPage(BasePage):
         preview_layout.setSpacing(4)
 
         header = QHBoxLayout()
-        header.addWidget(StrongBodyLabel(tr("cli_export.preview_title_codex"), preview_frame))
+        header.addWidget(
+            StrongBodyLabel(tr("cli_export.preview_title_codex"), preview_frame)
+        )
         header.addStretch()
 
         format_btn = ToolButton(FIF.ALIGNMENT, preview_frame)
@@ -16281,7 +16342,13 @@ class CLIExportPage(BasePage):
             all_backups.sort(key=lambda x: x.created_at, reverse=True)
             latest = all_backups[0]
             time_str = latest.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            self.backup_info_label.setText(tr("cli_export.latest_backup", time_str=time_str, cli_type=latest.cli_type))
+            self.backup_info_label.setText(
+                tr(
+                    "cli_export.latest_backup",
+                    time_str=time_str,
+                    cli_type=latest.cli_type,
+                )
+            )
         else:
             self.backup_info_label.setText("最近备份: 无")
 
@@ -16289,11 +16356,15 @@ class CLIExportPage(BasePage):
         """更新配置预览"""
         if self._selected_provider is None:
             # 清空所有预览
-            self.claude_preview_text.setPlainText(tr("cli_export.select_provider_first"))
+            self.claude_preview_text.setPlainText(
+                tr("cli_export.select_provider_first")
+            )
             self.codex_auth_text.setPlainText(tr("cli_export.select_provider_first"))
             self.codex_config_text.setPlainText(tr("cli_export.select_provider_first"))
             self.gemini_env_text.setPlainText(tr("cli_export.select_provider_first"))
-            self.gemini_settings_text.setPlainText(tr("cli_export.select_provider_first"))
+            self.gemini_settings_text.setPlainText(
+                tr("cli_export.select_provider_first")
+            )
             return
 
         try:
@@ -16393,19 +16464,26 @@ class CLIExportPage(BasePage):
         if dialog.exec_() == QDialog.Accepted:
             self._common_config_snippets[cli_type] = dialog.get_config()
             InfoBar.success(
-                title=tr("cli_export.save_success"), content=tr("cli_export.common_config_updated"), parent=self, duration=2000
+                title=tr("cli_export.save_success"),
+                content=tr("cli_export.common_config_updated"),
+                parent=self,
+                duration=2000,
             )
 
     def _on_single_export(self, cli_type: str):
         """单个 CLI 工具导出"""
         if self._selected_provider is None:
-            self.show_error(tr("cli_export.export_failed"), tr("cli_export.select_provider_first"))
+            self.show_error(
+                tr("cli_export.export_failed"), tr("cli_export.select_provider_first")
+            )
             return
 
         # 验证配置
         result = self.export_manager.validate_provider(self._selected_provider)
         if not result.valid:
-            self.show_error(tr("cli_export.config_incomplete"), "\n".join(result.errors))
+            self.show_error(
+                tr("cli_export.config_incomplete"), "\n".join(result.errors)
+            )
             return
 
         # 创建临时 provider 副本，使用用户输入的 base_url
@@ -16421,7 +16499,10 @@ class CLIExportPage(BasePage):
             base_url = self.gemini_base_url_edit.text().strip()
             model = self.gemini_model_combo.currentText().strip()
         else:
-            self.show_error(tr("cli_export.export_failed"), tr("cli_export.unknown_cli_type", cli_type=cli_type))
+            self.show_error(
+                tr("cli_export.export_failed"),
+                tr("cli_export.unknown_cli_type", cli_type=cli_type),
+            )
             return
 
         if base_url:
@@ -16444,30 +16525,44 @@ class CLIExportPage(BasePage):
             if export_result.success:
                 files_str = ", ".join(str(f.name) for f in export_result.files_written)
                 self.show_success(
-                    tr("cli_export.export_success"), tr("cli_export.exported_to", cli_type=cli_type.upper(), files_str=files_str)
+                    tr("cli_export.export_success"),
+                    tr(
+                        "cli_export.exported_to",
+                        cli_type=cli_type.upper(),
+                        files_str=files_str,
+                    ),
                 )
                 self._update_backup_info()
             else:
-                self.show_error(tr("cli_export.export_failed"), export_result.error_message or tr("cli_export.unknown_error"))
+                self.show_error(
+                    tr("cli_export.export_failed"),
+                    export_result.error_message or tr("cli_export.unknown_error"),
+                )
                 # 尝试恢复备份
                 if export_result.backup_path:
                     self.export_manager.backup_manager.restore_backup(
                         export_result.backup_path, cli_type
                     )
-                    self.show_warning(tr("cli_export.restored"), tr("cli_export.auto_restored"))
+                    self.show_warning(
+                        tr("cli_export.restored"), tr("cli_export.auto_restored")
+                    )
         except Exception as e:
             self.show_error("导出失败", str(e))
 
     def _on_batch_export(self):
         """批量导出"""
         if self._selected_provider is None:
-            self.show_error(tr("cli_export.export_failed"), tr("cli_export.select_provider_first"))
+            self.show_error(
+                tr("cli_export.export_failed"), tr("cli_export.select_provider_first")
+            )
             return
 
         # 验证配置
         result = self.export_manager.validate_provider(self._selected_provider)
         if not result.valid:
-            self.show_error(tr("cli_export.config_incomplete"), "\n".join(result.errors))
+            self.show_error(
+                tr("cli_export.config_incomplete"), "\n".join(result.errors)
+            )
             return
 
         # 获取已安装的 CLI 工具
@@ -16477,7 +16572,9 @@ class CLIExportPage(BasePage):
         ]
 
         if not targets:
-            self.show_warning(tr("cli_export.no_available_targets"), tr("cli_export.no_cli_detected"))
+            self.show_warning(
+                tr("cli_export.no_available_targets"), tr("cli_export.no_cli_detected")
+            )
             return
 
         # 为每个 CLI 工具创建带有用户输入 base_url 的 provider 副本
@@ -16529,12 +16626,21 @@ class CLIExportPage(BasePage):
 
         # 显示结果
         if failed == 0:
-            self.show_success(tr("cli_export.batch_export_success"), tr("cli_export.exported_to_count", successful=successful))
+            self.show_success(
+                tr("cli_export.batch_export_success"),
+                tr("cli_export.exported_to_count", successful=successful),
+            )
         else:
             failed_msgs = [r.error_message for r in results if not r.success]
             self.show_warning(
                 tr("cli_export.partial_export_failed"),
-                tr("cli_export.success_failed_count", successful=successful, failed=failed) + "\n" + "\n".join(failed_msgs[:3]),
+                tr(
+                    "cli_export.success_failed_count",
+                    successful=successful,
+                    failed=failed,
+                )
+                + "\n"
+                + "\n".join(failed_msgs[:3]),
             )
 
         self._update_backup_info()
@@ -16550,14 +16656,18 @@ class CLIExportPage(BasePage):
         if backup_dir.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(backup_dir)))
         else:
-            self.show_warning(tr("cli_export.no_backup"), tr("cli_export.backup_dir_not_exist"))
+            self.show_warning(
+                tr("cli_export.no_backup"), tr("cli_export.backup_dir_not_exist")
+            )
 
     def _restore_backup(self):
         """恢复备份"""
         # 显示备份选择对话框
         dialog = CLIBackupRestoreDialog(self.export_manager.backup_manager, self)
         if dialog.exec_() == QDialog.Accepted:
-            self.show_success(tr("cli_export.restore_success"), tr("cli_export.backup_restored"))
+            self.show_success(
+                tr("cli_export.restore_success"), tr("cli_export.backup_restored")
+            )
             self._refresh_cli_status()
 
 
@@ -16775,7 +16885,9 @@ class ImportPage(BasePage):
         # 配置列表
         self.config_table = TableWidget(detect_card)
         self.config_table.setColumnCount(3)
-        self.config_table.setHorizontalHeaderLabels([tr("import.source"), tr("import.config_path"), tr("import.status")])
+        self.config_table.setHorizontalHeaderLabels(
+            [tr("import.source"), tr("import.config_path"), tr("import.status")]
+        )
         # 设置列宽：第一列25字符，第三列15字符，第二列自动填充
         header = self.config_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
