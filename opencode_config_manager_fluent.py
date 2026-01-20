@@ -978,6 +978,12 @@ class UIConfig:
                 font-weight: 600;
                 font-size: 12px;
             }}
+            
+            /* ==================== 修复表格左上角单元格白色问题 ==================== */
+            QTableWidget QTableCornerButton::section {{
+                background-color: transparent;
+                border: none;
+            }}
 
             /* ==================== 列表字体 ==================== */
             QListWidget, ListWidget {{
