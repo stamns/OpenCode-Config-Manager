@@ -11209,7 +11209,11 @@ class OhMyAgentDialog(BaseDialog):
         self.agent_name = agent_name
         self.is_edit = agent_name is not None
 
-        self.setWindowTitle("编辑 Agent" if self.is_edit else "添加 Agent")
+        self.setWindowTitle(
+            tr("ohmyagent.dialog.edit_title")
+            if self.is_edit
+            else tr("ohmyagent.dialog.add_title")
+        )
         self.setMinimumWidth(450)
         self._setup_ui()
 
@@ -11222,9 +11226,9 @@ class OhMyAgentDialog(BaseDialog):
 
         # Agent 名称
         name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("Agent 名称:", self))
+        name_layout.addWidget(BodyLabel(tr("ohmyagent.dialog.agent_key_label"), self))
         self.name_edit = LineEdit(self)
-        self.name_edit.setPlaceholderText("如: oracle, librarian, explore")
+        self.name_edit.setPlaceholderText(tr("ohmyagent.dialog.agent_key_placeholder"))
         self.name_edit.setToolTip(get_tooltip("ohmyopencode_agent_name"))
         if self.is_edit:
             self.name_edit.setEnabled(False)
@@ -11233,7 +11237,7 @@ class OhMyAgentDialog(BaseDialog):
 
         # 绑定模型
         model_layout = QHBoxLayout()
-        model_layout.addWidget(BodyLabel("绑定模型:", self))
+        model_layout.addWidget(BodyLabel(tr("ohmyagent.dialog.model_label"), self))
         self.model_combo = ComboBox(self)
         self.model_combo.setToolTip(get_tooltip("ohmyopencode_agent_model"))
         self._load_models()
@@ -11241,7 +11245,7 @@ class OhMyAgentDialog(BaseDialog):
         layout.addLayout(model_layout)
 
         # 描述
-        desc_label = BodyLabel("描述:", self)
+        desc_label = BodyLabel(tr("common.description") + ":", self)
         desc_label.setToolTip(get_tooltip("ohmyopencode_agent_description"))
         layout.addWidget(desc_label)
         self.desc_edit = TextEdit(self)
@@ -11253,11 +11257,11 @@ class OhMyAgentDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.save_btn = PrimaryPushButton("保存", self)
+        self.save_btn = PrimaryPushButton(tr("common.save"), self)
         self.save_btn.clicked.connect(self._on_save)
         btn_layout.addWidget(self.save_btn)
 
@@ -11285,7 +11289,9 @@ class OhMyAgentDialog(BaseDialog):
     def _on_save(self):
         name = self.name_edit.text().strip()
         if not name:
-            InfoBar.error("错误", "请输入 Agent 名称", parent=self)
+            InfoBar.error(
+                tr("common.error"), tr("ohmyagent.dialog.key_required"), parent=self
+            )
             return
 
         config = self.main_window.ohmyopencode_config
@@ -11297,7 +11303,9 @@ class OhMyAgentDialog(BaseDialog):
             config["agents"] = {}
 
         if not self.is_edit and name in config["agents"]:
-            InfoBar.error("错误", f'Agent "{name}" 已存在', parent=self)
+            InfoBar.error(
+                tr("common.error"), tr("ohmyagent.dialog.key_exists"), parent=self
+            )
             return
 
         config["agents"][name] = {
@@ -11316,7 +11324,7 @@ class PresetOhMyAgentDialog(BaseDialog):
         super().__init__(parent)
         self.main_window = main_window
 
-        self.setWindowTitle("从预设添加 Agent")
+        self.setWindowTitle(tr("ohmyagent.preset_dialog.title"))
         self.setMinimumWidth(500)
         self._setup_ui()
 
@@ -11324,7 +11332,7 @@ class PresetOhMyAgentDialog(BaseDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
 
-        layout.addWidget(SubtitleLabel("选择预设 Agent", self))
+        layout.addWidget(SubtitleLabel(tr("ohmyagent.preset_dialog.subtitle"), self))
 
         # 预设列表
         self.list_widget = ListWidget(self)
@@ -11334,7 +11342,7 @@ class PresetOhMyAgentDialog(BaseDialog):
 
         # 绑定模型
         model_layout = QHBoxLayout()
-        model_layout.addWidget(BodyLabel("绑定模型:", self))
+        model_layout.addWidget(BodyLabel(tr("ohmyagent.dialog.model_label"), self))
         self.model_combo = ComboBox(self)
         self._load_models()
         model_layout.addWidget(self.model_combo)
@@ -11344,11 +11352,11 @@ class PresetOhMyAgentDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.add_btn = PrimaryPushButton("添加", self)
+        self.add_btn = PrimaryPushButton(tr("common.add"), self)
         self.add_btn.clicked.connect(self._on_add)
         btn_layout.addWidget(self.add_btn)
 
@@ -11363,7 +11371,7 @@ class PresetOhMyAgentDialog(BaseDialog):
     def _on_add(self):
         current = self.list_widget.currentItem()
         if not current:
-            InfoBar.warning("提示", "请选择一个预设 Agent", parent=self)
+            InfoBar.warning(tr("common.warning"), "请选择一个预设 Agent", parent=self)
             return
 
         # 解析选中的预设
@@ -11380,7 +11388,7 @@ class PresetOhMyAgentDialog(BaseDialog):
             config["agents"] = {}
 
         if name in config["agents"]:
-            InfoBar.warning("提示", f'Agent "{name}" 已存在', parent=self)
+            InfoBar.warning(tr("common.warning"), f'Agent "{name}" 已存在', parent=self)
             return
 
         config["agents"][name] = {
