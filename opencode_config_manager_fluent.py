@@ -6100,7 +6100,7 @@ class ModelPresetCustomDialog(BaseDialog):
     def _on_add(self):
         selected = self.model_list.selectedItems()
         if not selected:
-            InfoBar.warning("提示", "请选择至少一个模型", parent=self)
+            InfoBar.warning(tr("common.hint"), tr("dialog.select_at_least_one_model"), parent=self)
             return
 
         series = self.series_combo.currentText()
@@ -6156,7 +6156,7 @@ class ModelPresetCustomDialog(BaseDialog):
                 added += 1
 
         self.main_window.save_opencode_config()
-        InfoBar.success("成功", f"已添加 {added} 个模型", parent=self)
+        InfoBar.success(tr("common.success"), tr("dialog.models_added", count=added), parent=self)
         self.accept()
 
 
@@ -6544,7 +6544,7 @@ class OhMyMCPDialog(BaseDialog):
         config["disabled_mcps"] = list(mcps.keys())
         self.main_window.save_ohmyopencode_config()
         self._load_data()
-        InfoBar.success("成功", "已禁用所有 Oh My MCP 服务器", parent=self)
+        InfoBar.success(tr("common.success"), tr("dialog.disabled_all_ohmymcp"), parent=self)
 
     def _toggle_mcp(self, mcp_name: str):
         """切换指定 MCP 的启用状态"""
@@ -6560,11 +6560,11 @@ class OhMyMCPDialog(BaseDialog):
         if mcp_name in disabled_mcps:
             # 当前是禁用状态，启用它
             disabled_mcps.remove(mcp_name)
-            InfoBar.success("成功", f'已启用 "{mcp_name}"', parent=self)
+            InfoBar.success(tr("common.success"), tr("dialog.mcp_enabled", name=mcp_name), parent=self)
         else:
             # 当前是启用状态，禁用它
             disabled_mcps.append(mcp_name)
-            InfoBar.success("成功", f'已禁用 "{mcp_name}"', parent=self)
+            InfoBar.success(tr("common.success"), tr("dialog.mcp_disabled", name=mcp_name), parent=self)
 
         config["disabled_mcps"] = disabled_mcps
         self.main_window.save_ohmyopencode_config()
@@ -6794,7 +6794,7 @@ class MCPDialog(BaseDialog):
         self.extra_group = QGroupBox("附加信息（点击标题展开/收起）", self)
         self.extra_group.setCheckable(True)
         self.extra_group.setChecked(False)
-        self.extra_group.setToolTip("点击标题切换展开/收起")
+        self.extra_group.setToolTip(tr("dialog.tooltip_toggle_expand"))
         self.extra_group.toggled.connect(self._on_extra_group_toggled)
         group_layout = QVBoxLayout(self.extra_group)
         group_layout.setSpacing(0)
@@ -6805,7 +6805,7 @@ class MCPDialog(BaseDialog):
 
         desc_label = BodyLabel(tr("skill.description") + ":", self.extra_group)
         self.desc_edit = TextEdit(self.extra_group)
-        self.desc_edit.setPlaceholderText("如: 提供网页抓取能力的 MCP 服务器")
+        self.desc_edit.setPlaceholderText(tr("dialog.placeholder_mcp_desc"))
         self.desc_edit.setMaximumHeight(80)
         extra_layout.addWidget(desc_label)
         extra_layout.addWidget(self.desc_edit)
@@ -6813,7 +6813,7 @@ class MCPDialog(BaseDialog):
         tags_layout = QHBoxLayout()
         tags_layout.addWidget(BodyLabel("标签:", self.extra_group))
         self.tags_edit = LineEdit(self.extra_group)
-        self.tags_edit.setPlaceholderText("如: stdio, web, search")
+        self.tags_edit.setPlaceholderText(tr("dialog.placeholder_mcp_tags"))
         tags_layout.addWidget(self.tags_edit)
         extra_layout.addLayout(tags_layout)
 
@@ -6911,10 +6911,10 @@ class MCPDialog(BaseDialog):
     def _on_preset_clicked(self, preset_key: str) -> None:
         preset = self._get_preset_data(preset_key)
         if not preset:
-            InfoBar.warning("提示", "预设数据不可用", parent=self)
+            InfoBar.warning(tr("common.hint"), tr("dialog.preset_data_unavailable"), parent=self)
             return
         if preset.get("type") != self.mcp_type:
-            InfoBar.warning("提示", "当前预设类型与对话框类型不一致", parent=self)
+            InfoBar.warning(tr("common.hint"), tr("dialog.preset_type_mismatch"), parent=self)
             return
         # 使用预设的键名作为 MCP 名称，而不是 name 字段（name 字段可能包含特殊字符）
         if self.name_edit.isEnabled():
@@ -7259,14 +7259,14 @@ class OpenCodeAgentPage(BasePage):
             return
 
         name = self.table.item(row, 0).text()
-        w = FluentMessageBox("确认删除", f'确定要删除 Agent "{name}" 吗？', self)
+        w = FluentMessageBox(tr("common.confirm_delete_title"), tr("dialog.confirm_delete_agent", name=name), self)
         if w.exec_():
             config = self.main_window.opencode_config or {}
             if "agent" in config and name in config["agent"]:
                 del config["agent"][name]
                 self.main_window.save_opencode_config()
                 self._load_data()
-                self.show_success("成功", f'Agent "{name}" 已删除')
+                self.show_success(tr("common.success"), tr("dialog.agent_deleted", name=name))
 
 
 class OpenCodeAgentDialog(BaseDialog):
@@ -7352,7 +7352,7 @@ class OpenCodeAgentDialog(BaseDialog):
         desc_label.setMinimumWidth(80)
         desc_layout.addWidget(desc_label)
         self.desc_edit = LineEdit(basic_card)
-        self.desc_edit.setPlaceholderText("Agent 功能描述")
+        self.desc_edit.setPlaceholderText(tr("dialog.placeholder_agent_desc"))
         self.desc_edit.setMinimumHeight(36)
         self.desc_edit.setToolTip(get_tooltip("agent_description"))
         desc_layout.addWidget(self.desc_edit)
@@ -7477,7 +7477,7 @@ class OpenCodeAgentDialog(BaseDialog):
         prompt_label.setToolTip(get_tooltip("opencode_agent_prompt"))
         prompt_layout.addWidget(prompt_label)
         self.prompt_edit = TextEdit(prompt_card)
-        self.prompt_edit.setPlaceholderText("自定义系统提示词...")
+        self.prompt_edit.setPlaceholderText(tr("dialog.placeholder_custom_prompt"))
         self.prompt_edit.setMinimumHeight(80)
         prompt_layout.addWidget(self.prompt_edit)
 
@@ -7669,7 +7669,7 @@ class PresetOpenCodeAgentDialog(BaseDialog):
     def _on_add(self):
         selected = self.agent_list.selectedItems()
         if not selected:
-            InfoBar.warning("提示", "请选择至少一个 Agent", parent=self)
+            InfoBar.warning(tr("common.hint"), tr("dialog.select_at_least_one_agent"), parent=self)
             return
 
         config = self.main_window.opencode_config
@@ -7696,7 +7696,7 @@ class PresetOpenCodeAgentDialog(BaseDialog):
                 added += 1
 
         self.main_window.save_opencode_config()
-        InfoBar.success("成功", f"已添加 {added} 个 Agent", parent=self)
+        InfoBar.success(tr("common.success"), tr("dialog.agents_added", count=added), parent=self)
         self.accept()
 
 
@@ -7851,7 +7851,7 @@ class PermissionDialog(BaseDialog):
         tool_layout = QHBoxLayout()
         tool_layout.addWidget(BodyLabel(tr("permission.tool_name") + ":", self))
         self.tool_edit = LineEdit(self)
-        self.tool_edit.setPlaceholderText("如: Bash, Read, mcp_*")
+        self.tool_edit.setPlaceholderText(tr("dialog.placeholder_tool_names"))
         self.tool_edit.setToolTip(get_tooltip("permission_tool"))
         tool_layout.addWidget(self.tool_edit)
         layout.addLayout(tool_layout)
@@ -7884,7 +7884,7 @@ class PermissionDialog(BaseDialog):
     def _on_save(self):
         tool = self.tool_edit.text().strip()
         if not tool:
-            InfoBar.error("错误", "请输入工具名称", parent=self)
+            InfoBar.error(tr("common.error"), tr("dialog.enter_tool_name"), parent=self)
             return
 
         config = self.main_window.opencode_config
@@ -8670,7 +8670,7 @@ class MainWindow(FluentWindow):
             "• 点击【确定】重新加载文件内容（可能覆盖当前界面数据）\n"
             "• 点击【取消】保留当前界面数据（文件保持外部修改）"
         )
-        dialog = FluentMessageBox("配置文件已变更", msg, self)
+        dialog = FluentMessageBox(tr("dialog.config_file_changed"), msg, self)
         if dialog.exec_():
             # 重新加载并刷新哈希
             if config_name == "OpenCode":
@@ -8681,7 +8681,7 @@ class MainWindow(FluentWindow):
                     msg = "\n".join(f"• {e['message']}" for e in errors[:8])
                     if len(errors) > 8:
                         msg += f"\n... 还有 {len(errors) - 8} 个错误"
-                    InfoBar.error("错误", f"重新加载失败：\n{msg}", parent=self)
+                    InfoBar.error(tr("common.error"), tr("dialog.reload_failed", msg=msg), parent=self)
                     return
                 self.opencode_config = new_config
             else:
@@ -8778,7 +8778,7 @@ class MainWindow(FluentWindow):
 • 点击「确定」使用 .json 文件（删除 .jsonc）
 • 点击「取消」使用 .jsonc 文件（保持现状）"""
 
-            dialog = FluentMessageBox(f"{config_name} 配置文件冲突", msg, self)
+            dialog = FluentMessageBox(tr("dialog.config_file_conflict", config_name=config_name), msg, self)
 
             if dialog.exec_():
                 # 用户选择使用 .json，删除 .jsonc
@@ -8856,7 +8856,7 @@ class MainWindow(FluentWindow):
         msg_lines.append("\n是否尝试自动修复？（会先备份原配置）")
 
         # 创建对话框
-        dialog = FluentMessageBox("配置格式检查", "\n".join(msg_lines), self)
+        dialog = FluentMessageBox(tr("dialog.config_format_check"), tr("dialog.msg_15").join(msg_lines), self)
 
         if dialog.exec_():
             # 用户点击确认，执行修复
@@ -9090,14 +9090,14 @@ class OhMyAgentPage(BasePage):
             return
 
         name = self.table.item(row, 0).text()
-        w = FluentMessageBox("确认删除", f'确定要删除 Agent "{name}" 吗？', self)
+        w = FluentMessageBox(tr("common.confirm_delete_title"), tr("dialog.confirm_delete_agent", name=name), self)
         if w.exec_():
             config = self.main_window.ohmyopencode_config or {}
             if "agents" in config and name in config["agents"]:
                 del config["agents"][name]
                 self.main_window.save_ohmyopencode_config()
                 self._load_data()
-                self.show_success("成功", f'Agent "{name}" 已删除')
+                self.show_success(tr("common.success"), tr("dialog.agent_deleted", name=name))
 
 
 class OhMyAgentDialog(BaseDialog):
@@ -9149,7 +9149,7 @@ class OhMyAgentDialog(BaseDialog):
         desc_label.setToolTip(get_tooltip("ohmyopencode_agent_description"))
         layout.addWidget(desc_label)
         self.desc_edit = TextEdit(self)
-        self.desc_edit.setPlaceholderText("描述 Agent 的功能和适用场景")
+        self.desc_edit.setPlaceholderText(tr("dialog.placeholder_agent_desc_detail"))
         self.desc_edit.setMaximumHeight(100)
         layout.addWidget(self.desc_edit)
 
@@ -9477,14 +9477,14 @@ class CategoryPage(BasePage):
             return
 
         name = self.table.item(row, 0).text()
-        w = FluentMessageBox("确认删除", f'确定要删除 Category "{name}" 吗？', self)
+        w = FluentMessageBox(tr("common.confirm_delete_title"), tr("dialog.confirm_delete_category", name=name), self)
         if w.exec_():
             config = self.main_window.ohmyopencode_config or {}
             if "categories" in config and name in config["categories"]:
                 del config["categories"][name]
                 self.main_window.save_ohmyopencode_config()
                 self._load_data()
-                self.show_success("成功", f'Category "{name}" 已删除')
+                self.show_success(tr("common.success"), tr("dialog.category_deleted", name=name))
 
 
 class CategoryDialog(BaseDialog):
@@ -9513,7 +9513,7 @@ class CategoryDialog(BaseDialog):
         name_layout = QHBoxLayout()
         name_layout.addWidget(BodyLabel("Category 名称:", self))
         self.name_edit = LineEdit(self)
-        self.name_edit.setPlaceholderText("如: visual, business-logic")
+        self.name_edit.setPlaceholderText(tr("dialog.placeholder_category_tags"))
         self.name_edit.setToolTip(get_tooltip("category_name"))
         if self.is_edit:
             self.name_edit.setEnabled(False)
@@ -9548,7 +9548,7 @@ class CategoryDialog(BaseDialog):
         desc_label.setToolTip(get_tooltip("category_description"))
         layout.addWidget(desc_label)
         self.desc_edit = TextEdit(self)
-        self.desc_edit.setPlaceholderText("描述该分类的用途和适用场景")
+        self.desc_edit.setPlaceholderText(tr("dialog.placeholder_category_desc"))
         self.desc_edit.setMaximumHeight(80)
         layout.addWidget(self.desc_edit)
 
@@ -9594,7 +9594,7 @@ class CategoryDialog(BaseDialog):
     def _on_save(self):
         name = self.name_edit.text().strip()
         if not name:
-            InfoBar.error("错误", "请输入 Category 名称", parent=self)
+            InfoBar.error(tr("common.error"), tr("dialog.enter_category_name"), parent=self)
             return
 
         config = self.main_window.ohmyopencode_config
@@ -9675,7 +9675,7 @@ class PresetCategoryDialog(BaseDialog):
     def _on_add(self):
         current = self.list_widget.currentItem()
         if not current:
-            InfoBar.warning("提示", "请选择一个预设 Category", parent=self)
+            InfoBar.warning(tr("common.hint"), tr("dialog.select_preset_category"), parent=self)
             return
 
         text = current.text()
@@ -11147,7 +11147,7 @@ class SkillPage(BasePage):
         )
         self.detail_content = TextEdit(right_widget)
         self.detail_content.setReadOnly(True)
-        self.detail_content.setPlaceholderText("选择 Skill 后显示内容")
+        self.detail_content.setPlaceholderText(tr("dialog.placeholder_skill_select"))
         right_layout.addWidget(self.detail_content, 1)
 
         # 操作按钮
@@ -11325,7 +11325,7 @@ class SkillPage(BasePage):
         desc_layout = QHBoxLayout()
         desc_layout.addWidget(BodyLabel("描述 *:", basic_card))
         self.create_desc_edit = LineEdit(basic_card)
-        self.create_desc_edit.setPlaceholderText("描述 Skill 的功能 (1-1024 字符)")
+        self.create_desc_edit.setPlaceholderText(tr("dialog.placeholder_skill_desc"))
         basic_layout.addLayout(desc_layout)
         desc_layout.addWidget(self.create_desc_edit)
 
@@ -11333,7 +11333,7 @@ class SkillPage(BasePage):
         license_layout = QHBoxLayout()
         license_layout.addWidget(BodyLabel(tr("skill.license") + ":", basic_card))
         self.create_license_edit = LineEdit(basic_card)
-        self.create_license_edit.setPlaceholderText("如: MIT, Apache-2.0 (可选)")
+        self.create_license_edit.setPlaceholderText(tr("dialog.placeholder_license"))
         license_layout.addWidget(self.create_license_edit)
         basic_layout.addLayout(license_layout)
 
@@ -11341,7 +11341,7 @@ class SkillPage(BasePage):
         compat_layout = QHBoxLayout()
         compat_layout.addWidget(BodyLabel(tr("skill.compatibility") + ":", basic_card))
         self.create_compat_edit = LineEdit(basic_card)
-        self.create_compat_edit.setPlaceholderText("如: opencode, claude (可选)")
+        self.create_compat_edit.setPlaceholderText(tr("dialog.placeholder_tags"))
         compat_layout.addWidget(self.create_compat_edit)
         basic_layout.addLayout(compat_layout)
 
@@ -11514,7 +11514,7 @@ class SkillPage(BasePage):
         pattern_layout = QHBoxLayout()
         pattern_layout.addWidget(BodyLabel("模式:", edit_card))
         self.perm_pattern_edit = LineEdit(edit_card)
-        self.perm_pattern_edit.setPlaceholderText("如: *, internal-*, my-skill")
+        self.perm_pattern_edit.setPlaceholderText(tr("dialog.placeholder_allow_pattern"))
         self.perm_pattern_edit.setToolTip(get_tooltip("skill_pattern"))
         pattern_layout.addWidget(self.perm_pattern_edit)
         edit_layout.addLayout(pattern_layout)
@@ -11583,7 +11583,7 @@ class SkillPage(BasePage):
         agent_pattern_layout = QHBoxLayout()
         agent_pattern_layout.addWidget(BodyLabel("模式:", agent_edit_card))
         self.agent_perm_pattern_edit = LineEdit(agent_edit_card)
-        self.agent_perm_pattern_edit.setPlaceholderText("如: documents-*, internal-*")
+        self.agent_perm_pattern_edit.setPlaceholderText(tr("dialog.placeholder_deny_pattern"))
         agent_pattern_layout.addWidget(self.agent_perm_pattern_edit)
         agent_edit_layout.addLayout(agent_pattern_layout)
 
@@ -12345,7 +12345,7 @@ class MonitorPage(BasePage):
             # 停止对话延迟测试
             self.monitor_toggle_btn.setText(tr("monitor.start_monitoring"))
             self.monitor_toggle_btn.setIcon(FIF.PLAY)
-            self.monitor_toggle_btn.setToolTip("启动对话延迟自动检测")
+            self.monitor_toggle_btn.setToolTip(tr("dialog.tooltip_auto_detect"))
         # 立即执行一次检测以反映状态变化
         self._do_poll()
 
@@ -15219,7 +15219,7 @@ class BackupDialog(BaseDialog):
             InfoBar.success("成功", f"已备份到: {path}", parent=self)
             self._load_backups()
         else:
-            InfoBar.error("错误", "备份失败", parent=self)
+            InfoBar.error(tr("common.error"), tr("dialog.backup_failed"), parent=self)
 
     def _backup_ohmyopencode(self):
         """备份 Oh My OpenCode 配置"""
@@ -15230,7 +15230,7 @@ class BackupDialog(BaseDialog):
             InfoBar.success("成功", f"已备份到: {path}", parent=self)
             self._load_backups()
         else:
-            InfoBar.error("错误", "备份失败", parent=self)
+            InfoBar.error(tr("common.error"), tr("dialog.backup_failed"), parent=self)
 
     def _open_backup_dir(self):
         """打开备份目录"""
@@ -15242,11 +15242,11 @@ class BackupDialog(BaseDialog):
         """预览选中备份内容"""
         row = self.backup_table.currentRow()
         if row < 0:
-            InfoBar.warning("提示", "请先选择一个备份", parent=self)
+            InfoBar.warning(tr("common.hint"), tr("dialog.select_backup_first"), parent=self)
             return
         backup_path = Path(self.backup_table.item(row, 3).text())
         if not backup_path.exists():
-            InfoBar.error("错误", "备份文件不存在", parent=self)
+            InfoBar.error(tr("common.error"), tr("dialog.backup_file_not_exist"), parent=self)
             return
         try:
             with open(backup_path, "r", encoding="utf-8") as f:
@@ -15273,7 +15273,7 @@ class BackupDialog(BaseDialog):
         """恢复备份"""
         row = self.backup_table.currentRow()
         if row < 0:
-            InfoBar.warning("提示", "请先选择一个备份", parent=self)
+            InfoBar.warning(tr("common.hint"), tr("dialog.select_backup_first"), parent=self)
             return
 
         backup_path = Path(self.backup_table.item(row, 3).text())
@@ -15292,7 +15292,7 @@ class BackupDialog(BaseDialog):
         )
         if w.exec_():
             if self.backup_manager.restore(backup_path, target_path):
-                InfoBar.success("成功", "备份已恢复", parent=self)
+                InfoBar.success(tr("common.success"), tr("dialog.backup_restored"), parent=self)
                 # 重新加载配置
                 if target_path == ConfigPaths.get_opencode_config():
                     self.main_window.opencode_config = ConfigManager.load_json(
@@ -15303,24 +15303,24 @@ class BackupDialog(BaseDialog):
                         target_path
                     )
             else:
-                InfoBar.error("错误", "恢复失败", parent=self)
+                InfoBar.error(tr("common.error"), tr("dialog.restore_failed"), parent=self)
 
     def _delete_backup(self):
         """删除备份"""
         row = self.backup_table.currentRow()
         if row < 0:
-            InfoBar.warning("提示", "请先选择一个备份", parent=self)
+            InfoBar.warning(tr("common.hint"), tr("dialog.select_backup_first"), parent=self)
             return
 
         backup_path = Path(self.backup_table.item(row, 3).text())
 
-        w = FluentMessageBox("确认删除", "确定要删除此备份吗？", self)
+        w = FluentMessageBox(tr("common.confirm_delete_title"), tr("dialog.confirm_delete_backup"), self)
         if w.exec_():
             if self.backup_manager.delete_backup(backup_path):
-                InfoBar.success("成功", "备份已删除", parent=self)
+                InfoBar.success(tr("common.success"), tr("dialog.backup_deleted"), parent=self)
                 self._load_backups()
             else:
-                InfoBar.error("错误", "删除失败", parent=self)
+                InfoBar.error(tr("common.error"), tr("dialog.delete_failed"), parent=self)
 
 
 # ==================== 程序入口 ====================
