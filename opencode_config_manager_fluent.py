@@ -8282,7 +8282,7 @@ class MCPPage(BasePage):
     """MCP 服务器管理页面"""
 
     def __init__(self, main_window, parent=None):
-        super().__init__("MCP 服务器", parent)
+        super().__init__(tr("mcp.title"), parent)
         self.main_window = main_window
         self._setup_ui()
         self._load_data()
@@ -8297,29 +8297,29 @@ class MCPPage(BasePage):
         # 工具栏
         toolbar = QHBoxLayout()
 
-        self.add_local_btn = PrimaryPushButton(FIF.ADD, "添加 Local MCP", self)
+        self.add_local_btn = PrimaryPushButton(FIF.ADD, tr("mcp.add_local"), self)
         self.add_local_btn.clicked.connect(lambda: self._on_add("local"))
         toolbar.addWidget(self.add_local_btn)
 
-        self.add_remote_btn = PushButton(FIF.CLOUD, "添加 Remote MCP", self)
+        self.add_remote_btn = PushButton(FIF.CLOUD, tr("mcp.add_remote"), self)
         self.add_remote_btn.clicked.connect(lambda: self._on_add("remote"))
         toolbar.addWidget(self.add_remote_btn)
 
-        self.edit_btn = PushButton(FIF.EDIT, "编辑", self)
+        self.edit_btn = PushButton(FIF.EDIT, tr("common.edit"), self)
         self.edit_btn.clicked.connect(self._on_edit)
         toolbar.addWidget(self.edit_btn)
 
-        self.delete_btn = PushButton(FIF.DELETE, "删除", self)
+        self.delete_btn = PushButton(FIF.DELETE, tr("common.delete"), self)
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
-        self.awesome_btn = PushButton(FIF.LIBRARY, "awesome MCP 集合", self)
-        self.awesome_btn.setToolTip("打开 awesome MCP 集合仓库")
+        self.awesome_btn = PushButton(FIF.LIBRARY, tr("mcp.awesome_mcp"), self)
+        self.awesome_btn.setToolTip(tr("mcp.awesome_mcp_tooltip"))
         self.awesome_btn.clicked.connect(self._open_awesome_mcp)
         toolbar.addWidget(self.awesome_btn)
 
-        self.ohmy_mcp_btn = PushButton(FIF.ROBOT, "Oh My MCP", self)
-        self.ohmy_mcp_btn.setToolTip("管理 Oh My OpenCode 自带的 MCP 服务器")
+        self.ohmy_mcp_btn = PushButton(FIF.ROBOT, tr("mcp.oh_my_mcp"), self)
+        self.ohmy_mcp_btn.setToolTip(tr("mcp.oh_my_mcp_tooltip"))
         self.ohmy_mcp_btn.clicked.connect(self._on_ohmy_mcp)
         toolbar.addWidget(self.ohmy_mcp_btn)
 
@@ -8331,7 +8331,13 @@ class MCPPage(BasePage):
 
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(
-            ["名称", "类型", "启用", "超时", "命令/URL"]
+            [
+                tr("mcp.server_name"),
+                tr("mcp.server_type"),
+                tr("mcp.enabled"),
+                tr("mcp.timeout"),
+                tr("mcp.command_url"),
+            ]
         )
         # 列宽设置: 名称自适应, 类型15字符(120px), 启用8字符(64px), 超时10字符(80px), 命令/URL自适应
         header = self.table.horizontalHeader()
@@ -8389,18 +8395,18 @@ class MCPPage(BasePage):
         """打开 Oh My OpenCode MCP 管理对话框"""
         dialog = OhMyMCPDialog(self.main_window, parent=self)
         if dialog.exec_():
-            self.show_success("成功", "Oh My MCP 配置已更新")
+            self.show_success(tr("common.success"), tr("mcp.ohmy_updated_success"))
 
     def _on_add(self, mcp_type: str):
         dialog = MCPDialog(self.main_window, mcp_type=mcp_type, parent=self)
         if dialog.exec_():
             self._load_data()
-            self.show_success("成功", "MCP 服务器已添加")
+            self.show_success(tr("common.success"), tr("mcp.added_success"))
 
     def _on_edit(self):
         row = self.table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个 MCP 服务器")
+            self.show_warning(tr("common.info"), tr("mcp.select_first"))
             return
 
         name = self.table.item(row, 0).text()
@@ -8410,23 +8416,27 @@ class MCPPage(BasePage):
         )
         if dialog.exec_():
             self._load_data()
-            self.show_success("成功", "MCP 服务器已更新")
+            self.show_success(tr("common.success"), tr("mcp.updated_success"))
 
     def _on_delete(self):
         row = self.table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个 MCP 服务器")
+            self.show_warning(tr("common.info"), tr("mcp.select_first"))
             return
 
         name = self.table.item(row, 0).text()
-        w = FluentMessageBox("确认删除", f'确定要删除 MCP "{name}" 吗？', self)
+        w = FluentMessageBox(
+            tr("mcp.delete_confirm_title"), tr("mcp.delete_confirm", name=name), self
+        )
         if w.exec_():
             config = self.main_window.opencode_config or {}
             if "mcp" in config and name in config["mcp"]:
                 del config["mcp"][name]
                 self.main_window.save_opencode_config()
                 self._load_data()
-                self.show_success("成功", f'MCP "{name}" 已删除')
+                self.show_success(
+                    tr("common.success"), tr("mcp.deleted_success", name=name)
+                )
 
 
 class OhMyMCPDialog(BaseDialog):
