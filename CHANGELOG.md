@@ -4,6 +4,69 @@
 
 ---
 
+## [v1.2.0] - 2026-01-20 16:00
+**版本代号**: Oh My MCP 管理功能版
+
+### 🆕 新增功能
+- **Oh My MCP 管理功能**：
+  - 在 MCP 服务器页面新增 "Oh My MCP" 按钮
+  - 点击后弹出对话框，显示 Oh My OpenCode 自带的 3 个 MCP 服务器：
+    - **websearch** - 实时网页搜索（Exa AI）
+    - **context7** - 获取最新官方文档
+    - **grep_app** - 超快代码搜索（grep.app）
+  - 可视化管理每个 MCP 的启用/禁用状态
+  - 支持单个切换、全部启用、全部禁用操作
+  - 通过 `disabled_mcps` 字段在 `oh-my-opencode.json` 中保存配置
+
+### 📝 功能说明
+- Oh My OpenCode 默认启用这 3 个 MCP 服务器
+- 用户可以通过 UI 界面方便地禁用不需要的服务器
+- 状态实时显示：✓ 启用（绿色）/ ✗ 禁用（红色）
+- 配置自动保存到 Oh My OpenCode 配置文件
+
+---
+
+## [v1.1.9] - 2026-01-20 15:30
+**版本代号**: MCP 配置规范修复版
+
+### 🐛 Bug 修复
+- **修复 MCP 配置不符合 OpenCode 官方规范导致的启动失败问题**：
+  - **问题根因**：用户使用软件添加 MCP 后，OpenCode 启动报错 `Invalid input mcp.@modelcontextprotocol/server-sequential-thinking`
+  - **修复 1 - MCP 键名规范化**：预设 MCP 模板使用简化的键名（如 `sequential-thinking`）而不是包含特殊字符的 npm 包名（如 `@modelcontextprotocol/server-sequential-thinking`），符合 OpenCode 配置规范
+  - **修复 2 - 移除非标准字段**：根据 OpenCode 官方文档，MCP 配置只能包含固定的标准字段：
+    - Local MCP: `type`, `command`, `environment`, `enabled`, `timeout`
+    - Remote MCP: `type`, `url`, `headers`, `oauth`, `enabled`, `timeout`
+  - 移除了 `description`、`tags`、`homepage`、`docs` 等非标准字段的写入，这些字段仅用于 UI 显示，不再写入配置文件
+
+### 📝 技术细节
+- **OpenCode 配置验证规则**：OpenCode 会严格验证配置文件，不接受包含特殊字符（`@`、`/`）的 MCP 键名，也不接受非标准字段
+- **修复策略**：
+  1. 预设模板的键名直接用作 MCP 名称，不再使用 `name` 字段
+  2. `_update_extra_info()` 方法不再写入任何非标准字段
+  3. 额外信息（描述、标签等）仅在 UI 中显示，不影响配置文件
+- **影响范围**：v1.1.8 及之前版本均存在此问题，v1.1.9 完全修复
+
+---
+
+## [v1.1.8] - 2026-01-20 14:18
+**版本代号**: 配置加载容错修复版
+
+### 🐛 Bug 修复
+- **修复配置文件格式异常导致的启动崩溃问题**：
+  - 修复 `PermissionPage._load_data()` 方法：当 `permission` 字段为字符串等非字典类型时，程序启动会报错 `AttributeError: 'str' object has no attribute 'items'`
+  - 修复 `MCPPage._load_data()` 方法：添加 `mcp` 字段类型检查
+  - 修复 `OpenCodeAgentPage._load_data()` 方法：添加 `agent` 字段类型检查
+  - 修复 `OhMyAgentPage._load_data()` 方法：添加 `agents` 字段类型检查
+  - 修复 `CategoryPage._load_data()` 方法：添加 `categories` 字段类型检查
+  - 所有修复均添加 `isinstance(data, dict)` 类型检查，当配置格式异常时使用空字典，避免程序崩溃
+
+### 📝 技术细节
+- 问题根因：用户配置文件中某些字段（如 `permission`）可能因手动编辑或外部工具导入而变成非字典类型（如字符串 `"allow"`），导致调用 `.items()` 方法时抛出 `AttributeError`
+- 修复策略：在所有 `_load_data()` 方法中，对从配置文件读取的字典类型字段添加类型检查，确保程序健壮性
+- 影响范围：v1.1.6 和 v1.1.7 版本均存在此问题，v1.1.8 完全修复
+
+---
+
 ## [v1.1.7] - 2026-01-20 02:54
 **版本代号**: CLI 导出与 UI 优化版
 

@@ -37,9 +37,27 @@
 
 ---
 
-## 🎯 v1.1.7 最新版本
+## 🎯 v1.2.0 最新版本
 
-### 🆕 CLI 工具导出功能
+### 🆕 新增功能
+- **Oh My MCP 管理功能** - 在 MCP 服务器页面新增 "Oh My MCP" 按钮，可视化管理 Oh My OpenCode 自带的 3 个 MCP 服务器（websearch、context7、grep_app），支持启用/禁用操作，配置自动保存到 `oh-my-opencode.json`
+
+### 📝 v1.1.9 功能回顾
+
+#### 🐛 Bug 修复
+- **修复 MCP 配置不符合 OpenCode 官方规范导致的启动失败** - 当使用软件添加 MCP 后，OpenCode 启动报错 `Invalid input mcp.@modelcontextprotocol/server-sequential-thinking`。现已修复：
+  - MCP 键名规范化：使用简化键名（如 `sequential-thinking`）而不是包含特殊字符的 npm 包名
+  - 移除非标准字段：`description`、`tags`、`homepage`、`docs` 等字段不再写入配置文件，仅用于 UI 显示
+  - 完全符合 OpenCode 官方 MCP 配置规范
+
+### 📝 v1.1.8 功能回顾
+
+#### 🐛 Bug 修复
+- **修复配置文件格式异常导致的启动崩溃问题** - 当配置文件中 `permission`、`mcp`、`agent` 等字段为非字典类型时，程序启动会报错 `AttributeError: 'str' object has no attribute 'items'`，现已添加类型检查，确保程序健壮性
+
+### 📝 v1.1.7 功能回顾
+
+#### 🆕 CLI 工具导出功能
 - **Claude Code 多模型配置** - 支持 4 个模型字段 (主模型、Haiku、Sonnet、Opus)
 - **Codex/Gemini 双文件预览** - 双文件标签页预览 (auth.json + config.toml / .env + settings.json)
 - **Base URL 临时修改** - 可临时修改用于导出 不影响原始配置

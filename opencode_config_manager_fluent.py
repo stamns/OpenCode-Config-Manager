@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v1.1.7 (QFluentWidgets 版本)
+OpenCode & Oh My OpenCode 配置管理器 v1.2.0 (QFluentWidgets 版本)
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
 
 基于 PyQt5 + QFluentWidgets 重写，提供现代化 Fluent Design 界面
@@ -998,7 +998,7 @@ class UIConfig:
         """
 
 
-APP_VERSION = "1.1.7"
+APP_VERSION = "1.2.0"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -8095,6 +8095,11 @@ class MCPPage(BasePage):
         self.awesome_btn.clicked.connect(self._open_awesome_mcp)
         toolbar.addWidget(self.awesome_btn)
 
+        self.ohmy_mcp_btn = PushButton(FIF.ROBOT, "Oh My MCP", self)
+        self.ohmy_mcp_btn.setToolTip("管理 Oh My OpenCode 自带的 MCP 服务器")
+        self.ohmy_mcp_btn.clicked.connect(self._on_ohmy_mcp)
+        toolbar.addWidget(self.ohmy_mcp_btn)
+
         toolbar.addStretch()
         self._layout.addLayout(toolbar)
 
@@ -8126,6 +8131,10 @@ class MCPPage(BasePage):
         config = self.main_window.opencode_config or {}
         mcps = config.get("mcp", {})
 
+        # 添加类型检查，防止 mcp 字段为非字典类型时崩溃
+        if not isinstance(mcps, dict):
+            mcps = {}
+
         for name, data in mcps.items():
             row = self.table.rowCount()
             self.table.insertRow(row)
@@ -8152,6 +8161,12 @@ class MCPPage(BasePage):
 
     def _open_awesome_mcp(self):
         webbrowser.open("https://github.com/punkpeye/awesome-mcp-servers")
+
+    def _on_ohmy_mcp(self):
+        """打开 Oh My OpenCode MCP 管理对话框"""
+        dialog = OhMyMCPDialog(self.main_window, parent=self)
+        if dialog.exec_():
+            self.show_success("成功", "Oh My MCP 配置已更新")
 
     def _on_add(self, mcp_type: str):
         dialog = MCPDialog(self.main_window, mcp_type=mcp_type, parent=self)
@@ -8189,6 +8204,237 @@ class MCPPage(BasePage):
                 self.main_window.save_opencode_config()
                 self._load_data()
                 self.show_success("成功", f'MCP "{name}" 已删除')
+
+
+class OhMyMCPDialog(BaseDialog):
+    """Oh My OpenCode MCP 管理对话框"""
+
+    # Oh My OpenCode 自带的 MCP 服务器
+    OHMY_MCPS = {
+        "websearch": {
+            "name": "websearch",
+            "description": "实时网页搜索 - 由 Exa AI 提供支持，搜索网页并返回相关内容",
+            "type": "remote",
+            "enabled_by_default": True,
+        },
+        "context7": {
+            "name": "context7",
+            "description": "获取最新官方文档 - 为库和框架获取最新的官方文档",
+            "type": "remote",
+            "enabled_by_default": True,
+        },
+        "grep_app": {
+            "name": "grep_app",
+            "description": "超快代码搜索 - 通过 grep.app 在数百万公共 GitHub 仓库中搜索代码",
+            "type": "remote",
+            "enabled_by_default": True,
+        },
+    }
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+        self.setWindowTitle("Oh My OpenCode MCP 管理")
+        self.setMinimumWidth(700)
+        self.setMinimumHeight(400)
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        # 说明文字
+        info_label = BodyLabel(
+            "Oh My OpenCode 默认启用以下 MCP 服务器。您可以选择禁用不需要的服务器。",
+            self,
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # MCP 列表
+        self.table = TableWidget(self)
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["名称", "类型", "状态", "描述"])
+
+        # 列宽设置
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.resizeSection(0, 120)  # 名称
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.resizeSection(1, 80)  # 类型
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.resizeSection(2, 100)  # 状态 - 增宽以显示完整的"✓ 启用"
+        header.setSectionResizeMode(3, QHeaderView.Stretch)  # 描述
+
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.table)
+
+        # 操作按钮
+        btn_layout = QHBoxLayout()
+
+        self.toggle_btn = PushButton("切换状态", self)
+        self.toggle_btn.setToolTip("启用或禁用选中的 MCP 服务器")
+        self.toggle_btn.clicked.connect(self._on_toggle)
+        btn_layout.addWidget(self.toggle_btn)
+
+        self.enable_all_btn = PushButton("全部启用", self)
+        self.enable_all_btn.clicked.connect(self._on_enable_all)
+        btn_layout.addWidget(self.enable_all_btn)
+
+        self.disable_all_btn = PushButton("全部禁用", self)
+        self.disable_all_btn.clicked.connect(self._on_disable_all)
+        btn_layout.addWidget(self.disable_all_btn)
+
+        btn_layout.addStretch()
+
+        self.close_btn = PrimaryPushButton("关闭", self)
+        self.close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(self.close_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _load_data(self):
+        """加载 Oh My MCP 数据 - 从配置文件动态读取"""
+        self.table.setRowCount(0)
+
+        # 读取 Oh My OpenCode 配置
+        config = self.main_window.ohmyopencode_config or {}
+
+        # 获取 MCP 配置
+        mcps = config.get("mcp", {})
+        if not isinstance(mcps, dict):
+            mcps = {}
+
+        # 获取禁用列表
+        disabled_mcps = config.get("disabled_mcps", [])
+        if not isinstance(disabled_mcps, list):
+            disabled_mcps = []
+
+        # 如果配置中没有 MCP，显示提示信息
+        if not mcps:
+            InfoBar.info(
+                "提示",
+                "Oh My OpenCode 配置中未找到 MCP 服务器。\n默认的 MCP（websearch、context7、grep_app）由 Oh My OpenCode 插件自动提供。",
+                parent=self,
+            )
+            # 显示默认的 3 个 MCP
+            mcps = self.OHMY_MCPS
+
+        # 填充表格
+        for mcp_name, mcp_data in mcps.items():
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            # 名称
+            self.table.setItem(row, 0, QTableWidgetItem(mcp_name))
+
+            # 类型 - 从配置中读取或使用默认值
+            if isinstance(mcp_data, dict):
+                mcp_type = "remote" if "url" in mcp_data else "local"
+                description = mcp_data.get("description", "")
+            else:
+                # 如果是预设的 MCP，使用预设信息
+                mcp_type = (
+                    mcp_data.get("type", "remote")
+                    if isinstance(mcp_data, dict)
+                    else "remote"
+                )
+                description = (
+                    mcp_data.get("description", "")
+                    if isinstance(mcp_data, dict)
+                    else ""
+                )
+
+            self.table.setItem(row, 1, QTableWidgetItem(mcp_type))
+
+            # 状态
+            is_enabled = mcp_name not in disabled_mcps
+            status_text = "✓ 启用" if is_enabled else "✗ 禁用"
+            status_item = QTableWidgetItem(status_text)
+            if is_enabled:
+                status_item.setForeground(QColor("#4CAF50"))  # 绿色
+            else:
+                status_item.setForeground(QColor("#F44336"))  # 红色
+            self.table.setItem(row, 2, status_item)
+
+            # 描述
+            if not description:
+                description = f"{mcp_name} MCP 服务器"
+            desc_item = QTableWidgetItem(description)
+            desc_item.setToolTip(description)
+            self.table.setItem(row, 3, desc_item)
+
+    def _on_toggle(self):
+        """切换选中 MCP 的状态"""
+        row = self.table.currentRow()
+        if row < 0:
+            InfoBar.warning("提示", "请先选择一个 MCP 服务器", parent=self)
+            return
+
+        mcp_name = self.table.item(row, 0).text()
+        self._toggle_mcp(mcp_name)
+        self._load_data()
+
+    def _on_enable_all(self):
+        """启用所有 MCP"""
+        config = self.main_window.ohmyopencode_config
+        if config is None:
+            config = {}
+            self.main_window.ohmyopencode_config = config
+
+        # 清空 disabled_mcps 列表
+        config["disabled_mcps"] = []
+        self.main_window.save_ohmyopencode_config()
+        self._load_data()
+        InfoBar.success("成功", "已启用所有 Oh My MCP 服务器", parent=self)
+
+    def _on_disable_all(self):
+        """禁用所有 MCP"""
+        config = self.main_window.ohmyopencode_config
+        if config is None:
+            config = {}
+            self.main_window.ohmyopencode_config = config
+
+        # 获取所有 MCP 名称
+        mcps = config.get("mcp", {})
+        if not isinstance(mcps, dict):
+            mcps = {}
+
+        # 如果没有配置 MCP，使用默认的 3 个
+        if not mcps:
+            mcps = self.OHMY_MCPS
+
+        # 将所有 MCP 添加到 disabled_mcps 列表
+        config["disabled_mcps"] = list(mcps.keys())
+        self.main_window.save_ohmyopencode_config()
+        self._load_data()
+        InfoBar.success("成功", "已禁用所有 Oh My MCP 服务器", parent=self)
+
+    def _toggle_mcp(self, mcp_name: str):
+        """切换指定 MCP 的启用状态"""
+        config = self.main_window.ohmyopencode_config
+        if config is None:
+            config = {}
+            self.main_window.ohmyopencode_config = config
+
+        disabled_mcps = config.get("disabled_mcps", [])
+        if not isinstance(disabled_mcps, list):
+            disabled_mcps = []
+
+        if mcp_name in disabled_mcps:
+            # 当前是禁用状态，启用它
+            disabled_mcps.remove(mcp_name)
+            InfoBar.success("成功", f'已启用 "{mcp_name}"', parent=self)
+        else:
+            # 当前是启用状态，禁用它
+            disabled_mcps.append(mcp_name)
+            InfoBar.success("成功", f'已禁用 "{mcp_name}"', parent=self)
+
+        config["disabled_mcps"] = disabled_mcps
+        self.main_window.save_ohmyopencode_config()
 
 
 class MCPDialog(BaseDialog):
@@ -8525,8 +8771,9 @@ class MCPDialog(BaseDialog):
         if preset.get("type") != self.mcp_type:
             InfoBar.warning("提示", "当前预设类型与对话框类型不一致", parent=self)
             return
+        # 使用预设的键名作为 MCP 名称，而不是 name 字段（name 字段可能包含特殊字符）
         if self.name_edit.isEnabled():
-            self.name_edit.setText(preset.get("name", ""))
+            self.name_edit.setText(preset_key)
         if self.mcp_type == "local":
             command = preset.get("command", [])
             env = preset.get("environment", {})
@@ -8651,24 +8898,16 @@ class MCPDialog(BaseDialog):
         self.docs_edit.setText(docs)
 
     def _update_extra_info(self, mcp_data: Dict[str, Any]) -> None:
-        description = self.desc_edit.toPlainText().strip()
-        tags_text = self.tags_edit.text().strip()
-        homepage = self.homepage_edit.text().strip()
-        docs = self.docs_edit.text().strip()
+        """更新额外信息到 MCP 数据
 
-        if description:
-            mcp_data["description"] = description
+        注意：根据 OpenCode 官方文档，MCP 配置只能包含固定的标准字段：
+        - Local MCP: type, command, environment, enabled, timeout
+        - Remote MCP: type, url, headers, oauth, enabled, timeout
 
-        if tags_text:
-            tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
-            if tags:
-                mcp_data["tags"] = tags
-
-        if homepage:
-            mcp_data["homepage"] = homepage
-
-        if docs:
-            mcp_data["docs"] = docs
+        description、tags、homepage、docs 等字段仅用于 UI 显示，不应写入配置文件。
+        """
+        # 不再写入非标准字段，保持配置文件符合 OpenCode 规范
+        pass
 
     def _bind_preview_signals(self) -> None:
         self.name_edit.textChanged.connect(lambda: self._update_preview())
@@ -8801,6 +9040,10 @@ class OpenCodeAgentPage(BasePage):
         self.table.setRowCount(0)
         config = self.main_window.opencode_config or {}
         agents = config.get("agent", {})
+
+        # 添加类型检查，防止 agent 字段为非字典类型时崩溃
+        if not isinstance(agents, dict):
+            agents = {}
 
         for name, data in agents.items():
             row = self.table.rowCount()
@@ -9320,6 +9563,10 @@ class PermissionPage(BasePage):
         self.table.setRowCount(0)
         config = self.main_window.opencode_config or {}
         permissions = config.get("permission", {})
+
+        # 添加类型检查，防止 permission 字段为非字典类型时崩溃
+        if not isinstance(permissions, dict):
+            permissions = {}
 
         for tool, level in permissions.items():
             # 跳过 skill 子配置
@@ -10478,6 +10725,11 @@ class OhMyAgentPage(BasePage):
         self.table.setRowCount(0)
         config = self.main_window.ohmyopencode_config or {}
         agents = config.get("agents", {})
+
+        # 添加类型检查，防止 agents 字段为非字典类型时崩溃
+        if not isinstance(agents, dict):
+            agents = {}
+
         models = self._get_available_models()
         self._refresh_bulk_model_combo(models)
 
@@ -10853,6 +11105,11 @@ class CategoryPage(BasePage):
         self.table.setRowCount(0)
         config = self.main_window.ohmyopencode_config or {}
         categories = config.get("categories", {})
+
+        # 添加类型检查，防止 categories 字段为非字典类型时崩溃
+        if not isinstance(categories, dict):
+            categories = {}
+
         models = self._get_available_models()
         self._refresh_bulk_model_combo(models)
 
