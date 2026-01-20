@@ -8194,13 +8194,13 @@ class PresetModelDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.add_btn = PrimaryPushButton("添加选中模型", self)
-        self.add_btn.clicked.connect(self._on_add)
-        btn_layout.addWidget(self.add_btn)
+        self.save_btn = PrimaryPushButton(tr("common.save"), self)
+        self.save_btn.clicked.connect(self._on_save)
+        btn_layout.addWidget(self.save_btn)
 
         layout.addLayout(btn_layout)
 
@@ -8467,7 +8467,7 @@ class OhMyMCPDialog(BaseDialog):
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
         self.main_window = main_window
-        self.setWindowTitle("Oh My OpenCode MCP 管理")
+        self.setWindowTitle(tr("mcp.ohmy_dialog.title"))
         self.setMinimumWidth(700)
         self.setMinimumHeight(400)
         self._setup_ui()
@@ -8479,7 +8479,7 @@ class OhMyMCPDialog(BaseDialog):
 
         # 说明文字
         info_label = BodyLabel(
-            "Oh My OpenCode 默认启用以下 MCP 服务器。您可以选择禁用不需要的服务器。",
+            tr("mcp.ohmy_dialog.info_text"),
             self,
         )
         info_label.setWordWrap(True)
@@ -8488,7 +8488,14 @@ class OhMyMCPDialog(BaseDialog):
         # MCP 列表
         self.table = TableWidget(self)
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["名称", "类型", "状态", "描述"])
+        self.table.setHorizontalHeaderLabels(
+            [
+                tr("mcp.ohmy_dialog.table_name"),
+                tr("mcp.ohmy_dialog.table_type"),
+                tr("mcp.ohmy_dialog.table_status"),
+                tr("mcp.ohmy_dialog.table_description"),
+            ]
+        )
 
         # 列宽设置
         header = self.table.horizontalHeader()
@@ -8508,22 +8515,22 @@ class OhMyMCPDialog(BaseDialog):
         # 操作按钮
         btn_layout = QHBoxLayout()
 
-        self.toggle_btn = PushButton("切换状态", self)
-        self.toggle_btn.setToolTip("启用或禁用选中的 MCP 服务器")
+        self.toggle_btn = PushButton(tr("mcp.ohmy_dialog.toggle_button"), self)
+        self.toggle_btn.setToolTip(tr("mcp.ohmy_dialog.toggle_tooltip"))
         self.toggle_btn.clicked.connect(self._on_toggle)
         btn_layout.addWidget(self.toggle_btn)
 
-        self.enable_all_btn = PushButton("全部启用", self)
+        self.enable_all_btn = PushButton(tr("mcp.ohmy_dialog.enable_all"), self)
         self.enable_all_btn.clicked.connect(self._on_enable_all)
         btn_layout.addWidget(self.enable_all_btn)
 
-        self.disable_all_btn = PushButton("全部禁用", self)
+        self.disable_all_btn = PushButton(tr("mcp.ohmy_dialog.disable_all"), self)
         self.disable_all_btn.clicked.connect(self._on_disable_all)
         btn_layout.addWidget(self.disable_all_btn)
 
         btn_layout.addStretch()
 
-        self.close_btn = PrimaryPushButton("关闭", self)
+        self.close_btn = PrimaryPushButton(tr("common.close"), self)
         self.close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(self.close_btn)
 
@@ -8549,8 +8556,8 @@ class OhMyMCPDialog(BaseDialog):
         # 如果配置中没有 MCP，显示提示信息
         if not mcps:
             InfoBar.info(
-                "提示",
-                "Oh My OpenCode 配置中未找到 MCP 服务器。\n默认的 MCP（websearch、context7、grep_app）由 Oh My OpenCode 插件自动提供。",
+                tr("common.info"),
+                tr("mcp.ohmy_dialog.no_mcp_info"),
                 parent=self,
             )
             # 显示默认的 3 个 MCP
@@ -8585,7 +8592,11 @@ class OhMyMCPDialog(BaseDialog):
 
             # 状态
             is_enabled = mcp_name not in disabled_mcps
-            status_text = "✓ 启用" if is_enabled else "✗ 禁用"
+            status_text = (
+                tr("mcp.ohmy_dialog.status_enabled")
+                if is_enabled
+                else tr("mcp.ohmy_dialog.status_disabled")
+            )
             status_item = QTableWidgetItem(status_text)
             if is_enabled:
                 status_item.setForeground(QColor("#4CAF50"))  # 绿色
@@ -8604,7 +8615,11 @@ class OhMyMCPDialog(BaseDialog):
         """切换选中 MCP 的状态"""
         row = self.table.currentRow()
         if row < 0:
-            InfoBar.warning("提示", "请先选择一个 MCP 服务器", parent=self)
+            InfoBar.warning(
+                tr("common.warning"),
+                tr("mcp.ohmy_dialog.select_first_warning"),
+                parent=self,
+            )
             return
 
         mcp_name = self.table.item(row, 0).text()
@@ -8622,7 +8637,9 @@ class OhMyMCPDialog(BaseDialog):
         config["disabled_mcps"] = []
         self.main_window.save_ohmyopencode_config()
         self._load_data()
-        InfoBar.success("成功", "已启用所有 Oh My MCP 服务器", parent=self)
+        InfoBar.success(
+            tr("common.success"), tr("mcp.ohmy_dialog.enable_all_success"), parent=self
+        )
 
     def _on_disable_all(self):
         """禁用所有 MCP"""
@@ -8777,9 +8794,15 @@ class MCPDialog(BaseDialog):
         self.mcp_type = mcp_type
         self.is_edit = mcp_name is not None
 
-        self.setWindowTitle(
-            "编辑 MCP" if self.is_edit else f"添加 {mcp_type.title()} MCP"
-        )
+        if self.is_edit:
+            self.setWindowTitle(tr("mcp.dialog.edit_title"))
+        else:
+            title = (
+                tr("mcp.dialog.add_local_title")
+                if mcp_type == "local"
+                else tr("mcp.dialog.add_remote_title")
+            )
+            self.setWindowTitle(title)
         self.setMinimumWidth(550)
         self._setup_ui()
 
@@ -8793,22 +8816,28 @@ class MCPDialog(BaseDialog):
 
         preset_layout = QHBoxLayout()
         preset_layout.setSpacing(6)
-        preset_layout.addWidget(BodyLabel("常用 MCP 预设:", self))
+        preset_layout.addWidget(BodyLabel(tr("mcp.dialog.preset_label"), self))
         self.preset_buttons = {}
-        current_type_label = "远程" if self.mcp_type == "remote" else "本地"
+        current_type_label = (
+            tr("mcp.remote") if self.mcp_type == "remote" else tr("mcp.local")
+        )
         for preset_name in self.PRESET_MCP_TEMPLATES.keys():
             preset_data = self._get_preset_data(preset_name)
             preset_type = preset_data.get("type", "local")
-            preset_type_label = "远程" if preset_type == "remote" else "本地"
+            preset_type_label = (
+                tr("mcp.remote") if preset_type == "remote" else tr("mcp.local")
+            )
             preset_btn = PushButton(preset_name, self)
             preset_btn.clicked.connect(partial(self._on_preset_clicked, preset_name))
             if preset_type != self.mcp_type:
                 preset_btn.setEnabled(False)
                 preset_btn.setToolTip(
-                    f"当前为{current_type_label} MCP，此预设为{preset_type_label}类型"
+                    tr("mcp.dialog.preset_disabled_tooltip").format(
+                        current=current_type_label, preset=preset_type_label
+                    )
                 )
             else:
-                preset_btn.setToolTip("点击应用预设")
+                preset_btn.setToolTip(tr("mcp.dialog.preset_tooltip"))
             preset_layout.addWidget(preset_btn)
             self.preset_buttons[preset_name] = preset_btn
         preset_layout.addStretch()
@@ -8816,9 +8845,9 @@ class MCPDialog(BaseDialog):
 
         # MCP 名称
         name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("MCP 名称:", self))
+        name_layout.addWidget(BodyLabel(tr("mcp.dialog.mcp_name_label"), self))
         self.name_edit = LineEdit(self)
-        self.name_edit.setPlaceholderText("如: context7, filesystem")
+        self.name_edit.setPlaceholderText(tr("mcp.dialog.mcp_name_placeholder"))
         self.name_edit.setToolTip(get_tooltip("mcp_name"))
         if self.is_edit:
             self.name_edit.setEnabled(False)
@@ -8826,51 +8855,51 @@ class MCPDialog(BaseDialog):
         layout.addLayout(name_layout)
 
         # 启用状态
-        self.enabled_check = CheckBox("启用此 MCP 服务器", self)
+        self.enabled_check = CheckBox(tr("mcp.dialog.enable_checkbox"), self)
         self.enabled_check.setChecked(True)
         self.enabled_check.setToolTip(get_tooltip("mcp_enabled"))
         layout.addWidget(self.enabled_check)
 
         if self.mcp_type == "local":
             # 启动命令
-            cmd_label = BodyLabel("启动命令 (JSON数组):", self)
+            cmd_label = BodyLabel(tr("mcp.dialog.command_label"), self)
             cmd_label.setToolTip(get_tooltip("mcp_command"))
             layout.addWidget(cmd_label)
             self.command_edit = TextEdit(self)
-            self.command_edit.setPlaceholderText('["npx", "-y", "@mcp/server"]')
+            self.command_edit.setPlaceholderText(tr("mcp.dialog.command_placeholder"))
             self.command_edit.setMaximumHeight(80)
             layout.addWidget(self.command_edit)
 
             # 环境变量
-            env_label = BodyLabel("环境变量 (JSON对象):", self)
+            env_label = BodyLabel(tr("mcp.dialog.env_label"), self)
             env_label.setToolTip(get_tooltip("mcp_environment"))
             layout.addWidget(env_label)
             self.env_edit = TextEdit(self)
-            self.env_edit.setPlaceholderText('{"API_KEY": "xxx"}')
+            self.env_edit.setPlaceholderText(tr("mcp.dialog.env_placeholder"))
             self.env_edit.setMaximumHeight(80)
             layout.addWidget(self.env_edit)
         else:
             # URL
             url_layout = QHBoxLayout()
-            url_layout.addWidget(BodyLabel("服务器 URL:", self))
+            url_layout.addWidget(BodyLabel(tr("mcp.dialog.url_label"), self))
             self.url_edit = LineEdit(self)
-            self.url_edit.setPlaceholderText("https://mcp.example.com/mcp")
+            self.url_edit.setPlaceholderText(tr("mcp.dialog.url_placeholder"))
             self.url_edit.setToolTip(get_tooltip("mcp_url"))
             url_layout.addWidget(self.url_edit)
             layout.addLayout(url_layout)
 
             # Headers
-            headers_label = BodyLabel("请求头 (JSON对象):", self)
+            headers_label = BodyLabel(tr("mcp.dialog.headers_label"), self)
             headers_label.setToolTip(get_tooltip("mcp_headers"))
             layout.addWidget(headers_label)
             self.headers_edit = TextEdit(self)
-            self.headers_edit.setPlaceholderText('{"Authorization": "Bearer xxx"}')
+            self.headers_edit.setPlaceholderText(tr("mcp.dialog.headers_placeholder"))
             self.headers_edit.setMaximumHeight(80)
             layout.addWidget(self.headers_edit)
 
         # 超时
         timeout_layout = QHBoxLayout()
-        timeout_layout.addWidget(BodyLabel("超时 (ms):", self))
+        timeout_layout.addWidget(BodyLabel(tr("mcp.dialog.timeout_label"), self))
         self.timeout_spin = SpinBox(self)
         self.timeout_spin.setRange(1000, 300000)
         self.timeout_spin.setValue(5000)
@@ -9056,7 +9085,9 @@ class MCPDialog(BaseDialog):
     def _on_save(self):
         name = self.name_edit.text().strip()
         if not name:
-            InfoBar.error("错误", "请输入 MCP 名称", parent=self)
+            InfoBar.error(
+                tr("common.error"), tr("mcp.dialog.name_required"), parent=self
+            )
             return
 
         self._update_preview()
@@ -9070,7 +9101,7 @@ class MCPDialog(BaseDialog):
             config["mcp"] = {}
 
         if not self.is_edit and name in config["mcp"]:
-            InfoBar.error("错误", f'MCP "{name}" 已存在', parent=self)
+            InfoBar.error(tr("common.error"), tr("mcp.dialog.name_exists"), parent=self)
             return
 
         mcp_data = {
@@ -9085,7 +9116,11 @@ class MCPDialog(BaseDialog):
                 try:
                     mcp_data["command"] = json.loads(cmd_text)
                 except json.JSONDecodeError as e:
-                    InfoBar.error("错误", f"命令 JSON 格式错误: {e}", parent=self)
+                    InfoBar.error(
+                        tr("common.error"),
+                        tr("mcp.dialog.command_invalid").format(error=str(e)),
+                        parent=self,
+                    )
                     return
 
             env_text = self.env_edit.toPlainText().strip()
@@ -9093,12 +9128,18 @@ class MCPDialog(BaseDialog):
                 try:
                     mcp_data["environment"] = json.loads(env_text)
                 except json.JSONDecodeError as e:
-                    InfoBar.error("错误", f"环境变量 JSON 格式错误: {e}", parent=self)
+                    InfoBar.error(
+                        tr("common.error"),
+                        tr("mcp.dialog.env_invalid").format(error=str(e)),
+                        parent=self,
+                    )
                     return
         else:
             url = self.url_edit.text().strip()
             if not url:
-                InfoBar.error("错误", "请输入服务器 URL", parent=self)
+                InfoBar.error(
+                    tr("common.error"), tr("mcp.dialog.url_required"), parent=self
+                )
                 return
             mcp_data["url"] = url
 
@@ -9107,7 +9148,11 @@ class MCPDialog(BaseDialog):
                 try:
                     mcp_data["headers"] = json.loads(headers_text)
                 except json.JSONDecodeError as e:
-                    InfoBar.error("错误", f"请求头 JSON 格式错误: {e}", parent=self)
+                    InfoBar.error(
+                        tr("common.error"),
+                        tr("mcp.dialog.headers_invalid").format(error=str(e)),
+                        parent=self,
+                    )
                     return
 
         self._update_extra_info(mcp_data)
