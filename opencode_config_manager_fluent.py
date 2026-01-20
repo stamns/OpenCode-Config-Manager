@@ -7235,7 +7235,7 @@ class ModelPage(BasePage):
     """Model 管理页面"""
 
     def __init__(self, main_window, parent=None):
-        super().__init__("Model 管理", parent)
+        super().__init__(tr("model.title"), parent)
         self.main_window = main_window
         self._setup_ui()
         self._load_providers()
@@ -7256,7 +7256,7 @@ class ModelPage(BasePage):
     def _setup_ui(self):
         # Provider 选择
         provider_layout = QHBoxLayout()
-        provider_layout.addWidget(BodyLabel("选择 Provider:", self))
+        provider_layout.addWidget(BodyLabel(tr("model.select_provider"), self))
         self.provider_combo = ComboBox(self)
         self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
         provider_layout.addWidget(self.provider_combo)
@@ -7268,23 +7268,23 @@ class ModelPage(BasePage):
 
         self._bulk_models_owner = "model"
 
-        self.add_btn = PrimaryPushButton(FIF.ADD, "添加模型", self)
+        self.add_btn = PrimaryPushButton(FIF.ADD, tr("model.add_model"), self)
         self.add_btn.clicked.connect(self._on_add)
         toolbar.addWidget(self.add_btn)
 
-        self.preset_btn = PushButton(FIF.LIBRARY, "从预设添加", self)
+        self.preset_btn = PushButton(FIF.LIBRARY, tr("model.add_from_preset"), self)
         self.preset_btn.clicked.connect(self._on_add_preset)
         toolbar.addWidget(self.preset_btn)
 
-        self.edit_btn = PushButton(FIF.EDIT, "编辑", self)
+        self.edit_btn = PushButton(FIF.EDIT, tr("common.edit"), self)
         self.edit_btn.clicked.connect(self._on_edit)
         toolbar.addWidget(self.edit_btn)
 
-        self.delete_btn = PushButton(FIF.DELETE, "删除", self)
+        self.delete_btn = PushButton(FIF.DELETE, tr("common.delete"), self)
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
-        self.bulk_model_label = BodyLabel("批量模型:", self)
+        self.bulk_model_label = BodyLabel(tr("model.bulk_model"), self)
         toolbar.addWidget(self.bulk_model_label)
         self.bulk_model_combo = ComboBox(self)
         self.bulk_model_combo.setMinimumWidth(220)
@@ -7298,7 +7298,13 @@ class ModelPage(BasePage):
 
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(
-            ["模型ID", "显示名称", "上下文", "输出", "附件"]
+            [
+                tr("model.model_id"),
+                tr("model.model_name"),
+                tr("model.context"),
+                tr("model.output"),
+                tr("model.attachment"),
+            ]
         )
         # 调整列宽：模型ID和显示名称加宽，上下文/输出/附件各10字符(约80px)
         header = self.table.horizontalHeader()
@@ -7356,47 +7362,51 @@ class ModelPage(BasePage):
         """添加模型"""
         provider = self.provider_combo.currentText()
         if not provider:
-            self.show_warning("提示", "请先选择一个 Provider")
+            self.show_warning(tr("common.info"), tr("model.select_provider_first"))
             return
         dialog = ModelDialog(self.main_window, provider, parent=self)
         if dialog.exec_():
             self._load_models(provider)
-            self.show_success("成功", "模型已添加")
+            self.show_success(tr("common.success"), tr("model.added_success"))
 
     def _on_add_preset(self):
         """从预设添加模型"""
         provider = self.provider_combo.currentText()
         if not provider:
-            self.show_warning("提示", "请先选择一个 Provider")
+            self.show_warning(tr("common.info"), tr("model.select_provider_first"))
             return
         dialog = PresetModelDialog(self.main_window, provider, parent=self)
         if dialog.exec_():
             self._load_models(provider)
-            self.show_success("成功", "预设模型已添加")
+            self.show_success(tr("common.success"), tr("model.preset_added_success"))
 
     def _on_edit(self):
         """编辑模型"""
         provider = self.provider_combo.currentText()
         row = self.table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个模型")
+            self.show_warning(tr("common.info"), tr("model.select_model_first"))
             return
         model_id = self.table.item(row, 0).text()
         dialog = ModelDialog(self.main_window, provider, model_id=model_id, parent=self)
         if dialog.exec_():
             self._load_models(provider)
-            self.show_success("成功", "模型已更新")
+            self.show_success(tr("common.success"), tr("model.updated_success"))
 
     def _on_delete(self):
         """删除模型"""
         provider = self.provider_combo.currentText()
         row = self.table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个模型")
+            self.show_warning(tr("common.info"), tr("model.select_model_first"))
             return
 
         model_id = self.table.item(row, 0).text()
-        w = FluentMessageBox("确认删除", f'确定要删除模型 "{model_id}" 吗？', self)
+        w = FluentMessageBox(
+            tr("model.delete_confirm_title"),
+            tr("model.delete_confirm", name=model_id),
+            self,
+        )
         if w.exec_():
             config = self.main_window.opencode_config or {}
             if "provider" in config and provider in config["provider"]:
@@ -7405,7 +7415,9 @@ class ModelPage(BasePage):
                     del models[model_id]
                     self.main_window.save_opencode_config()
                     self._load_models(provider)
-                    self.show_success("成功", f'模型 "{model_id}" 已删除')
+                    self.show_success(
+                        tr("common.success"), tr("model.deleted_success", name=model_id)
+                    )
 
 
 class ModelDialog(BaseDialog):
