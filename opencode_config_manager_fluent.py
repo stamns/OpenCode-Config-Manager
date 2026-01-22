@@ -808,6 +808,9 @@ from PyQt5.QtCore import (
     QObject,
     QRegularExpression,
     Qt as QtCore,
+    QMetaObject,
+    Q_ARG,
+    pyqtSlot,
 )
 from PyQt5.QtGui import (
     QIcon,
@@ -855,6 +858,7 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     InfoBarIcon,
+    StateToolTip,
     PushButton,
     PrimaryPushButton,
     TransparentPushButton,
@@ -5754,13 +5758,13 @@ class ProviderPage(BasePage):
             "thinking": False,
             "variants": False,
         }
-        if category == "Claude 系列":
+        if category == tr("provider.claude_series_short"):
             support["thinking"] = True
             support["variants"] = True
-        elif category == "OpenAI/Codex 系列":
+        elif category == tr("provider.openai_series_short"):
             support["options"] = True
             support["variants"] = True
-        elif category == "Gemini 系列":
+        elif category == tr("provider.gemini_series_short"):
             support["thinking"] = True
             support["variants"] = True
 
@@ -5806,7 +5810,7 @@ class ProviderPage(BasePage):
                 continue
             if key == "thinking":
                 value = config.get("value")
-                if category == "Claude 系列":
+                if category == tr("provider.claude_series_short"):
                     result["options"] = {
                         "thinking": {"type": "enabled", "budgetTokens": 64000}
                     }
@@ -5820,7 +5824,7 @@ class ProviderPage(BasePage):
                         result["options"]["thinking"]["budgetTokens"] = thinking_map[
                             value
                         ]
-                elif category == "Gemini 系列":
+                elif category == tr("provider.gemini_series_short"):
                     result["options"] = {"thinkingConfig": {"thinkingBudget": 32000}}
                     thinking_map = {
                         "8k": 8000,
@@ -5881,6 +5885,12 @@ class ProviderPage(BasePage):
         self.export_cli_btn = PushButton(FIF.SEND, tr("provider.export_to_cli"), self)
         self.export_cli_btn.clicked.connect(self._on_export_to_cli)
         toolbar.addWidget(self.export_cli_btn)
+
+        self.query_balance_btn = PushButton(
+            FIF.MARKET, tr("provider.query_balance"), self
+        )
+        self.query_balance_btn.clicked.connect(self._on_query_balance)
+        toolbar.addWidget(self.query_balance_btn)
 
         toolbar.addStretch()
         self._layout.addLayout(toolbar)
@@ -6028,6 +6038,541 @@ class ProviderPage(BasePage):
         else:
             self.show_warning(tr("common.info"), tr("provider.cli_page_unavailable"))
 
+    def _on_query_balance(self):
+        """查询余额"""
+        row = self.table.currentRow()
+        if row < 0:
+            self.show_warning(tr("common.info"), tr("provider.select_first"))
+            return
+
+        provider_name = self.table.item(row, 0).text()
+        config = self.main_window.opencode_config or {}
+        provider = config.get("provider", {}).get(provider_name, {})
+
+        if not isinstance(provider, dict):
+            self.show_warning(tr("common.info"), tr("provider.provider_not_exist"))
+            return
+
+        # 获取 baseURL 和 apiKey
+        options = provider.get("options", {})
+        base_url = options.get("baseURL", "")
+        api_key = options.get("apiKey", "")
+
+        if not base_url:
+            self.show_warning(tr("common.info"), tr("provider.no_base_url"))
+            return
+
+        if not api_key:
+            self.show_warning(tr("common.info"), tr("provider.no_api_key"))
+            return
+
+        # 显示加载提示
+        state_tooltip = StateToolTip(
+            tr("provider.querying_balance"), tr("provider.please_wait"), self.window()
+        )
+        state_tooltip.move(state_tooltip.getSuitablePos())
+        state_tooltip.show()
+
+        # 在后台线程查询余额
+        def query_thread():
+            try:
+                usage_data = self._query_provider_usage(base_url, api_key)
+                # 在主线程显示结果
+                QMetaObject.invokeMethod(
+                    self,
+                    "_show_balance_result",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, provider_name),
+                    Q_ARG(object, usage_data),
+                    Q_ARG(str, api_key),
+                    Q_ARG(object, state_tooltip),
+                )
+            except Exception as e:
+                # 在主线程显示错误
+                QMetaObject.invokeMethod(
+                    self,
+                    "_show_balance_error",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, str(e)),
+                    Q_ARG(object, state_tooltip),
+                )
+
+        thread = threading.Thread(target=query_thread, daemon=True)
+        thread.start()
+
+    def _query_provider_usage(self, base_url: str, api_key: str) -> Dict[str, Any]:
+        """查询 Provider 用量（支持 OpenAI API 和 NewAPI）"""
+        import json
+        from datetime import datetime, timedelta
+
+        # 规范化 base_url - 移除末尾斜杠
+        base_url = base_url.rstrip("/")
+
+        # 先尝试 NewAPI 接口
+        try:
+            return self._query_newapi_usage(base_url, api_key)
+        except Exception as newapi_error:
+            # NewAPI 失败，尝试 OpenAI API
+            pass
+
+        # 尝试 OpenAI API 接口
+        try:
+            return self._query_openai_usage(base_url, api_key)
+        except Exception as openai_error:
+            # 两种方式都失败，抛出错误
+            raise Exception(
+                f"余额查询失败。NewAPI: {str(newapi_error)[:50]}... OpenAI API: {str(openai_error)[:50]}..."
+            )
+
+    def _query_newapi_usage(self, base_url: str, api_key: str) -> Dict[str, Any]:
+        """查询 NewAPI 用量"""
+        import json
+
+        # NewAPI 余额查询端点
+        balance_url = f"{base_url}/api/usage/token"
+        req = urllib.request.Request(balance_url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise Exception(f"NewAPI 查询失败: {e.code} - {error_body}")
+        except Exception as e:
+            raise Exception(f"NewAPI 请求失败: {str(e)}")
+
+        # 解析 NewAPI 响应
+        if not response_data.get("code") or "data" not in response_data:
+            raise Exception("NewAPI 响应格式不正确")
+
+        usage_data = response_data["data"]
+
+        # NewAPI 返回的是积分，需要转换为美元
+        # 转换比例: 500,000 积分 = $1
+        CONVERSION_RATE = 500000.0
+
+        total_granted_points = usage_data.get("total_granted", 0)
+        total_used_points = usage_data.get("total_used", 0)
+        total_available_points = usage_data.get("total_available", 0)
+
+        # 转换为美元
+        total_balance = total_granted_points / CONVERSION_RATE
+        used_balance = total_used_points / CONVERSION_RATE
+        remaining_balance = total_available_points / CONVERSION_RATE
+
+        # 判断是否为无限额度
+        is_unlimited = usage_data.get("unlimited_quota", False)
+
+        return {
+            "api_type": "newapi",
+            "token_name": usage_data.get("name", ""),
+            "total_balance": total_balance,
+            "used_balance": used_balance,
+            "remaining_balance": remaining_balance,
+            "is_unlimited": is_unlimited,
+            "access_until": usage_data.get("expires_at", 0),
+            "query_start_date": "",
+            "query_end_date": "",
+        }
+
+    def _query_openai_usage(self, base_url: str, api_key: str) -> Dict[str, Any]:
+        """查询 OpenAI API 用量"""
+        import json
+        from datetime import datetime, timedelta
+
+        # 规范化 base_url - 移除末尾斜杠
+        base_url = base_url.rstrip("/")
+
+        # 智能处理 /v1 路径 - 如果已经包含 /v1，就不再添加
+        if base_url.endswith("/v1"):
+            api_base = base_url
+        else:
+            api_base = f"{base_url}/v1"
+
+        # 1. 查询订阅信息
+        subscription_url = f"{api_base}/dashboard/billing/subscription"
+        req = urllib.request.Request(subscription_url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                subscription_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise Exception(f"订阅信息查询失败: {e.code} - {error_body}")
+        except Exception as e:
+            raise Exception(f"请求订阅信息失败: {str(e)}")
+
+        total_balance = subscription_data.get("hard_limit_usd", 0.0)
+        access_until = subscription_data.get("access_until", 0)
+        is_unlimited = total_balance >= 100000000.0
+
+        # 2. 查询使用情况（最近100天）
+        now = datetime.now()
+        start = now - timedelta(days=100)
+        start_date = start.strftime("%Y-%m-%d")
+        end_date = now.strftime("%Y-%m-%d")
+
+        usage_url = f"{api_base}/dashboard/billing/usage?start_date={start_date}&end_date={end_date}"
+        req = urllib.request.Request(usage_url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                usage_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise Exception(f"使用情况查询失败: {e.code} - {error_body}")
+        except Exception as e:
+            raise Exception(f"请求使用情况失败: {str(e)}")
+
+        # total_usage 是以美分为单位，需要除以100转换为美元
+        total_usage_cents = usage_data.get("total_usage", 0.0)
+        used_balance = total_usage_cents / 100.0
+
+        # 计算剩余额度
+        remaining_balance = (
+            float("inf") if is_unlimited else (total_balance - used_balance)
+        )
+
+        return {
+            "api_type": "openai",
+            "token_name": "",
+            "total_balance": total_balance,
+            "used_balance": used_balance,
+            "remaining_balance": remaining_balance,
+            "is_unlimited": is_unlimited,
+            "access_until": access_until,
+            "query_start_date": start_date,
+            "query_end_date": end_date,
+        }
+
+        # 1. 查询订阅信息
+        subscription_url = f"{api_base}/dashboard/billing/subscription"
+        req = urllib.request.Request(subscription_url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                subscription_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise Exception(f"订阅信息查询失败: {e.code} - {error_body}")
+        except Exception as e:
+            raise Exception(f"请求订阅信息失败: {str(e)}")
+
+        total_balance = subscription_data.get("hard_limit_usd", 0.0)
+        access_until = subscription_data.get("access_until", 0)
+        is_unlimited = total_balance >= 100000000.0
+
+        # 2. 查询使用情况（最近100天）
+        now = datetime.now()
+        start = now - timedelta(days=100)
+        start_date = start.strftime("%Y-%m-%d")
+        end_date = now.strftime("%Y-%m-%d")
+
+        usage_url = f"{api_base}/dashboard/billing/usage?start_date={start_date}&end_date={end_date}"
+        req = urllib.request.Request(usage_url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                usage_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise Exception(f"使用情况查询失败: {e.code} - {error_body}")
+        except Exception as e:
+            raise Exception(f"请求使用情况失败: {str(e)}")
+
+        # total_usage 是以美分为单位，需要除以100转换为美元
+        total_usage_cents = usage_data.get("total_usage", 0.0)
+        used_balance = total_usage_cents / 100.0
+
+        # 计算剩余额度
+        remaining_balance = (
+            float("inf") if is_unlimited else (total_balance - used_balance)
+        )
+
+        return {
+            "total_balance": total_balance,
+            "used_balance": used_balance,
+            "remaining_balance": remaining_balance,
+            "is_unlimited": is_unlimited,
+            "access_until": access_until,
+            "query_start_date": start_date,
+            "query_end_date": end_date,
+        }
+
+    @pyqtSlot(str, object, str, object)
+    def _show_balance_result(
+        self,
+        provider_name: str,
+        usage_data: Dict[str, Any],
+        api_key: str,
+        state_tooltip,
+    ):
+        """显示余额查询结果"""
+        state_tooltip.setContent(tr("provider.query_complete"))
+        state_tooltip.setState(True)
+        state_tooltip.close()
+
+        # 创建结果对话框
+        dialog = BalanceResultDialog(provider_name, usage_data, api_key, self)
+        dialog.exec_()
+
+    @pyqtSlot(str, object)
+    def _show_balance_error(self, error_msg: str, state_tooltip):
+        """显示余额查询错误"""
+        state_tooltip.setContent(tr("provider.query_failed"))
+        state_tooltip.setState(False)
+        state_tooltip.close()
+
+        self.show_error(
+            tr("common.error"), tr("provider.query_balance_error", error=error_msg)
+        )
+
+
+class BalanceResultDialog(BaseDialog):
+    """余额查询结果对话框"""
+
+    def __init__(
+        self,
+        provider_name: str,
+        usage_data: Dict[str, Any],
+        api_key: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.provider_name = provider_name
+        self.usage_data = usage_data
+        self.api_key = api_key
+        self.setWindowTitle(tr("provider.balance_info"))
+        self.setMinimumSize(500, 400)
+        self._setup_ui()
+
+    def _mask_api_key(self, api_key: str) -> str:
+        """遮挡 API Key 中间部分"""
+        if not api_key or len(api_key) < 10:
+            return "***"
+        # 显示前4个字符和后4个字符，中间用 *** 代替
+        return f"{api_key[:4]}***{api_key[-4:]}"
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        # 标题
+        title = TitleLabel(tr("provider.balance_info"), self)
+        layout.addWidget(title)
+
+        # Provider 名称和 Key
+        provider_key_layout = QHBoxLayout()
+        provider_label = BodyLabel(
+            f"{tr('provider.provider_name')}: {self.provider_name}", self
+        )
+        provider_key_layout.addWidget(provider_label)
+
+        # 显示遮挡的 API Key
+        if self.api_key:
+            masked_key = self._mask_api_key(self.api_key)
+            key_label = CaptionLabel(f"Key: {masked_key}", self)
+            key_label.setStyleSheet("color: #888888; margin-left: 10px;")
+            provider_key_layout.addWidget(key_label)
+
+        provider_key_layout.addStretch()
+        layout.addLayout(provider_key_layout)
+
+        # API 类型（如果是 NewAPI）
+        api_type = self.usage_data.get("api_type", "openai")
+        if api_type == "newapi":
+            api_type_label = CaptionLabel(f"API 类型: NewAPI / One-API", self)
+            api_type_label.setStyleSheet("color: #888888;")
+            layout.addWidget(api_type_label)
+
+            # Token 名称
+            token_name = self.usage_data.get("token_name", "")
+            if token_name:
+                token_label = CaptionLabel(f"Token 名称: {token_name}", self)
+                token_label.setStyleSheet("color: #888888;")
+                layout.addWidget(token_label)
+
+        # 余额信息卡片
+        card = QWidget(self)
+        card_layout = QVBoxLayout(card)
+        card_layout.setSpacing(16)
+
+        # 判断是否为无限额度
+        is_unlimited = self.usage_data.get("is_unlimited", False)
+
+        # ========== Key 额度信息区域 ==========
+        quota_section = QWidget(self)
+        quota_layout = QVBoxLayout(quota_section)
+        quota_layout.setSpacing(8)
+        quota_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 区域标题
+        quota_title = StrongBodyLabel(tr("provider.key_quota_info"), self)
+        quota_layout.addWidget(quota_title)
+
+        # Key 额度
+        key_quota_layout = QHBoxLayout()
+        key_quota_layout.addWidget(BodyLabel(tr("provider.key_quota") + ":", self))
+        if is_unlimited:
+            key_quota_value = BodyLabel("🔓 无限", self)
+            key_quota_value.setStyleSheet(
+                "font-weight: bold; color: #107c10; font-size: 15px;"
+            )
+        else:
+            key_quota_value = BodyLabel(
+                self._format_currency(self.usage_data["total_balance"]), self
+            )
+            key_quota_value.setStyleSheet(
+                "font-weight: bold; color: #0078d4; font-size: 15px;"
+            )
+        key_quota_layout.addWidget(key_quota_value)
+        key_quota_layout.addStretch()
+        quota_layout.addLayout(key_quota_layout)
+
+        # Key 余额
+        key_balance_layout = QHBoxLayout()
+        key_balance_layout.addWidget(BodyLabel(tr("provider.key_balance") + ":", self))
+        if is_unlimited:
+            key_balance_value = BodyLabel("🔓 无限", self)
+            key_balance_value.setStyleSheet(
+                "font-weight: bold; color: #107c10; font-size: 15px;"
+            )
+        else:
+            remaining = self.usage_data["remaining_balance"]
+            key_balance_value = BodyLabel(self._format_currency(remaining), self)
+            color = "#107c10" if remaining > 10 else "#d13438"
+            key_balance_value.setStyleSheet(
+                f"font-weight: bold; color: {color}; font-size: 15px;"
+            )
+        key_balance_layout.addWidget(key_balance_value)
+        key_balance_layout.addStretch()
+        quota_layout.addLayout(key_balance_layout)
+
+        card_layout.addWidget(quota_section)
+
+        # 分隔线
+        separator1 = QWidget(self)
+        separator1.setFixedHeight(1)
+        separator1.setStyleSheet("background-color: #e0e0e0;")
+        card_layout.addWidget(separator1)
+
+        # ========== 使用详情区域 ==========
+        usage_section = QWidget(self)
+        usage_layout = QVBoxLayout(usage_section)
+        usage_layout.setSpacing(8)
+        usage_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 区域标题
+        usage_title = StrongBodyLabel(tr("provider.usage_details"), self)
+        usage_layout.addWidget(usage_title)
+
+        # 已使用
+        used_layout = QHBoxLayout()
+        used_layout.addWidget(BodyLabel(tr("provider.used") + ":", self))
+        used_value = BodyLabel(
+            self._format_currency(self.usage_data["used_balance"]), self
+        )
+        used_value.setStyleSheet("font-weight: bold; color: #d13438;")
+        used_layout.addWidget(used_value)
+        used_layout.addStretch()
+        usage_layout.addLayout(used_layout)
+
+        # 使用率（仅对有限额度显示）
+        if not is_unlimited and self.usage_data["total_balance"] > 0:
+            usage_rate = (
+                self.usage_data["used_balance"] / self.usage_data["total_balance"]
+            ) * 100
+            usage_rate_layout = QHBoxLayout()
+            usage_rate_layout.addWidget(
+                BodyLabel(tr("provider.usage_rate") + ":", self)
+            )
+            usage_rate_value = BodyLabel(f"{usage_rate:.2f}%", self)
+            usage_rate_value.setStyleSheet("font-weight: bold; color: #888888;")
+            usage_rate_layout.addWidget(usage_rate_value)
+            usage_rate_layout.addStretch()
+            usage_layout.addLayout(usage_rate_layout)
+
+        card_layout.addWidget(usage_section)
+
+        # 分隔线
+        separator2 = QWidget(self)
+        separator2.setFixedHeight(1)
+        separator2.setStyleSheet("background-color: #e0e0e0;")
+        card_layout.addWidget(separator2)
+
+        # ========== 其他信息区域 ==========
+        other_section = QWidget(self)
+        other_layout = QVBoxLayout(other_section)
+        other_layout.setSpacing(8)
+        other_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 有效期
+        if self.usage_data["access_until"] > 0:
+            expiry_layout = QHBoxLayout()
+            expiry_layout.addWidget(BodyLabel(tr("provider.access_until") + ":", self))
+            expiry_date = datetime.fromtimestamp(self.usage_data["access_until"])
+            expiry_value = BodyLabel(expiry_date.strftime("%Y-%m-%d %H:%M:%S"), self)
+            expiry_layout.addWidget(expiry_value)
+            expiry_layout.addStretch()
+            other_layout.addLayout(expiry_layout)
+        else:
+            # 永不过期
+            expiry_layout = QHBoxLayout()
+            expiry_layout.addWidget(BodyLabel(tr("provider.expiry") + ":", self))
+            expiry_value = BodyLabel(tr("provider.never_expire"), self)
+            expiry_value.setStyleSheet("color: #107c10;")
+            expiry_layout.addWidget(expiry_value)
+            expiry_layout.addStretch()
+            other_layout.addLayout(expiry_layout)
+
+        # 查询时间范围（仅对 OpenAI API 显示）
+        if api_type == "openai" and self.usage_data["query_start_date"]:
+            date_range_layout = QHBoxLayout()
+            date_range_layout.addWidget(
+                BodyLabel(tr("provider.query_period") + ":", self)
+            )
+            date_range_value = CaptionLabel(
+                f"{self.usage_data['query_start_date']} ~ {self.usage_data['query_end_date']}",
+                self,
+            )
+            date_range_layout.addWidget(date_range_value)
+            date_range_layout.addStretch()
+            other_layout.addLayout(date_range_layout)
+
+        card_layout.addWidget(other_section)
+
+        # 添加说明文本
+        note_label = CaptionLabel(
+            tr("provider.balance_note"),
+            self,
+        )
+        note_label.setStyleSheet("color: #888888; font-style: italic;")
+        card_layout.addWidget(note_label)
+
+        layout.addWidget(card)
+        layout.addStretch()
+
+        # 关闭按钮
+        close_btn = PrimaryPushButton(tr("common.close"), self)
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+    def _format_currency(self, value: float) -> str:
+        """格式化货币"""
+        if value == float("inf"):
+            return tr("provider.unlimited")
+        return f"${value:.2f}"
+
 
 class ModelPresetCustomDialog(BaseDialog):
     """模型配置包自定义弹窗"""
@@ -6097,8 +6642,10 @@ class ModelPresetCustomDialog(BaseDialog):
 
     def _on_series_changed(self, series: str):
         self.model_list.clear()
-        if series in PRESET_MODEL_CONFIGS:
-            models = PRESET_MODEL_CONFIGS[series]["models"]
+        # 将显示名称转换回原始键
+        original_key = self._series_map.get(series, series)
+        if original_key in PRESET_MODEL_CONFIGS:
+            models = PRESET_MODEL_CONFIGS[original_key]["models"]
             for model_id, data in models.items():
                 self.model_list.addItem(f"{model_id} - {data.get('name', '')}")
 
@@ -6111,7 +6658,9 @@ class ModelPresetCustomDialog(BaseDialog):
             return
 
         series = self.series_combo.currentText()
-        series_data = PRESET_MODEL_CONFIGS.get(series, {})
+        # 将显示名称转换回原始键
+        original_key = self._series_map.get(series, series)
+        series_data = PRESET_MODEL_CONFIGS.get(original_key, {})
         models_data = series_data.get("models", {})
 
         config = self.main_window.opencode_config
@@ -6210,6 +6759,12 @@ class NativeProviderPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
+        self.query_balance_btn = PushButton(
+            FIF.MARKET, tr("provider.query_balance"), self
+        )
+        self.query_balance_btn.clicked.connect(self._on_query_balance)
+        toolbar.addWidget(self.query_balance_btn)
+
         toolbar.addStretch()
         self._layout.addLayout(toolbar)
 
@@ -6294,7 +6849,9 @@ class NativeProviderPage(BasePage):
         """配置 Provider"""
         provider = self._get_selected_provider()
         if not provider:
-            self.show_warning("提示", "请先选择一个 Provider")
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Provider")
+            )
             return
 
         dialog = NativeProviderDialog(
@@ -6312,7 +6869,9 @@ class NativeProviderPage(BasePage):
         """测试连接"""
         provider = self._get_selected_provider()
         if not provider:
-            self.show_warning("提示", "请先选择一个 Provider")
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Provider")
+            )
             return
 
         if not provider.test_endpoint:
@@ -6322,7 +6881,9 @@ class NativeProviderPage(BasePage):
         # 获取认证信息
         auth_data = self.auth_manager.get_provider_auth(provider.id)
         if not auth_data:
-            self.show_error("测试失败", "请先配置此 Provider")
+            self.show_error(
+                tr("provider.test_failed"), tr("provider.please_configure_provider")
+            )
             return
 
         api_key = auth_data.get("apiKey", "")
@@ -6330,7 +6891,9 @@ class NativeProviderPage(BasePage):
             api_key = _resolve_env_value(api_key)
 
         if not api_key:
-            self.show_error("测试失败", "未找到 API Key")
+            self.show_error(
+                tr("provider.test_failed"), tr("provider.api_key_not_found")
+            )
             return
 
         # 获取 baseURL
@@ -6354,7 +6917,9 @@ class NativeProviderPage(BasePage):
             base_url = default_urls.get(provider.id, "")
 
         if not base_url:
-            self.show_error("测试失败", "无法确定 API 地址")
+            self.show_error(
+                tr("provider.test_failed"), tr("provider.cannot_determine_api_address")
+            )
             return
 
         test_url = base_url.rstrip("/") + provider.test_endpoint
@@ -6369,17 +6934,24 @@ class NativeProviderPage(BasePage):
             req.add_header("x-api-key", api_key)
             with urllib.request.urlopen(req, timeout=10) as resp:
                 elapsed = int((time.time() - start_time) * 1000)
-                self.show_success("连接成功", f"响应时间: {elapsed}ms")
+                self.show_success(
+                    tr("provider.connection_success"),
+                    f"{tr('provider.response_time')}: {elapsed}ms",
+                )
         except urllib.error.HTTPError as e:
-            self.show_error("连接失败", f"HTTP {e.code}: {e.reason}")
+            self.show_error(
+                tr("provider.connection_failed"), f"HTTP {e.code}: {e.reason}"
+            )
         except Exception as e:
-            self.show_error("连接失败", str(e))
+            self.show_error(tr("provider.connection_failed"), str(e))
 
     def _on_delete(self):
         """删除配置"""
         provider = self._get_selected_provider()
         if not provider:
-            self.show_warning("提示", "请先选择一个 Provider")
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Provider")
+            )
             return
 
         # 检查是否已配置
@@ -6416,6 +6988,246 @@ class NativeProviderPage(BasePage):
 
         self.show_success("删除成功", f"{provider.name} 配置已删除")
         self._load_data()
+
+    def _on_query_balance(self):
+        """查询余额"""
+        provider = self._get_selected_provider()
+        if not provider:
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Provider")
+            )
+            return
+
+        # 获取认证信息
+        auth_data = self.auth_manager.get_provider_auth(provider.id)
+        if not auth_data:
+            self.show_warning("提示", "此 Provider 尚未配置")
+            return
+
+        # 获取 API Key
+        api_key = auth_data.get("apiKey", "")
+        if not api_key:
+            self.show_warning("提示", "未配置 API Key")
+            return
+
+        # 获取 baseURL
+        config = self.main_window.opencode_config or {}
+        provider_config = config.get("provider", {}).get(provider.id, {})
+        options = provider_config.get("options", {})
+        base_url = options.get("baseURL", provider.default_base_url)
+
+        if not base_url:
+            self.show_warning("提示", "未配置 baseURL")
+            return
+
+        # 显示加载提示
+        state_tooltip = StateToolTip(
+            tr("provider.querying_balance"), tr("provider.please_wait"), self.window()
+        )
+        state_tooltip.move(state_tooltip.getSuitablePos())
+        state_tooltip.show()
+
+        # 在后台线程查询余额
+        def query_thread():
+            try:
+                usage_data = self._query_provider_usage(base_url, api_key)
+                # 在主线程显示结果
+                QMetaObject.invokeMethod(
+                    self,
+                    "_show_balance_result",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, provider.name),
+                    Q_ARG(object, usage_data),
+                    Q_ARG(object, state_tooltip),
+                )
+            except Exception as e:
+                # 在主线程显示错误
+                QMetaObject.invokeMethod(
+                    self,
+                    "_show_balance_error",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, str(e)),
+                    Q_ARG(object, state_tooltip),
+                )
+
+        thread = threading.Thread(target=query_thread, daemon=True)
+        thread.start()
+
+    def _query_provider_usage(self, base_url: str, api_key: str) -> Dict[str, Any]:
+        """查询 Provider 用量（支持 OpenAI API 和 NewAPI）"""
+        import json
+        from datetime import datetime, timedelta
+
+        # 规范化 base_url - 移除末尾斜杠
+        base_url = base_url.rstrip("/")
+
+        # 先尝试 NewAPI 接口
+        try:
+            return self._query_newapi_usage(base_url, api_key)
+        except Exception as newapi_error:
+            # NewAPI 失败，尝试 OpenAI API
+            pass
+
+        # 尝试 OpenAI API 接口
+        try:
+            return self._query_openai_usage(base_url, api_key)
+        except Exception as openai_error:
+            # 两种方式都失败，抛出错误
+            raise Exception(
+                f"余额查询失败。NewAPI: {str(newapi_error)[:50]}... OpenAI API: {str(openai_error)[:50]}..."
+            )
+
+    def _query_newapi_usage(self, base_url: str, api_key: str) -> Dict[str, Any]:
+        """查询 NewAPI 用量"""
+        import json
+
+        # NewAPI 余额查询端点
+        balance_url = f"{base_url}/api/usage/token"
+        req = urllib.request.Request(balance_url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise Exception(f"NewAPI 查询失败: {e.code} - {error_body}")
+        except Exception as e:
+            raise Exception(f"NewAPI 请求失败: {str(e)}")
+
+        # 解析 NewAPI 响应
+        if not response_data.get("code") or "data" not in response_data:
+            raise Exception("NewAPI 响应格式不正确")
+
+        usage_data = response_data["data"]
+
+        # NewAPI 返回的是积分，需要转换为美元
+        # 转换比例: 500,000 积分 = $1
+        CONVERSION_RATE = 500000.0
+
+        total_granted_points = usage_data.get("total_granted", 0)
+        total_used_points = usage_data.get("total_used", 0)
+        total_available_points = usage_data.get("total_available", 0)
+
+        # 转换为美元
+        total_balance = total_granted_points / CONVERSION_RATE
+        used_balance = total_used_points / CONVERSION_RATE
+        remaining_balance = total_available_points / CONVERSION_RATE
+
+        # 判断是否为无限额度
+        is_unlimited = usage_data.get("unlimited_quota", False)
+
+        return {
+            "api_type": "newapi",
+            "token_name": usage_data.get("name", ""),
+            "total_balance": total_balance,
+            "used_balance": used_balance,
+            "remaining_balance": remaining_balance,
+            "is_unlimited": is_unlimited,
+            "access_until": usage_data.get("expires_at", 0),
+            "query_start_date": "",
+            "query_end_date": "",
+        }
+
+    def _query_openai_usage(self, base_url: str, api_key: str) -> Dict[str, Any]:
+        """查询 OpenAI API 用量"""
+        import json
+        from datetime import datetime, timedelta
+
+        # 智能处理 /v1 路径 - 如果已经包含 /v1，就不再添加
+        if base_url.endswith("/v1"):
+            api_base = base_url
+        else:
+            api_base = f"{base_url}/v1"
+
+        # 1. 查询订阅信息
+        subscription_url = f"{api_base}/dashboard/billing/subscription"
+        req = urllib.request.Request(subscription_url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                subscription_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise Exception(f"订阅信息查询失败: {e.code} - {error_body}")
+        except Exception as e:
+            raise Exception(f"请求订阅信息失败: {str(e)}")
+
+        total_balance = subscription_data.get("hard_limit_usd", 0.0)
+        access_until = subscription_data.get("access_until", 0)
+        is_unlimited = total_balance >= 100000000.0
+
+        # 2. 查询使用情况（最近100天）
+        now = datetime.now()
+        start = now - timedelta(days=100)
+        start_date = start.strftime("%Y-%m-%d")
+        end_date = now.strftime("%Y-%m-%d")
+
+        usage_url = f"{api_base}/dashboard/billing/usage?start_date={start_date}&end_date={end_date}"
+        req = urllib.request.Request(usage_url)
+        req.add_header("Authorization", f"Bearer {api_key}")
+        req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                usage_data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise Exception(f"使用情况查询失败: {e.code} - {error_body}")
+        except Exception as e:
+            raise Exception(f"请求使用情况失败: {str(e)}")
+
+        # total_usage 是以美分为单位，需要除以100转换为美元
+        total_usage_cents = usage_data.get("total_usage", 0.0)
+        used_balance = total_usage_cents / 100.0
+
+        # 计算剩余额度
+        remaining_balance = (
+            float("inf") if is_unlimited else (total_balance - used_balance)
+        )
+
+        return {
+            "api_type": "openai",
+            "token_name": "",
+            "total_balance": total_balance,
+            "used_balance": used_balance,
+            "remaining_balance": remaining_balance,
+            "is_unlimited": is_unlimited,
+            "access_until": access_until,
+            "query_start_date": start_date,
+            "query_end_date": end_date,
+        }
+
+    @pyqtSlot(str, object, str, object)
+    def _show_balance_result(
+        self,
+        provider_name: str,
+        usage_data: Dict[str, Any],
+        api_key: str,
+        state_tooltip,
+    ):
+        """显示余额查询结果"""
+        state_tooltip.setContent(tr("provider.query_complete"))
+        state_tooltip.setState(True)
+        state_tooltip.close()
+
+        # 创建结果对话框
+        dialog = BalanceResultDialog(provider_name, usage_data, api_key, self)
+        dialog.exec_()
+
+    @pyqtSlot(str, object)
+    def _show_balance_error(self, error_msg: str, state_tooltip):
+        """显示余额查询错误"""
+        state_tooltip.setContent(tr("provider.query_failed"))
+        state_tooltip.setState(False)
+        state_tooltip.close()
+
+        self.show_error(
+            tr("common.error"), tr("provider.query_balance_error", error=error_msg)
+        )
 
 
 class ModelSelectDialog(BaseDialog):
@@ -6548,9 +7360,11 @@ class ModelSelectDialog(BaseDialog):
     def _load_categories(self):
         self._rebuild_categories()
         self._build_batch_controls()
-        self._add_batch_control("attachment", "附件", [])
-        self._add_batch_control("modalities", "图片", [])
-        self._add_batch_control("limit", "输出长度", ["4k", "8k", "16k", "32k", "64k"])
+        self._add_batch_control("attachment", tr("provider.attachment"), [])
+        self._add_batch_control("modalities", tr("provider.image"), [])
+        self._add_batch_control(
+            "limit", tr("provider.output_length"), ["4k", "8k", "16k", "32k", "64k"]
+        )
         self._add_batch_control(
             "options", "Options", ["fast", "medium", "high", "xhigh"]
         )
@@ -6625,11 +7439,11 @@ class ModelSelectDialog(BaseDialog):
     def _rebuild_categories(self):
         self.category_list.blockSignals(True)
         self.category_list.clear()
-        self.category_list.addItem("全部")
+        self.category_list.addItem(tr("provider.all_categories"))
 
         groups = self._group_models()
         for group in sorted(groups.keys(), key=str.lower):
-            if group != "全部":
+            if group != tr("provider.all_categories"):
                 self.category_list.addItem(group)
 
         self.category_list.setCurrentRow(0)
@@ -6655,12 +7469,12 @@ class ModelSelectDialog(BaseDialog):
             return model_id[:1].upper() if model_id else "其他"
         # 厂商识别
         if "claude" in lower:
-            return "Claude 系列"
+            return tr("provider.claude_series_short")
         if "gemini" in lower:
-            return "Gemini 系列"
+            return tr("provider.gemini_series_short")
         if any(token in lower for token in ("gpt", "openai", "codex", "o1")):
-            return "OpenAI/Codex 系列"
-        return "其他模型"
+            return tr("provider.openai_series_short")
+        return tr("provider.other_models_short")
 
     def _resolve_category_for_preset(self, model_id: str) -> str:
         return self._get_group_key(model_id, "厂商识别")
@@ -6681,7 +7495,7 @@ class ModelSelectDialog(BaseDialog):
 
     def _get_bulk_category(self) -> str:
         if not self._visible_model_ids:
-            return "其他模型"
+            return tr("provider.other_models_short")
         return self._resolve_category_for_preset(self._visible_model_ids[0])
 
     def _get_category_bulk_support(self, category: str) -> Dict[str, bool]:
@@ -6693,13 +7507,13 @@ class ModelSelectDialog(BaseDialog):
             "thinking": False,
             "variants": False,
         }
-        if category == "Claude 系列":
+        if category == tr("provider.claude_series_short"):
             support["thinking"] = True
             support["variants"] = True
-        elif category == "OpenAI/Codex 系列":
+        elif category == tr("provider.openai_series_short"):
             support["options"] = True
             support["variants"] = True
-        elif category == "Gemini 系列":
+        elif category == tr("provider.gemini_series_short"):
             support["thinking"] = True
             support["variants"] = True
         return support
@@ -6801,7 +7615,7 @@ class ModelSelectDialog(BaseDialog):
         group = (
             self.category_list.currentItem().text()
             if self.category_list.currentItem()
-            else "全部"
+            else tr("provider.all_categories")
         )
         keyword = self.keyword_edit.text().strip()
         match_mode = self.match_mode_combo.currentText()
@@ -6814,7 +7628,7 @@ class ModelSelectDialog(BaseDialog):
                 regex = None
 
         for model_id in self.model_ids:
-            if group != "全部":
+            if group != tr("provider.all_categories"):
                 if (
                     self._get_group_key(model_id, self.group_mode_combo.currentText())
                     != group
@@ -6875,7 +7689,9 @@ class ModelSelectDialog(BaseDialog):
     def _update_count_label(self):
         total = len(self._items)
         selected = len(self._selected)
-        self.count_label.setText(f"已选 {selected} / 共 {total}")
+        self.count_label.setText(
+            tr("provider.selected_count", selected=selected, total=total)
+        )
 
     def _on_confirm(self):
         selected = [model_id for model_id in self._items if model_id in self._selected]
@@ -6993,11 +7809,11 @@ class ProviderDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.save_btn = PrimaryPushButton("保存", self)
+        self.save_btn = PrimaryPushButton(tr("common.save"), self)
         self.save_btn.clicked.connect(self._on_save)
         btn_layout.addWidget(self.save_btn)
 
@@ -7072,7 +7888,7 @@ class ProviderDialog(BaseDialog):
 
 
 # ==================== 原生 Provider 页面 ====================
-class NativeProviderDialog(QDialog):
+class NativeProviderDialog(BaseDialog):
     """原生 Provider 配置对话框"""
 
     def __init__(
@@ -7094,7 +7910,7 @@ class NativeProviderDialog(QDialog):
 
     def _setup_ui(self):
         """初始化对话框 UI"""
-        self.setWindowTitle(f"配置 {self.provider.name}")
+        self.setWindowTitle(tr("provider.configure_provider", name=self.provider.name))
         self.setMinimumWidth(500)
         self.setMinimumHeight(400)
 
@@ -7501,7 +8317,9 @@ class ModelDialog(BaseDialog):
         self.is_edit = model_id is not None
         self.current_model_data = {"options": {}, "variants": {}}
 
-        self.setWindowTitle("编辑模型" if self.is_edit else "添加模型")
+        self.setWindowTitle(
+            tr("model.edit_model") if self.is_edit else tr("model.add_model")
+        )
         self.setMinimumSize(750, 750)
         self._setup_ui()
         self._apply_enhanced_style()
@@ -7596,11 +8414,11 @@ class ModelDialog(BaseDialog):
         basic_layout.setContentsMargins(16, 12, 16, 12)
 
         # 标题
-        basic_layout.addWidget(SubtitleLabel("基本信息", basic_card))
+        basic_layout.addWidget(SubtitleLabel(tr("model.basic_info"), basic_card))
 
         # 模型ID
         id_layout = QHBoxLayout()
-        id_layout.addWidget(BodyLabel("模型 ID:", self))
+        id_layout.addWidget(BodyLabel(tr("model.model_id") + ":", self))
         self.id_edit = LineEdit(self)
         self.id_edit.setPlaceholderText("如: claude-sonnet-4-5-20250929")
         self.id_edit.setToolTip(get_tooltip("model_id"))
@@ -7611,20 +8429,20 @@ class ModelDialog(BaseDialog):
 
         # 显示名称
         name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("显示名称:", self))
+        name_layout.addWidget(BodyLabel(tr("model.model_name") + ":", self))
         self.name_edit = LineEdit(self)
         self.name_edit.setToolTip(get_tooltip("model_name"))
         name_layout.addWidget(self.name_edit)
         basic_layout.addLayout(name_layout)
 
         # 支持附件
-        self.attachment_check = CheckBox("支持附件 (图片/文档)", self)
+        self.attachment_check = CheckBox(tr("model.support_attachment"), self)
         self.attachment_check.setToolTip(get_tooltip("model_attachment"))
         basic_layout.addWidget(self.attachment_check)
 
         # Modalities 输入/输出模态
         modalities_layout = QHBoxLayout()
-        modalities_layout.addWidget(BodyLabel("输入模态:", self))
+        modalities_layout.addWidget(BodyLabel(tr("model.input_modality") + ":", self))
         self.input_text_check = CheckBox("text", self)
         self.input_text_check.setChecked(True)
         modalities_layout.addWidget(self.input_text_check)
@@ -7635,7 +8453,7 @@ class ModelDialog(BaseDialog):
         self.input_video_check = CheckBox("video", self)
         modalities_layout.addWidget(self.input_video_check)
         modalities_layout.addSpacing(20)
-        modalities_layout.addWidget(BodyLabel("输出模态:", self))
+        modalities_layout.addWidget(BodyLabel(tr("model.output_modality") + ":", self))
         self.output_text_check = CheckBox("text", self)
         self.output_text_check.setChecked(True)
         modalities_layout.addWidget(self.output_text_check)
@@ -7648,7 +8466,7 @@ class ModelDialog(BaseDialog):
 
         # 上下文窗口和最大输出
         limit_layout = QHBoxLayout()
-        limit_layout.addWidget(BodyLabel("上下文窗口:", self))
+        limit_layout.addWidget(BodyLabel(tr("model.context") + ":", self))
         self.context_spin = SpinBox(self)
         self.context_spin.setRange(0, 10000000)
         self.context_spin.setValue(200000)
@@ -7656,7 +8474,7 @@ class ModelDialog(BaseDialog):
         self.context_spin.setToolTip(get_tooltip("model_context"))
         limit_layout.addWidget(self.context_spin)
         limit_layout.addSpacing(20)
-        limit_layout.addWidget(BodyLabel("最大输出:", self))
+        limit_layout.addWidget(BodyLabel(tr("model.output") + ":", self))
         self.output_spin = SpinBox(self)
         self.output_spin.setRange(0, 1000000)
         self.output_spin.setValue(16000)
@@ -7679,13 +8497,13 @@ class ModelDialog(BaseDialog):
         self.options_widget = QWidget()
         self._setup_options_tab(self.options_widget)
         self.stacked_widget.addWidget(self.options_widget)
-        self.pivot.addItem(routeKey="options", text="Options 配置")
+        self.pivot.addItem(routeKey="options", text=tr("model.options_tab"))
 
         # Variants Tab
         self.variants_widget = QWidget()
         self._setup_variants_tab(self.variants_widget)
         self.stacked_widget.addWidget(self.variants_widget)
-        self.pivot.addItem(routeKey="variants", text="Variants 变体")
+        self.pivot.addItem(routeKey="variants", text=tr("model.variants_tab"))
 
         self.pivot.currentItemChanged.connect(
             lambda k: self.stacked_widget.setCurrentIndex(0 if k == "options" else 1)
@@ -7701,11 +8519,11 @@ class ModelDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.save_btn = PrimaryPushButton("保存", self)
+        self.save_btn = PrimaryPushButton(tr("common.save"), self)
         self.save_btn.clicked.connect(self._on_save)
         btn_layout.addWidget(self.save_btn)
 
@@ -7739,7 +8557,9 @@ class ModelDialog(BaseDialog):
         claude_layout = QVBoxLayout(claude_card)
         claude_layout.setContentsMargins(8, 6, 8, 6)
         claude_layout.setSpacing(6)
-        claude_layout.addWidget(CaptionLabel("Claude Thinking 配置", claude_card))
+        claude_layout.addWidget(
+            CaptionLabel(tr("model.claude_thinking_config"), claude_card)
+        )
         claude_btn_layout = QHBoxLayout()
         claude_btn_layout.setSpacing(6)
 
@@ -7759,7 +8579,7 @@ class ModelDialog(BaseDialog):
         )
         claude_btn_layout.addWidget(btn_budget)
 
-        btn_full = PrimaryPushButton("一键添加", claude_card)
+        btn_full = PrimaryPushButton(tr("model.one_click_add"), claude_card)
         btn_full.setFixedHeight(32)
         btn_full.clicked.connect(self._add_full_thinking_config)
         claude_btn_layout.addWidget(btn_full)
@@ -7772,7 +8592,9 @@ class ModelDialog(BaseDialog):
         openai_layout = QVBoxLayout(openai_card)
         openai_layout.setContentsMargins(8, 6, 8, 6)
         openai_layout.setSpacing(6)
-        openai_layout.addWidget(CaptionLabel("OpenAI 推理配置", openai_card))
+        openai_layout.addWidget(
+            CaptionLabel(tr("model.openai_reasoning_config"), openai_card)
+        )
         openai_btn_layout = QHBoxLayout()
         openai_btn_layout.setSpacing(6)
 
@@ -7798,7 +8620,9 @@ class ModelDialog(BaseDialog):
         gemini_layout = QVBoxLayout(gemini_card)
         gemini_layout.setContentsMargins(8, 6, 8, 6)
         gemini_layout.setSpacing(6)
-        gemini_layout.addWidget(CaptionLabel("Gemini Thinking 配置", gemini_card))
+        gemini_layout.addWidget(
+            CaptionLabel(tr("model.gemini_thinking_config"), gemini_card)
+        )
         gemini_btn_layout = QHBoxLayout()
         gemini_btn_layout.setSpacing(6)
 
@@ -7818,13 +8642,17 @@ class ModelDialog(BaseDialog):
         layout.addWidget(gemini_card)
 
         # Options 列表
-        options_label = BodyLabel("Options 键值对列表:", scroll_content)
+        options_label = BodyLabel(
+            tr("model.options_key_value_list_label"), scroll_content
+        )
         options_label.setToolTip(get_tooltip("model_options"))
         layout.addWidget(options_label)
 
         self.options_table = TableWidget(scroll_content)
         self.options_table.setColumnCount(2)
-        self.options_table.setHorizontalHeaderLabels(["键", "值"])
+        self.options_table.setHorizontalHeaderLabels(
+            [tr("model.key"), tr("model.value")]
+        )
         self.options_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.options_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.options_table.setMinimumHeight(100)
@@ -7838,7 +8666,7 @@ class ModelDialog(BaseDialog):
         input_layout = QHBoxLayout()
         input_layout.setSpacing(8)
 
-        key_label = BodyLabel("键:", scroll_content)
+        key_label = BodyLabel(tr("model.key") + ":", scroll_content)
         key_label.setFixedWidth(24)
         input_layout.addWidget(key_label)
 
@@ -7847,7 +8675,7 @@ class ModelDialog(BaseDialog):
         self.option_key_edit.setFixedHeight(32)
         input_layout.addWidget(self.option_key_edit, 1)
 
-        value_label = BodyLabel("值:", scroll_content)
+        value_label = BodyLabel(tr("model.value") + ":", scroll_content)
         value_label.setFixedWidth(24)
         input_layout.addWidget(value_label)
 
@@ -7861,11 +8689,11 @@ class ModelDialog(BaseDialog):
         # 添加/删除按钮
         opt_btn_layout = QHBoxLayout()
         opt_btn_layout.setSpacing(8)
-        add_opt_btn = PrimaryPushButton("添加", scroll_content)
+        add_opt_btn = PrimaryPushButton(tr("model.add"), scroll_content)
         add_opt_btn.setFixedHeight(32)
         add_opt_btn.clicked.connect(self._add_option)
         opt_btn_layout.addWidget(add_opt_btn)
-        del_opt_btn = PushButton("删除选中", scroll_content)
+        del_opt_btn = PushButton(tr("model.delete_selected"), scroll_content)
         del_opt_btn.setFixedHeight(32)
         del_opt_btn.clicked.connect(self._delete_option)
         opt_btn_layout.addWidget(del_opt_btn)
@@ -7885,14 +8713,16 @@ class ModelDialog(BaseDialog):
         layout.setSpacing(12)
         layout.setContentsMargins(4, 8, 4, 8)
 
-        variants_label = BodyLabel("模型变体配置 (Variants):", parent)
+        variants_label = BodyLabel(tr("model.variants_config_label"), parent)
         variants_label.setToolTip(get_tooltip("model_variants"))
         layout.addWidget(variants_label)
 
         # Variants 列表
         self.variants_table = TableWidget(parent)
         self.variants_table.setColumnCount(2)
-        self.variants_table.setHorizontalHeaderLabels(["变体名称", "配置"])
+        self.variants_table.setHorizontalHeaderLabels(
+            [tr("model.variant_name"), tr("model.config")]
+        )
         self.variants_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.variants_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.variants_table.setMinimumHeight(120)
@@ -7904,7 +8734,7 @@ class ModelDialog(BaseDialog):
         # 变体名称输入
         name_layout = QHBoxLayout()
         name_layout.setSpacing(8)
-        name_label = BodyLabel("变体名:", parent)
+        name_label = BodyLabel(tr("model.variant_name_label"), parent)
         name_label.setMinimumWidth(50)
         name_layout.addWidget(name_label)
         self.variant_name_edit = LineEdit(parent)
@@ -7916,7 +8746,7 @@ class ModelDialog(BaseDialog):
         # 预设名称按钮
         preset_layout = QHBoxLayout()
         preset_layout.setSpacing(6)
-        preset_layout.addWidget(CaptionLabel("预设:", parent))
+        preset_layout.addWidget(CaptionLabel(tr("model.preset_label") + ":", parent))
         for name in ["high", "low", "thinking", "fast", "default"]:
             btn = PushButton(name, parent)
             btn.setMinimumHeight(30)
@@ -7928,7 +8758,7 @@ class ModelDialog(BaseDialog):
         layout.addLayout(preset_layout)
 
         # JSON 配置编辑器
-        layout.addWidget(BodyLabel("配置 (JSON):", parent))
+        layout.addWidget(BodyLabel(tr("model.config_json_label"), parent))
         self.variant_config_edit = TextEdit(parent)
         self.variant_config_edit.setPlaceholderText('{"reasoningEffort": "high"}')
         self.variant_config_edit.setMinimumHeight(80)
@@ -7938,11 +8768,11 @@ class ModelDialog(BaseDialog):
         # 添加/删除按钮
         var_btn_layout = QHBoxLayout()
         var_btn_layout.setSpacing(8)
-        add_var_btn = PrimaryPushButton("添加变体", parent)
+        add_var_btn = PrimaryPushButton(tr("model.add_variant"), parent)
         add_var_btn.setMinimumHeight(36)
         add_var_btn.clicked.connect(self._add_variant)
         var_btn_layout.addWidget(add_var_btn)
-        del_var_btn = PushButton("删除变体", parent)
+        del_var_btn = PushButton(tr("model.delete_variant"), parent)
         del_var_btn.setMinimumHeight(36)
         del_var_btn.clicked.connect(self._delete_variant)
         var_btn_layout.addWidget(del_var_btn)
@@ -8230,7 +9060,7 @@ class PresetModelDialog(BaseDialog):
         self.main_window = main_window
         self.provider_name = provider_name
 
-        self.setWindowTitle("从预设添加模型")
+        self.setWindowTitle(tr("model.add_from_preset_title"))
         self.setMinimumSize(500, 400)
         self._setup_ui()
 
@@ -8240,9 +9070,23 @@ class PresetModelDialog(BaseDialog):
 
         # 模型系列选择
         series_layout = QHBoxLayout()
-        series_layout.addWidget(BodyLabel("模型系列:", self))
+        series_layout.addWidget(BodyLabel(tr("model.model_series") + ":", self))
         self.series_combo = ComboBox(self)
-        self.series_combo.addItems(list(PRESET_MODEL_CONFIGS.keys()))
+        # 添加翻译后的系列名称
+        self._series_map = {}
+        for key in PRESET_MODEL_CONFIGS.keys():
+            if key == "Claude 系列":
+                display_name = tr("provider.claude_series_short")
+            elif key == "OpenAI/Codex 系列":
+                display_name = tr("provider.openai_series_short")
+            elif key == "Gemini 系列":
+                display_name = tr("provider.gemini_series_short")
+            elif key == "其他模型":
+                display_name = tr("provider.other_models_short")
+            else:
+                display_name = key
+            self._series_map[display_name] = key
+            self.series_combo.addItem(display_name)
         self.series_combo.currentTextChanged.connect(self._on_series_changed)
         series_layout.addWidget(self.series_combo)
         layout.addLayout(series_layout)
@@ -8277,19 +9121,25 @@ class PresetModelDialog(BaseDialog):
 
     def _on_series_changed(self, series: str):
         self.model_list.clear()
-        if series in PRESET_MODEL_CONFIGS:
-            models = PRESET_MODEL_CONFIGS[series]["models"]
+        # 将显示名称转换回原始键
+        original_key = self._series_map.get(series, series)
+        if original_key in PRESET_MODEL_CONFIGS:
+            models = PRESET_MODEL_CONFIGS[original_key]["models"]
             for model_id, data in models.items():
                 self.model_list.addItem(f"{model_id} - {data.get('name', '')}")
 
     def _on_add(self):
         selected = self.model_list.selectedItems()
         if not selected:
-            InfoBar.warning("提示", "请选择至少一个模型", parent=self)
+            InfoBar.warning(
+                tr("common.info"), tr("model.select_at_least_one"), parent=self
+            )
             return
 
         series = self.series_combo.currentText()
-        series_data = PRESET_MODEL_CONFIGS.get(series, {})
+        # 将显示名称转换回原始键
+        original_key = self._series_map.get(series, series)
+        series_data = PRESET_MODEL_CONFIGS.get(original_key, {})
         models_data = series_data.get("models", {})
 
         config = self.main_window.opencode_config
@@ -8516,19 +9366,19 @@ class OhMyMCPDialog(BaseDialog):
     OHMY_MCPS = {
         "websearch": {
             "name": "websearch",
-            "description": "实时网页搜索 - 由 Exa AI 提供支持，搜索网页并返回相关内容",
+            "description": "websearch_desc",
             "type": "remote",
             "enabled_by_default": True,
         },
         "context7": {
             "name": "context7",
-            "description": "获取最新官方文档 - 为库和框架获取最新的官方文档",
+            "description": "context7_desc",
             "type": "remote",
             "enabled_by_default": True,
         },
         "grep_app": {
             "name": "grep_app",
-            "description": "超快代码搜索 - 通过 grep.app 在数百万公共 GitHub 仓库中搜索代码",
+            "description": "grep_app_desc",
             "type": "remote",
             "enabled_by_default": True,
         },
@@ -8674,9 +9524,12 @@ class OhMyMCPDialog(BaseDialog):
                 status_item.setForeground(QColor("#F44336"))  # 红色
             self.table.setItem(row, 2, status_item)
 
-            # 描述
+            # 描述 - 使用翻译
             if not description:
-                description = f"{mcp_name} MCP 服务器"
+                description = tr("mcp.ohmy_dialog.default_desc", name=mcp_name)
+            elif description in ["websearch_desc", "context7_desc", "grep_app_desc"]:
+                # 如果是预设的描述键，使用翻译
+                description = tr(f"mcp.ohmy_dialog.{description}")
             desc_item = QTableWidgetItem(description)
             desc_item.setToolTip(description)
             self.table.setItem(row, 3, desc_item)
@@ -8988,7 +9841,7 @@ class MCPDialog(BaseDialog):
         layout.addLayout(timeout_layout)
 
         # 附加信息（默认收起）
-        self.extra_group = QGroupBox("附加信息（点击标题展开/收起）", self)
+        self.extra_group = QGroupBox(tr("mcp.additional_info"), self)
         self.extra_group.setCheckable(True)
         self.extra_group.setChecked(False)
         self.extra_group.setToolTip(tr("dialog.tooltip_toggle_expand"))
@@ -9008,21 +9861,23 @@ class MCPDialog(BaseDialog):
         extra_layout.addWidget(self.desc_edit)
 
         tags_layout = QHBoxLayout()
-        tags_layout.addWidget(BodyLabel("标签:", self.extra_group))
+        tags_layout.addWidget(BodyLabel(tr("mcp.tags") + ":", self.extra_group))
         self.tags_edit = LineEdit(self.extra_group)
         self.tags_edit.setPlaceholderText(tr("dialog.placeholder_mcp_tags"))
         tags_layout.addWidget(self.tags_edit)
         extra_layout.addLayout(tags_layout)
 
         homepage_layout = QHBoxLayout()
-        homepage_layout.addWidget(BodyLabel("主页链接:", self.extra_group))
+        homepage_layout.addWidget(
+            BodyLabel(tr("mcp.homepage_link") + ":", self.extra_group)
+        )
         self.homepage_edit = LineEdit(self.extra_group)
         self.homepage_edit.setPlaceholderText("https://github.com/xxx")
         homepage_layout.addWidget(self.homepage_edit)
         extra_layout.addLayout(homepage_layout)
 
         docs_layout = QHBoxLayout()
-        docs_layout.addWidget(BodyLabel("文档链接:", self.extra_group))
+        docs_layout.addWidget(BodyLabel(tr("mcp.docs_link") + ":", self.extra_group))
         self.docs_edit = LineEdit(self.extra_group)
         self.docs_edit.setPlaceholderText("https://docs.example.com")
         docs_layout.addWidget(self.docs_edit)
@@ -9033,13 +9888,17 @@ class MCPDialog(BaseDialog):
         layout.addWidget(self.extra_group)
 
         # JSON 预览
-        self.preview_group = QGroupBox("完整 JSON 预览", self)
+        self.preview_group = QGroupBox(tr("mcp.full_json_preview"), self)
         preview_layout = QVBoxLayout(self.preview_group)
         preview_layout.setSpacing(8)
 
         preview_header = QHBoxLayout()
-        preview_header.addWidget(BodyLabel("完整 MCP 配置预览", self.preview_group))
-        self.preview_wrap_check = CheckBox("包含 mcpServers 包装", self.preview_group)
+        preview_header.addWidget(
+            BodyLabel(tr("mcp.full_mcp_config_preview"), self.preview_group)
+        )
+        self.preview_wrap_check = CheckBox(
+            tr("mcp.include_wrapper"), self.preview_group
+        )
         self.preview_wrap_check.setChecked(False)
         self.preview_wrap_check.stateChanged.connect(lambda: self._update_preview())
         preview_header.addWidget(self.preview_wrap_check)
@@ -9073,11 +9932,11 @@ class MCPDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.save_btn = PrimaryPushButton("保存", self)
+        self.save_btn = PrimaryPushButton(tr("common.save"), self)
         self.save_btn.clicked.connect(self._on_save)
         btn_layout.addWidget(self.save_btn)
 
@@ -9582,7 +10441,7 @@ class OpenCodeAgentDialog(BaseDialog):
         # 模型 (可选)
         model_layout = QHBoxLayout()
         model_layout.setSpacing(8)
-        model_label = BodyLabel("模型 (可选):", basic_card)
+        model_label = BodyLabel(tr("agent.dialog.model_optional_label"), basic_card)
         model_label.setMinimumWidth(80)
         model_layout.addWidget(model_label)
         self.model_edit = LineEdit(basic_card)
@@ -9598,7 +10457,9 @@ class OpenCodeAgentDialog(BaseDialog):
         param_card = CardWidget(content)
         param_layout = QVBoxLayout(param_card)
         param_layout.setSpacing(10)
-        param_layout.addWidget(SubtitleLabel("参数配置", param_card))
+        param_layout.addWidget(
+            SubtitleLabel(tr("agent.dialog.param_config_title"), param_card)
+        )
 
         # Temperature
         temp_layout = QHBoxLayout()
@@ -9627,7 +10488,7 @@ class OpenCodeAgentDialog(BaseDialog):
         self.maxsteps_spin = SpinBox(param_card)
         self.maxsteps_spin.setRange(0, 1000)
         self.maxsteps_spin.setValue(0)
-        self.maxsteps_spin.setSpecialValueText("不限制")
+        self.maxsteps_spin.setSpecialValueText(tr("agent.dialog.max_steps_unlimited"))
         self.maxsteps_spin.setMinimumHeight(36)
         self.maxsteps_spin.setToolTip(get_tooltip("opencode_agent_maxSteps"))
         steps_layout.addWidget(self.maxsteps_spin)
@@ -9652,7 +10513,9 @@ class OpenCodeAgentDialog(BaseDialog):
         tools_card = CardWidget(content)
         tools_layout = QVBoxLayout(tools_card)
         tools_layout.setSpacing(8)
-        tools_layout.addWidget(SubtitleLabel("工具和权限配置", tools_card))
+        tools_layout.addWidget(
+            SubtitleLabel(tr("agent.dialog.tools_permission_title"), tools_card)
+        )
 
         # 工具配置 (JSON)
         tools_label = BodyLabel(tr("agent.dialog.tools_label"), tools_card)
@@ -9665,7 +10528,7 @@ class OpenCodeAgentDialog(BaseDialog):
         tools_layout.addWidget(self.tools_edit)
 
         # 权限配置 (JSON)
-        perm_label = BodyLabel("权限配置 (JSON):", tools_card)
+        perm_label = BodyLabel(tr("agent.dialog.permission_label"), tools_card)
         perm_label.setToolTip(get_tooltip("opencode_agent_permission"))
         tools_layout.addWidget(perm_label)
         self.permission_edit = TextEdit(tools_card)
@@ -9680,7 +10543,9 @@ class OpenCodeAgentDialog(BaseDialog):
         prompt_card = CardWidget(content)
         prompt_layout = QVBoxLayout(prompt_card)
         prompt_layout.setSpacing(8)
-        prompt_label = SubtitleLabel("系统提示词", prompt_card)
+        prompt_label = SubtitleLabel(
+            tr("agent.dialog.system_prompt_title"), prompt_card
+        )
         prompt_label.setToolTip(get_tooltip("opencode_agent_prompt"))
         prompt_layout.addWidget(prompt_label)
         self.prompt_edit = TextEdit(prompt_card)
@@ -9851,7 +10716,7 @@ class PresetOpenCodeAgentDialog(BaseDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        layout.addWidget(BodyLabel("选择预设 Agent:", self))
+        layout.addWidget(BodyLabel(tr("agent.preset_dialog.select_label"), self))
 
         self.agent_list = ListWidget(self)
         self.agent_list.setSelectionMode(QAbstractItemView.MultiSelection)
@@ -9863,11 +10728,11 @@ class PresetOpenCodeAgentDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.add_btn = PrimaryPushButton("添加选中", self)
+        self.add_btn = PrimaryPushButton(tr("agent.preset_dialog.add_selected"), self)
         self.add_btn.clicked.connect(self._on_add)
         btn_layout.addWidget(self.add_btn)
 
@@ -10584,44 +11449,30 @@ class MainWindow(FluentWindow):
         layout.insertWidget(insert_pos, self.lang_button)
 
     def _on_language_switch(self):
-        """切换语言"""
+        """切换语言（优化版 - 无闪烁过渡）"""
         current_lang = _lang_manager.get_current_language()
         new_lang = "en_US" if current_lang == "zh_CN" else "zh_CN"
 
-        # 切换语言（会自动发出 language_changed 信号）
+        # 切换语言
         _lang_manager.set_language(new_lang)
 
-        # 刷新所有UI
-        self._refresh_all_ui()
+        # 保存当前窗口状态
+        geometry = self.geometry()
 
-        # 显示成功提示
-        InfoBar.success(
-            tr("common.success"),
-            tr("settings.language_switched"),
-            duration=2000,
-            parent=self,
-        )
+        # 隐藏当前窗口（避免闪烁）
+        self.hide()
 
-    def _refresh_all_ui(self):
-        """刷新所有UI文本"""
-        # 刷新导航菜单文本
-        self._refresh_navigation_items()
+        # 创建新窗口
+        new_window = MainWindow()
+        new_window.setGeometry(geometry)
 
-        # 刷新语言按钮文本
-        current_lang = _lang_manager.get_current_language()
-        self.lang_button.setText("中文" if current_lang == "zh_CN" else "EN")
+        # 显示新窗口
+        new_window.show()
+        new_window.raise_()
+        new_window.activateWindow()
 
-        # 刷新所有页面
-        for i in range(self.stackedWidget.count()):
-            widget = self.stackedWidget.widget(i)
-            if hasattr(widget, "refresh_ui"):
-                widget.refresh_ui()
-
-    def _refresh_navigation_items(self):
-        """刷新导航菜单项文本"""
-        # 这里需要重新设置每个导航项的文本
-        # 由于 FluentWindow 的限制，我们需要重新初始化导航
-        pass
+        # 关闭当前窗口
+        self.close()
 
     def _init_navigation(self):
         # ===== 顶部工具栏区域 =====
@@ -11194,7 +12045,7 @@ class OhMyAgentPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
-        self.bulk_model_label = BodyLabel("批量模型:", self)
+        self.bulk_model_label = BodyLabel(tr("ohmyagent.bulk_model"), self)
         toolbar.addWidget(self.bulk_model_label)
         self.bulk_model_combo = ComboBox(self)
         self.bulk_model_combo.setMinimumWidth(220)
@@ -11312,7 +12163,9 @@ class OhMyAgentPage(BasePage):
         """编辑 Agent"""
         row = self.table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个 Agent")
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Agent")
+            )
             return
 
         name = self.table.item(row, 0).text()
@@ -11325,7 +12178,9 @@ class OhMyAgentPage(BasePage):
         """删除 Agent"""
         row = self.table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个 Agent")
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Agent")
+            )
             return
 
         name = self.table.item(row, 0).text()
@@ -11581,7 +12436,7 @@ class CategoryPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
-        self.bulk_model_label = BodyLabel("批量模型:", self)
+        self.bulk_model_label = BodyLabel(tr("ohmyagent.bulk_model"), self)
         toolbar.addWidget(self.bulk_model_label)
         self.bulk_model_combo = ComboBox(self)
         self.bulk_model_combo.setMinimumWidth(220)
@@ -11706,7 +12561,9 @@ class CategoryPage(BasePage):
     def _on_edit(self):
         row = self.table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个 Category")
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Category")
+            )
             return
 
         name = self.table.item(row, 0).text()
@@ -11718,7 +12575,9 @@ class CategoryPage(BasePage):
     def _on_delete(self):
         row = self.table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个 Category")
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Category")
+            )
             return
 
         name = self.table.item(row, 0).text()
@@ -11807,11 +12666,11 @@ class CategoryDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.save_btn = PrimaryPushButton("保存", self)
+        self.save_btn = PrimaryPushButton(tr("common.save"), self)
         self.save_btn.clicked.connect(self._on_save)
         btn_layout.addWidget(self.save_btn)
 
@@ -11909,11 +12768,11 @@ class PresetCategoryDialog(BaseDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self.cancel_btn = PushButton("取消", self)
+        self.cancel_btn = PushButton(tr("common.cancel"), self)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
 
-        self.add_btn = PrimaryPushButton("添加", self)
+        self.add_btn = PrimaryPushButton(tr("model.add"), self)
         self.add_btn.clicked.connect(self._on_add)
         btn_layout.addWidget(self.add_btn)
 
@@ -12167,149 +13026,157 @@ class SkillMarket:
         {
             "name": "git-release",
             "repo": "vercel-labs/git-release",
-            "description": "创建 GitHub Releases 的 Skill",
-            "category": "开发工具",
+            "description": "git_release_desc",
+            "category": "dev_tools",
             "tags": ["git", "github", "release"],
         },
         {
             "name": "code-review",
             "repo": "anthropics/code-review-skill",
-            "description": "代码审查和质量检查",
-            "category": "代码质量",
+            "description": "code_review_desc",
+            "category": "code_quality",
             "tags": ["review", "quality", "best-practices"],
         },
         {
             "name": "test-generator",
             "repo": "openai/test-generator-skill",
-            "description": "自动生成单元测试",
-            "category": "测试",
+            "description": "test_generator_desc",
+            "category": "testing",
             "tags": ["testing", "unit-test", "automation"],
         },
         {
             "name": "documentation",
             "repo": "anthropics/documentation-skill",
-            "description": "生成和维护项目文档",
-            "category": "文档",
+            "description": "documentation_desc",
+            "category": "documentation",
             "tags": ["docs", "documentation", "readme"],
         },
         {
             "name": "refactoring",
             "repo": "openai/refactoring-skill",
-            "description": "代码重构和优化建议",
-            "category": "代码质量",
+            "description": "refactoring_desc",
+            "category": "code_quality",
             "tags": ["refactor", "optimization", "clean-code"],
         },
         {
             "name": "security-audit",
             "repo": "anthropics/security-audit-skill",
-            "description": "安全漏洞扫描和修复建议",
-            "category": "安全",
+            "description": "security_audit_desc",
+            "category": "security",
             "tags": ["security", "vulnerability", "audit"],
         },
         {
             "name": "api-design",
             "repo": "openai/api-design-skill",
-            "description": "RESTful API 设计和文档生成",
-            "category": "API",
+            "description": "api_design_desc",
+            "category": "api",
             "tags": ["api", "rest", "design"],
         },
         {
             "name": "database-migration",
             "repo": "vercel-labs/database-migration-skill",
-            "description": "数据库迁移脚本生成",
-            "category": "数据库",
+            "description": "database_migration_desc",
+            "category": "database",
             "tags": ["database", "migration", "sql"],
         },
         {
             "name": "ui-ux-pro-max",
             "repo": "code-yeongyu/ui-ux-pro-max",
-            "description": "UI/UX 设计专家 - 50种样式、21种配色、50种字体组合",
-            "category": "UI/UX",
+            "description": "ui_ux_pro_max_desc",
+            "category": "ui_ux",
             "tags": ["ui", "ux", "design", "frontend", "react"],
         },
         {
             "name": "playwright",
             "repo": "anthropics/playwright-skill",
-            "description": "浏览器自动化测试和网页抓取",
-            "category": "测试",
+            "description": "playwright_desc",
+            "category": "testing",
             "tags": ["browser", "automation", "testing", "scraping"],
         },
         {
             "name": "docker-compose",
             "repo": "vercel-labs/docker-compose-skill",
-            "description": "Docker Compose 配置生成和优化",
-            "category": "DevOps",
+            "description": "docker_compose_desc",
+            "category": "devops",
             "tags": ["docker", "container", "devops", "deployment"],
         },
         {
             "name": "ci-cd-pipeline",
             "repo": "github/ci-cd-pipeline-skill",
-            "description": "CI/CD 流水线配置（GitHub Actions、GitLab CI）",
-            "category": "DevOps",
+            "description": "ci_cd_pipeline_desc",
+            "category": "devops",
             "tags": ["ci", "cd", "pipeline", "automation"],
         },
         {
             "name": "performance-optimization",
             "repo": "openai/performance-optimization-skill",
-            "description": "性能分析和优化建议",
-            "category": "性能优化",
+            "description": "performance_optimization_desc",
+            "category": "performance",
             "tags": ["performance", "optimization", "profiling"],
         },
         {
             "name": "error-handling",
             "repo": "anthropics/error-handling-skill",
-            "description": "错误处理和异常管理最佳实践",
-            "category": "代码质量",
+            "description": "error_handling_desc",
+            "category": "code_quality",
             "tags": ["error", "exception", "handling", "logging"],
         },
         {
             "name": "regex-helper",
             "repo": "openai/regex-helper-skill",
-            "description": "正则表达式生成和解释",
-            "category": "开发工具",
+            "description": "regex_helper_desc",
+            "category": "dev_tools",
             "tags": ["regex", "pattern", "matching", "validation"],
         },
         {
             "name": "sql-query-optimizer",
             "repo": "vercel-labs/sql-query-optimizer-skill",
-            "description": "SQL 查询优化和性能调优",
-            "category": "数据库",
+            "description": "sql_query_optimizer_desc",
+            "category": "database",
             "tags": ["sql", "database", "optimization", "query"],
         },
         {
             "name": "accessibility-checker",
             "repo": "anthropics/accessibility-checker-skill",
-            "description": "网页无障碍访问性检查和修复",
-            "category": "UI/UX",
+            "description": "accessibility_checker_desc",
+            "category": "ui_ux",
             "tags": ["accessibility", "a11y", "wcag", "frontend"],
         },
         {
             "name": "i18n-translator",
             "repo": "openai/i18n-translator-skill",
-            "description": "国际化和本地化支持",
-            "category": "开发工具",
+            "description": "i18n_translator_desc",
+            "category": "dev_tools",
             "tags": ["i18n", "l10n", "translation", "localization"],
         },
         {
             "name": "git-workflow",
             "repo": "github/git-workflow-skill",
-            "description": "Git 工作流和分支管理策略",
-            "category": "开发工具",
+            "description": "git_workflow_desc",
+            "category": "dev_tools",
             "tags": ["git", "workflow", "branching", "collaboration"],
         },
         {
             "name": "code-formatter",
             "repo": "anthropics/code-formatter-skill",
-            "description": "代码格式化和风格统一",
-            "category": "代码质量",
+            "description": "code_formatter_desc",
+            "category": "code_quality",
             "tags": ["formatting", "style", "prettier", "eslint"],
         },
     ]
 
     @classmethod
     def get_all_skills(cls) -> List[Dict[str, Any]]:
-        """获取所有市场 Skills"""
-        return cls.FEATURED_SKILLS
+        """获取所有市场 Skills（翻译后）"""
+        return [cls._translate_skill(s) for s in cls.FEATURED_SKILLS]
+
+    @classmethod
+    def _translate_skill(cls, skill: Dict[str, Any]) -> Dict[str, Any]:
+        """翻译 Skill 数据"""
+        translated = skill.copy()
+        translated["description"] = tr(f"skill.market_skills.{skill['description']}")
+        translated["category"] = tr(f"skill.categories.{skill['category']}")
+        return translated
 
     @classmethod
     def search_skills(cls, query: str) -> List[Dict[str, Any]]:
@@ -12317,24 +13184,27 @@ class SkillMarket:
         query = query.lower()
         results = []
         for skill in cls.FEATURED_SKILLS:
+            translated = cls._translate_skill(skill)
             if (
                 query in skill["name"].lower()
-                or query in skill["description"].lower()
+                or query in translated["description"].lower()
                 or any(query in tag for tag in skill["tags"])
             ):
-                results.append(skill)
+                results.append(translated)
         return results
 
     @classmethod
     def get_by_category(cls, category: str) -> List[Dict[str, Any]]:
         """按分类获取 Skills"""
-        return [s for s in cls.FEATURED_SKILLS if s["category"] == category]
+        all_skills = cls.get_all_skills()
+        return [s for s in all_skills if s["category"] == category]
 
     @classmethod
     def get_categories(cls) -> List[str]:
-        """获取所有分类"""
-        categories = set(s["category"] for s in cls.FEATURED_SKILLS)
-        return sorted(categories)
+        """获取所有分类（翻译后）"""
+        category_keys = set(s["category"] for s in cls.FEATURED_SKILLS)
+        translated_categories = [tr(f"skill.categories.{key}") for key in category_keys]
+        return sorted(translated_categories)
 
 
 # ==================== Skill 市场对话框 ====================
@@ -12370,7 +13240,12 @@ class SkillMarketDialog(MessageBoxBase):
         self.table = TableWidget(self.widget)
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(
-            [tr("common.name"), tr("common.description"), "分类", "仓库"]
+            [
+                tr("common.name"),
+                tr("common.description"),
+                tr("skill.market_dialog.category_label"),
+                tr("skill.market_dialog.repo_label"),
+            ]
         )
         self.table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeToContents
@@ -13026,10 +13901,7 @@ class SkillInstallDialog(MessageBoxBase):
 
         # 提示信息
         self.hint_label = CaptionLabel(
-            "支持格式:\n"
-            "• GitHub shorthand: user/repo\n"
-            "• 完整 URL: https://github.com/...\n"
-            "• 本地路径: ./skill 或 /path/to/skill",
+            tr("skill.install_dialog.format_hint"),
             self.widget,
         )
 
@@ -13096,14 +13968,25 @@ class SkillUpdateDialog(MessageBoxBase):
         total = len(updates)
         has_update_count = sum(1 for u in updates if u["has_update"])
         self.info_label = BodyLabel(
-            f"共 {total} 个 Skills，{has_update_count} 个有更新", self.widget
+            tr(
+                "skill.update_dialog.info_text",
+                total=total,
+                has_update=has_update_count,
+            ),
+            self.widget,
         )
 
         # 表格
         self.table = TableWidget(self.widget)
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(
-            ["选择", "Skill 名称", "当前版本", "最新版本", "状态"]
+            [
+                tr("skill.update_dialog.table_select"),
+                tr("skill.update_dialog.table_name"),
+                tr("skill.update_dialog.table_current"),
+                tr("skill.update_dialog.table_latest"),
+                tr("skill.update_dialog.table_status"),
+            ]
         )
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.table.horizontalHeader().resizeSection(0, 60)
@@ -13144,17 +14027,17 @@ class SkillUpdateDialog(MessageBoxBase):
             # 当前版本
             if update["current_commit"]:
                 current = update["current_commit"]
-            elif update["status"] == "本地":
-                current = "本地"
+            elif update["status"] == tr("skill.update_dialog.status_local"):
+                current = tr("skill.update_dialog.status_local")
             else:
-                current = "未知"
+                current = tr("skill.update_dialog.status_unknown")
             self.table.setItem(row, 2, QTableWidgetItem(current))
 
             # 最新版本
             if update["latest_commit"]:
                 latest = update["latest_commit"]
-            elif update["status"] == "本地":
-                latest = "本地"
+            elif update["status"] == tr("skill.update_dialog.status_local"):
+                latest = tr("skill.update_dialog.status_local")
             else:
                 latest = "-"
             self.table.setItem(row, 3, QTableWidgetItem(latest))
@@ -13180,7 +14063,7 @@ class SkillUpdateDialog(MessageBoxBase):
         self.viewLayout.addLayout(btn_layout)
 
         self.yesButton.setText("更新选中")
-        self.cancelButton.setText("取消")
+        self.cancelButton.setText(tr("common.cancel"))
 
         self.widget.setMinimumWidth(700)
         self.widget.setMinimumHeight(500)
@@ -13335,7 +14218,7 @@ class SkillPage(BasePage):
         update_btn.clicked.connect(self._on_check_updates)
         toolbar.addWidget(update_btn)
 
-        refresh_btn = PushButton(FIF.SYNC, "刷新", left_widget)
+        refresh_btn = PushButton(FIF.SYNC, tr("skill.refresh"), left_widget)
         refresh_btn.clicked.connect(self._refresh_skill_list)
         toolbar.addWidget(refresh_btn)
 
@@ -13349,11 +14232,7 @@ class SkillPage(BasePage):
 
         # 路径说明
         path_info = CaptionLabel(
-            "搜索路径:\n"
-            "• ~/.config/opencode/skills/\n"
-            "• ~/.claude/skills/\n"
-            "• .opencode/skills/\n"
-            "• .claude/skills/",
+            tr("skill.search_paths"),
             left_widget,
         )
         left_layout.addWidget(path_info)
@@ -13372,7 +14251,7 @@ class SkillPage(BasePage):
         detail_layout.setContentsMargins(16, 12, 16, 12)
         detail_layout.setSpacing(8)
 
-        self.detail_name = StrongBodyLabel("选择一个 Skill 查看详情", detail_card)
+        self.detail_name = StrongBodyLabel(tr("skill.select_to_view"), detail_card)
         detail_layout.addWidget(self.detail_name)
 
         self.detail_desc = CaptionLabel("", detail_card)
@@ -13533,7 +14412,7 @@ class SkillPage(BasePage):
 
     def _clear_detail(self):
         """清空详情显示"""
-        self.detail_name.setText("选择一个 Skill 查看详情")
+        self.detail_name.setText(tr("skill.select_to_view"))
         self.detail_desc.setText("")
         self.detail_source.setText("")
         self.detail_license.setText("")
@@ -13551,10 +14430,12 @@ class SkillPage(BasePage):
         create_layout = QVBoxLayout(create_widget)
         create_layout.setContentsMargins(0, 16, 0, 0)
 
-        create_layout.addWidget(SubtitleLabel("创建/编辑 SKILL.md", create_widget))
+        create_layout.addWidget(
+            SubtitleLabel(tr("skill.create_tab.title"), create_widget)
+        )
         create_layout.addWidget(
             CaptionLabel(
-                "创建新的 Skill 或编辑现有 Skill。支持完整的 frontmatter 字段。",
+                tr("skill.create_tab.subtitle"),
                 create_widget,
             )
         )
@@ -13567,10 +14448,10 @@ class SkillPage(BasePage):
 
         # Skill 名称
         name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("名称 *:", basic_card))
+        name_layout.addWidget(BodyLabel(tr("skill.create_tab.name_label"), basic_card))
         self.create_name_edit = LineEdit(basic_card)
         self.create_name_edit.setPlaceholderText(
-            "小写字母、数字、连字符，如: git-release"
+            tr("skill.create_tab.name_placeholder")
         )
         self.create_name_edit.setToolTip(get_tooltip("skill_name"))
         name_layout.addWidget(self.create_name_edit)
@@ -13578,7 +14459,9 @@ class SkillPage(BasePage):
 
         # 描述
         desc_layout = QHBoxLayout()
-        desc_layout.addWidget(BodyLabel("描述 *:", basic_card))
+        license_layout.addWidget(
+            BodyLabel(tr("skill.create_tab.license_label"), basic_card)
+        )
         self.create_desc_edit = LineEdit(basic_card)
         self.create_desc_edit.setPlaceholderText(tr("dialog.placeholder_skill_desc"))
         basic_layout.addLayout(desc_layout)
@@ -13594,7 +14477,9 @@ class SkillPage(BasePage):
 
         # Compatibility
         compat_layout = QHBoxLayout()
-        compat_layout.addWidget(BodyLabel(tr("skill.compatibility") + ":", basic_card))
+        compat_layout.addWidget(
+            BodyLabel(tr("skill.create_tab.compat_label"), basic_card)
+        )
         self.create_compat_edit = LineEdit(basic_card)
         self.create_compat_edit.setPlaceholderText(tr("dialog.placeholder_tags"))
         compat_layout.addWidget(self.create_compat_edit)
@@ -13602,14 +14487,16 @@ class SkillPage(BasePage):
 
         # 保存位置
         loc_layout = QHBoxLayout()
-        loc_layout.addWidget(BodyLabel(tr("skill.save_location") + ":", basic_card))
+        loc_layout.addWidget(
+            BodyLabel(tr("skill.create_tab.location_label"), basic_card)
+        )
         self.create_loc_combo = ComboBox(basic_card)
         self.create_loc_combo.addItems(
             [
-                "OpenCode 全局 (~/.config/opencode/skills/)",
-                "OpenCode 项目 (.opencode/skills/)",
-                "Claude 全局 (~/.claude/skills/)",
-                "Claude 项目 (.claude/skills/)",
+                tr("skill.create_tab.location_opencode_global"),
+                tr("skill.create_tab.location_opencode_project"),
+                tr("skill.create_tab.location_claude_global"),
+                tr("skill.create_tab.location_claude_project"),
             ]
         )
         loc_layout.addWidget(self.create_loc_combo)
@@ -13619,22 +14506,26 @@ class SkillPage(BasePage):
         create_layout.addWidget(basic_card)
 
         # 内容编辑
-        create_layout.addWidget(BodyLabel("Skill 内容 (Markdown):", create_widget))
+        create_layout.addWidget(
+            BodyLabel(tr("skill.create_tab.content_label"), create_widget)
+        )
         self.create_content_edit = TextEdit(create_widget)
         self.create_content_edit.setPlaceholderText(
-            "## What I do\n\n- 描述功能点 1\n- 描述功能点 2\n\n"
-            "## When to use me\n\n描述使用场景\n\n"
-            "## Instructions\n\n- 具体指令 1\n- 具体指令 2"
+            tr("skill.create_tab.content_placeholder")
         )
         create_layout.addWidget(self.create_content_edit, 1)
 
         # 按钮
         btn_layout = QHBoxLayout()
-        save_btn = PrimaryPushButton(FIF.SAVE, tr("skill.save_skill"), create_widget)
+        save_btn = PrimaryPushButton(
+            FIF.SAVE, tr("skill.create_tab.save_button"), create_widget
+        )
         save_btn.clicked.connect(self._on_save_skill)
         btn_layout.addWidget(save_btn)
 
-        clear_btn = PushButton(FIF.DELETE, "清空", create_widget)
+        clear_btn = PushButton(
+            FIF.DELETE, tr("skill.create_tab.clear_button"), create_widget
+        )
         clear_btn.clicked.connect(self._on_clear_create_form)
         btn_layout.addWidget(clear_btn)
 
@@ -13728,20 +14619,24 @@ class SkillPage(BasePage):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 8, 0)
 
-        left_layout.addWidget(SubtitleLabel("全局 Skill 权限", left_widget))
         left_layout.addWidget(
-            CaptionLabel(
-                "配置 permission.skill 权限，控制 Skill 的加载行为", left_widget
-            )
+            SubtitleLabel(tr("skill.permission_tab.global_title"), left_widget)
+        )
+        left_layout.addWidget(
+            CaptionLabel(tr("skill.permission_tab.global_subtitle"), left_widget)
         )
 
         # 工具栏
         toolbar = QHBoxLayout()
-        add_perm_btn = PrimaryPushButton(FIF.ADD, "添加", left_widget)
+        add_perm_btn = PrimaryPushButton(
+            FIF.ADD, tr("skill.permission_tab.add_button"), left_widget
+        )
         add_perm_btn.clicked.connect(self._on_add_permission)
         toolbar.addWidget(add_perm_btn)
 
-        del_perm_btn = PushButton(FIF.DELETE, "删除", left_widget)
+        del_perm_btn = PushButton(
+            FIF.DELETE, tr("skill.permission_tab.delete_button"), left_widget
+        )
         del_perm_btn.clicked.connect(self._on_delete_permission)
         toolbar.addWidget(del_perm_btn)
 
@@ -13767,7 +14662,9 @@ class SkillPage(BasePage):
         edit_layout.setContentsMargins(12, 8, 12, 8)
 
         pattern_layout = QHBoxLayout()
-        pattern_layout.addWidget(BodyLabel("模式:", edit_card))
+        pattern_layout.addWidget(
+            BodyLabel(tr("skill.permission_tab.pattern_label"), edit_card)
+        )
         self.perm_pattern_edit = LineEdit(edit_card)
         self.perm_pattern_edit.setPlaceholderText(
             tr("dialog.placeholder_allow_pattern")
@@ -13777,7 +14674,9 @@ class SkillPage(BasePage):
         edit_layout.addLayout(pattern_layout)
 
         perm_sel_layout = QHBoxLayout()
-        perm_sel_layout.addWidget(BodyLabel("权限:", edit_card))
+        perm_sel_layout.addWidget(
+            BodyLabel(tr("skill.permission_tab.permission_label"), edit_card)
+        )
         self.perm_level_combo = ComboBox(edit_card)
         self.perm_level_combo.addItems(["allow", "ask", "deny"])
         self.perm_level_combo.setToolTip(get_tooltip("skill_permission"))
@@ -13785,7 +14684,9 @@ class SkillPage(BasePage):
         perm_sel_layout.addStretch()
         edit_layout.addLayout(perm_sel_layout)
 
-        save_perm_btn = PrimaryPushButton("保存权限", edit_card)
+        save_perm_btn = PrimaryPushButton(
+            tr("skill.permission_tab.save_permission"), edit_card
+        )
         save_perm_btn.clicked.connect(self._on_save_permission)
         edit_layout.addWidget(save_perm_btn)
 
@@ -13796,14 +14697,18 @@ class SkillPage(BasePage):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(8, 0, 0, 0)
 
-        right_layout.addWidget(SubtitleLabel("Agent 级别配置", right_widget))
         right_layout.addWidget(
-            CaptionLabel("为特定 Agent 配置 Skill 权限或禁用 Skill 工具", right_widget)
+            SubtitleLabel(tr("skill.permission_tab.agent_level_title"), right_widget)
+        )
+        right_layout.addWidget(
+            CaptionLabel(tr("skill.permission_tab.agent_level_subtitle"), right_widget)
         )
 
         # Agent 选择
         agent_layout = QHBoxLayout()
-        agent_layout.addWidget(BodyLabel("选择 Agent:", right_widget))
+        agent_layout.addWidget(
+            BodyLabel(tr("skill.permission_tab.select_agent"), right_widget)
+        )
         self.agent_combo = ComboBox(right_widget)
         self.agent_combo.addItems(["task", "plan", "code", "summarize"])
         self.agent_combo.currentTextChanged.connect(self._on_agent_changed)
@@ -13813,13 +14718,18 @@ class SkillPage(BasePage):
 
         # 禁用 Skill 工具
         self.disable_skill_check = CheckBox(
-            "禁用 Skill 工具 (tools.skill: false)", right_widget
+            tr("skill.permission_tab.disable_skill_tool") + " (tools.skill: false)",
+            right_widget,
         )
         self.disable_skill_check.stateChanged.connect(self._on_disable_skill_changed)
         right_layout.addWidget(self.disable_skill_check)
 
         # Agent 权限覆盖
-        right_layout.addWidget(BodyLabel("Agent 权限覆盖:", right_widget))
+        right_layout.addWidget(
+            BodyLabel(
+                tr("skill.permission_tab.agent_skill_permission") + ":", right_widget
+            )
+        )
         self.agent_perm_table = TableWidget(right_widget)
         self.agent_perm_table.setColumnCount(2)
         self.agent_perm_table.setHorizontalHeaderLabels(
@@ -13838,7 +14748,7 @@ class SkillPage(BasePage):
         agent_edit_layout.setContentsMargins(12, 8, 12, 8)
 
         agent_pattern_layout = QHBoxLayout()
-        agent_pattern_layout.addWidget(BodyLabel("模式:", agent_edit_card))
+        agent_pattern_layout.addWidget(BodyLabel(tr("rules.pattern"), agent_edit_card))
         self.agent_perm_pattern_edit = LineEdit(agent_edit_card)
         self.agent_perm_pattern_edit.setPlaceholderText(
             tr("dialog.placeholder_deny_pattern")
@@ -13847,7 +14757,7 @@ class SkillPage(BasePage):
         agent_edit_layout.addLayout(agent_pattern_layout)
 
         agent_perm_layout = QHBoxLayout()
-        agent_perm_layout.addWidget(BodyLabel("权限:", agent_edit_card))
+        agent_perm_layout.addWidget(BodyLabel(tr("rules.permission"), agent_edit_card))
         self.agent_perm_level_combo = ComboBox(agent_edit_card)
         self.agent_perm_level_combo.addItems(["allow", "ask", "deny"])
         agent_perm_layout.addWidget(self.agent_perm_level_combo)
@@ -13855,7 +14765,7 @@ class SkillPage(BasePage):
         agent_edit_layout.addLayout(agent_perm_layout)
 
         agent_btn_layout = QHBoxLayout()
-        add_agent_perm_btn = PushButton(FIF.ADD, "添加", agent_edit_card)
+        add_agent_perm_btn = PushButton(FIF.ADD, tr("common.add"), agent_edit_card)
         add_agent_perm_btn.clicked.connect(self._on_add_agent_permission)
         agent_btn_layout.addWidget(add_agent_perm_btn)
 
@@ -13883,7 +14793,10 @@ class SkillPage(BasePage):
         """删除选中的权限"""
         row = self.perm_table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个权限")
+            self.show_warning(
+                tr("common.info"),
+                tr("common.please_select_first", item=tr("permission.title")),
+            )
             return
 
         pattern = self.perm_table.item(row, 0).text()
@@ -14017,7 +14930,10 @@ class SkillPage(BasePage):
         """删除 Agent 权限覆盖"""
         row = self.agent_perm_table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择一个权限")
+            self.show_warning(
+                tr("common.info"),
+                tr("common.please_select_first", item=tr("permission.title")),
+            )
             return
 
         pattern = self.agent_perm_table.item(row, 0).text()
@@ -14276,7 +15192,7 @@ class RulesPage(BasePage):
         self.inst_path_edit.setFixedHeight(36)
         add_layout.addWidget(self.inst_path_edit)
 
-        add_btn = PushButton(FIF.ADD, "添加", inst_card)
+        add_btn = PushButton(FIF.ADD, tr("common.add"), inst_card)
         add_btn.setFixedHeight(36)
         add_btn.clicked.connect(self._on_add_instruction)
         add_layout.addWidget(add_btn)
@@ -14291,7 +15207,7 @@ class RulesPage(BasePage):
         # 快捷路径
         quick_layout = QHBoxLayout()
         quick_layout.setSpacing(8)
-        quick_layout.addWidget(BodyLabel("快捷:", inst_card))
+        quick_layout.addWidget(BodyLabel(tr("rules.quick"), inst_card))
         for path in ["CONTRIBUTING.md", "docs/*.md", ".cursor/rules/*.md"]:
             btn = PushButton(path, inst_card)
             btn.setFixedHeight(32)
@@ -14314,12 +15230,12 @@ class RulesPage(BasePage):
         # 位置选择
         loc_layout = QHBoxLayout()
         loc_layout.setSpacing(12)
-        loc_layout.addWidget(BodyLabel("编辑位置:", agents_card))
-        self.global_radio = RadioButton("全局", agents_card)
+        loc_layout.addWidget(BodyLabel(tr("rules.edit_location"), agents_card))
+        self.global_radio = RadioButton(tr("rules.global"), agents_card)
         self.global_radio.setChecked(True)
         self.global_radio.clicked.connect(self._load_agents_md)
         loc_layout.addWidget(self.global_radio)
-        self.project_radio = RadioButton("项目", agents_card)
+        self.project_radio = RadioButton(tr("rules.project"), agents_card)
         self.project_radio.clicked.connect(self._load_agents_md)
         loc_layout.addWidget(self.project_radio)
         loc_layout.addStretch()
@@ -14388,7 +15304,10 @@ class RulesPage(BasePage):
     def _on_delete_instruction(self):
         current = self.inst_list.currentItem()
         if not current:
-            self.show_warning("提示", "请先选择一个路径")
+            self.show_warning(
+                tr("common.info"),
+                tr("common.please_select_first", item=tr("skill.path")),
+            )
             return
 
         path = current.text()
@@ -16450,7 +17369,7 @@ class CLIExportPage(BasePage):
                 )
             )
         else:
-            self.backup_info_label.setText("最近备份: 无")
+            self.backup_info_label.setText(tr("cli_export.latest_backup_none"))
 
     def _update_preview(self):
         """更新配置预览"""
@@ -16787,7 +17706,7 @@ class CLIBackupRestoreDialog(QDialog):
         layout.setSpacing(16)
 
         # 说明
-        layout.addWidget(BodyLabel("选择要恢复的备份:"))
+        layout.addWidget(BodyLabel(tr("backup.select_backup")))
 
         # 备份列表
         self.backup_table = TableWidget(self)
@@ -16808,7 +17727,7 @@ class CLIBackupRestoreDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = PushButton("取消", self)
+        cancel_btn = PushButton(tr("common.cancel"), self)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
@@ -16922,11 +17841,11 @@ GEMINI_MAX_RETRIES=3"""
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = PushButton("取消", self)
+        cancel_btn = PushButton(tr("common.cancel"), self)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        save_btn = PrimaryPushButton("保存", self)
+        save_btn = PrimaryPushButton(tr("common.save"), self)
         save_btn.clicked.connect(self.accept)
         btn_layout.addWidget(save_btn)
 
@@ -16963,7 +17882,7 @@ class ImportPage(BasePage):
 
         # 手动选择文件
         manual_layout = QHBoxLayout()
-        manual_layout.addWidget(BodyLabel("手动选择:", detect_card))
+        manual_layout.addWidget(BodyLabel(tr("import.manual_select"), detect_card))
         self.manual_source_combo = ComboBox(detect_card)
         self.manual_source_combo.addItems(
             [
@@ -16976,7 +17895,7 @@ class ImportPage(BasePage):
         )
         manual_layout.addWidget(self.manual_source_combo)
 
-        manual_btn = PushButton(FIF.FOLDER, "选择文件", detect_card)
+        manual_btn = PushButton(FIF.FOLDER, tr("common.select_file"), detect_card)
         manual_btn.clicked.connect(self._select_manual_file)
         manual_layout.addWidget(manual_btn)
         manual_layout.addStretch()
@@ -17016,15 +17935,15 @@ class ImportPage(BasePage):
         # 按钮
         btn_layout = QHBoxLayout()
 
-        preview_btn = PushButton("预览转换", preview_card)
+        preview_btn = PushButton(tr("import.preview_convert"), preview_card)
         preview_btn.clicked.connect(self._preview_convert)
         btn_layout.addWidget(preview_btn)
 
-        import_btn = PrimaryPushButton("导入到 OpenCode", preview_card)
+        import_btn = PrimaryPushButton(tr("import.import_to_opencode"), preview_card)
         import_btn.clicked.connect(self._import_selected)
         btn_layout.addWidget(import_btn)
 
-        confirm_btn = PushButton("确认映射", preview_card)
+        confirm_btn = PushButton(tr("import.confirm_mapping"), preview_card)
         confirm_btn.clicked.connect(self._confirm_mapping)
         btn_layout.addWidget(confirm_btn)
 
@@ -17088,7 +18007,7 @@ class ImportPage(BasePage):
         """预览转换结果"""
         row = self.config_table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择要转换的配置")
+            self.show_warning(tr("common.info"), "请先选择要转换的配置")
             return
 
         source = self.config_table.item(row, 0).text()
@@ -17127,7 +18046,7 @@ class ImportPage(BasePage):
             left_layout.addWidget(source_edit)
 
             right_layout = QVBoxLayout()
-            right_layout.addWidget(SubtitleLabel("转换后的 OpenCode 配置", dialog))
+            right_layout.addWidget(SubtitleLabel(tr("import.converted_config"), dialog))
             convert_edit = TextEdit(dialog)
             convert_edit.setReadOnly(True)
             convert_edit.setPlainText(
@@ -17170,7 +18089,7 @@ class ImportPage(BasePage):
         """导入选中的配置"""
         row = self.config_table.currentRow()
         if row < 0:
-            self.show_warning("提示", "请先选择要导入的配置")
+            self.show_warning(tr("common.info"), "请先选择要导入的配置")
             return
 
         source = self.config_table.item(row, 0).text()
@@ -17239,7 +18158,7 @@ class ImportPage(BasePage):
     def _confirm_mapping(self):
         """手动确认映射"""
         if not self._last_converted:
-            self.show_warning("提示", "请先预览转换结果")
+            self.show_warning(tr("common.info"), "请先预览转换结果")
             return
         dialog = ImportMappingDialog(
             self.main_window, self._last_converted, parent=self
@@ -17286,7 +18205,7 @@ class ImportMappingDialog(BaseDialog):
         providers = self.converted.get("provider", {})
         if not providers:
             scroll_layout.addWidget(
-                BodyLabel("未检测到可导入的 Provider", scroll_container)
+                BodyLabel(tr("import.no_provider_detected"), scroll_container)
             )
         else:
             self.provider_edits = {}
@@ -17300,7 +18219,7 @@ class ImportMappingDialog(BaseDialog):
                 )
 
                 name_layout = QHBoxLayout()
-                name_layout.addWidget(BodyLabel("显示名称:", card))
+                name_layout.addWidget(BodyLabel(tr("model.model_name") + ":", card))
                 name_edit = LineEdit(card)
                 name_edit.setText(provider_data.get("name", ""))
                 name_layout.addWidget(name_edit)
@@ -17334,7 +18253,7 @@ class ImportMappingDialog(BaseDialog):
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        cancel_btn = PushButton("取消", self)
+        cancel_btn = PushButton(tr("common.cancel"), self)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
