@@ -14370,7 +14370,7 @@ class SkillPage(BasePage):
         agent_edit_layout.addLayout(agent_perm_layout)
 
         agent_btn_layout = QHBoxLayout()
-        add_agent_perm_btn = PushButton(FIF.ADD, "添加", agent_edit_card)
+        add_agent_perm_btn = PushButton(FIF.ADD, tr("common.add"), agent_edit_card)
         add_agent_perm_btn.clicked.connect(self._on_add_agent_permission)
         agent_btn_layout.addWidget(add_agent_perm_btn)
 
@@ -14797,7 +14797,7 @@ class RulesPage(BasePage):
         self.inst_path_edit.setFixedHeight(36)
         add_layout.addWidget(self.inst_path_edit)
 
-        add_btn = PushButton(FIF.ADD, "添加", inst_card)
+        add_btn = PushButton(FIF.ADD, tr("common.add"), inst_card)
         add_btn.setFixedHeight(36)
         add_btn.clicked.connect(self._on_add_instruction)
         add_layout.addWidget(add_btn)
@@ -14836,11 +14836,11 @@ class RulesPage(BasePage):
         loc_layout = QHBoxLayout()
         loc_layout.setSpacing(12)
         loc_layout.addWidget(BodyLabel(tr("rules.edit_location"), agents_card))
-        self.global_radio = RadioButton("全局", agents_card)
+        self.global_radio = RadioButton(tr("rules.global"), agents_card)
         self.global_radio.setChecked(True)
         self.global_radio.clicked.connect(self._load_agents_md)
         loc_layout.addWidget(self.global_radio)
-        self.project_radio = RadioButton("项目", agents_card)
+        self.project_radio = RadioButton(tr("rules.project"), agents_card)
         self.project_radio.clicked.connect(self._load_agents_md)
         loc_layout.addWidget(self.project_radio)
         loc_layout.addStretch()
@@ -17500,7 +17500,7 @@ class ImportPage(BasePage):
         )
         manual_layout.addWidget(self.manual_source_combo)
 
-        manual_btn = PushButton(FIF.FOLDER, "选择文件", detect_card)
+        manual_btn = PushButton(FIF.FOLDER, tr("common.select_file"), detect_card)
         manual_btn.clicked.connect(self._select_manual_file)
         manual_layout.addWidget(manual_btn)
         manual_layout.addStretch()
