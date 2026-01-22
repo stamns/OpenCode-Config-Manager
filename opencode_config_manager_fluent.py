@@ -11762,7 +11762,7 @@ class CategoryDialog(BaseDialog):
 
         # Category 名称
         name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("Category 名称:", self))
+        name_layout.addWidget(BodyLabel(tr("category.category_name") + ":", self))
         self.name_edit = LineEdit(self)
         self.name_edit.setPlaceholderText(tr("dialog.placeholder_category_tags"))
         self.name_edit.setToolTip(get_tooltip("category_name"))
@@ -11773,7 +11773,7 @@ class CategoryDialog(BaseDialog):
 
         # 绑定模型
         model_layout = QHBoxLayout()
-        model_layout.addWidget(BodyLabel("绑定模型:", self))
+        model_layout.addWidget(BodyLabel(tr("category.bind_model"), self))
         self.model_combo = ComboBox(self)
         self.model_combo.setToolTip(get_tooltip("category_model"))
         self._load_models()
@@ -11887,7 +11887,7 @@ class PresetCategoryDialog(BaseDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
 
-        layout.addWidget(SubtitleLabel("选择预设 Category", self))
+        layout.addWidget(SubtitleLabel(tr("category.select_preset_category"), self))
 
         # 预设列表
         self.list_widget = ListWidget(self)
@@ -11899,7 +11899,7 @@ class PresetCategoryDialog(BaseDialog):
 
         # 绑定模型
         model_layout = QHBoxLayout()
-        model_layout.addWidget(BodyLabel("绑定模型:", self))
+        model_layout.addWidget(BodyLabel(tr("category.bind_model"), self))
         self.model_combo = ComboBox(self)
         self._load_models()
         model_layout.addWidget(self.model_combo)
