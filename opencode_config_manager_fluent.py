@@ -14430,10 +14430,12 @@ class SkillPage(BasePage):
         create_layout = QVBoxLayout(create_widget)
         create_layout.setContentsMargins(0, 16, 0, 0)
 
-        create_layout.addWidget(SubtitleLabel("创建/编辑 SKILL.md", create_widget))
+        create_layout.addWidget(
+            SubtitleLabel(tr("skill.create_tab.title"), create_widget)
+        )
         create_layout.addWidget(
             CaptionLabel(
-                "创建新的 Skill 或编辑现有 Skill。支持完整的 frontmatter 字段。",
+                tr("skill.create_tab.subtitle"),
                 create_widget,
             )
         )
@@ -14446,10 +14448,10 @@ class SkillPage(BasePage):
 
         # Skill 名称
         name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("名称 *:", basic_card))
+        name_layout.addWidget(BodyLabel(tr("skill.create_tab.name_label"), basic_card))
         self.create_name_edit = LineEdit(basic_card)
         self.create_name_edit.setPlaceholderText(
-            "小写字母、数字、连字符，如: git-release"
+            tr("skill.create_tab.name_placeholder")
         )
         self.create_name_edit.setToolTip(get_tooltip("skill_name"))
         name_layout.addWidget(self.create_name_edit)
@@ -14457,7 +14459,7 @@ class SkillPage(BasePage):
 
         # 描述
         desc_layout = QHBoxLayout()
-        desc_layout.addWidget(BodyLabel("描述 *:", basic_card))
+        desc_layout.addWidget(BodyLabel(tr("skill.create_tab.desc_label"), basic_card))
         self.create_desc_edit = LineEdit(basic_card)
         self.create_desc_edit.setPlaceholderText(tr("dialog.placeholder_skill_desc"))
         basic_layout.addLayout(desc_layout)
@@ -14465,7 +14467,9 @@ class SkillPage(BasePage):
 
         # License
         license_layout = QHBoxLayout()
-        license_layout.addWidget(BodyLabel(tr("skill.license") + ":", basic_card))
+        license_layout.addWidget(
+            BodyLabel(tr("skill.create_tab.license_label"), basic_card)
+        )
         self.create_license_edit = LineEdit(basic_card)
         self.create_license_edit.setPlaceholderText(tr("dialog.placeholder_license"))
         license_layout.addWidget(self.create_license_edit)
@@ -14473,7 +14477,9 @@ class SkillPage(BasePage):
 
         # Compatibility
         compat_layout = QHBoxLayout()
-        compat_layout.addWidget(BodyLabel(tr("skill.compatibility") + ":", basic_card))
+        compat_layout.addWidget(
+            BodyLabel(tr("skill.create_tab.compat_label"), basic_card)
+        )
         self.create_compat_edit = LineEdit(basic_card)
         self.create_compat_edit.setPlaceholderText(tr("dialog.placeholder_tags"))
         compat_layout.addWidget(self.create_compat_edit)
@@ -14481,14 +14487,16 @@ class SkillPage(BasePage):
 
         # 保存位置
         loc_layout = QHBoxLayout()
-        loc_layout.addWidget(BodyLabel(tr("skill.save_location") + ":", basic_card))
+        loc_layout.addWidget(
+            BodyLabel(tr("skill.create_tab.location_label"), basic_card)
+        )
         self.create_loc_combo = ComboBox(basic_card)
         self.create_loc_combo.addItems(
             [
-                "OpenCode 全局 (~/.config/opencode/skills/)",
-                "OpenCode 项目 (.opencode/skills/)",
-                "Claude 全局 (~/.claude/skills/)",
-                "Claude 项目 (.claude/skills/)",
+                tr("skill.create_tab.location_opencode_global"),
+                tr("skill.create_tab.location_opencode_project"),
+                tr("skill.create_tab.location_claude_global"),
+                tr("skill.create_tab.location_claude_project"),
             ]
         )
         loc_layout.addWidget(self.create_loc_combo)
@@ -14498,22 +14506,26 @@ class SkillPage(BasePage):
         create_layout.addWidget(basic_card)
 
         # 内容编辑
-        create_layout.addWidget(BodyLabel("Skill 内容 (Markdown):", create_widget))
+        create_layout.addWidget(
+            BodyLabel(tr("skill.create_tab.content_label"), create_widget)
+        )
         self.create_content_edit = TextEdit(create_widget)
         self.create_content_edit.setPlaceholderText(
-            "## What I do\n\n- 描述功能点 1\n- 描述功能点 2\n\n"
-            "## When to use me\n\n描述使用场景\n\n"
-            "## Instructions\n\n- 具体指令 1\n- 具体指令 2"
+            tr("skill.create_tab.content_placeholder")
         )
         create_layout.addWidget(self.create_content_edit, 1)
 
         # 按钮
         btn_layout = QHBoxLayout()
-        save_btn = PrimaryPushButton(FIF.SAVE, tr("skill.save_skill"), create_widget)
+        save_btn = PrimaryPushButton(
+            FIF.SAVE, tr("skill.create_tab.save_button"), create_widget
+        )
         save_btn.clicked.connect(self._on_save_skill)
         btn_layout.addWidget(save_btn)
 
-        clear_btn = PushButton(FIF.DELETE, "清空", create_widget)
+        clear_btn = PushButton(
+            FIF.DELETE, tr("skill.create_tab.clear_button"), create_widget
+        )
         clear_btn.clicked.connect(self._on_clear_create_form)
         btn_layout.addWidget(clear_btn)
 
