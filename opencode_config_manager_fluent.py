@@ -13504,7 +13504,14 @@ class SecurityScanDialog(MessageBoxBase):
         # 问题表格
         self.table = TableWidget(self.widget)
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["行号", "风险等级", "描述", "代码"])
+        self.table.setHorizontalHeaderLabels(
+            [
+                tr("skill.security_dialog.table_line"),
+                tr("skill.security_dialog.table_risk"),
+                tr("skill.security_dialog.table_description"),
+                tr("skill.security_dialog.table_code"),
+            ]
+        )
         self.table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeToContents
         )
@@ -17709,7 +17716,9 @@ class CLIBackupRestoreDialog(QDialog):
         # 备份列表
         self.backup_table = TableWidget(self)
         self.backup_table.setColumnCount(3)
-        self.backup_table.setHorizontalHeaderLabels(["CLI 类型", "备份时间", "文件"])
+        self.backup_table.setHorizontalHeaderLabels(
+            [tr("backup.cli_type"), tr("backup.backup_time"), tr("backup.file")]
+        )
         header = self.backup_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         header.setSectionResizeMode(1, QHeaderView.Fixed)
@@ -17729,7 +17738,7 @@ class CLIBackupRestoreDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        restore_btn = PrimaryPushButton("恢复", self)
+        restore_btn = PrimaryPushButton(tr("backup.restore"), self)
         restore_btn.clicked.connect(self._on_restore)
         btn_layout.addWidget(restore_btn)
 
