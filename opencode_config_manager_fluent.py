@@ -12045,7 +12045,7 @@ class OhMyAgentPage(BasePage):
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
-        self.bulk_model_label = BodyLabel("批量模型:", self)
+        self.bulk_model_label = BodyLabel(tr("ohmyagent.bulk_model"), self)
         toolbar.addWidget(self.bulk_model_label)
         self.bulk_model_combo = ComboBox(self)
         self.bulk_model_combo.setMinimumWidth(220)
@@ -12237,402 +12237,7 @@ class OhMyAgentDialog(BaseDialog):
 
         # 绑定模型
         model_layout = QHBoxLayout()
-        model_layout.addWidget(BodyLabel(tr("ohmyagent.dialog.model_label"), self))
-        self.model_combo = ComboBox(self)
-        self.model_combo.setToolTip(get_tooltip("ohmyopencode_agent_model"))
-        self._load_models()
-        model_layout.addWidget(self.model_combo)
-        layout.addLayout(model_layout)
-
-        # 描述
-        desc_label = BodyLabel(tr("common.description") + ":", self)
-        desc_label.setToolTip(get_tooltip("ohmyopencode_agent_description"))
-        layout.addWidget(desc_label)
-        self.desc_edit = TextEdit(self)
-        self.desc_edit.setPlaceholderText(tr("dialog.placeholder_agent_desc_detail"))
-        self.desc_edit.setMaximumHeight(100)
-        layout.addWidget(self.desc_edit)
-
-        # 按钮
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
-        self.cancel_btn = PushButton(tr("common.cancel"), self)
-        self.cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(self.cancel_btn)
-
-        self.save_btn = PrimaryPushButton(tr("common.save"), self)
-        self.save_btn.clicked.connect(self._on_save)
-        btn_layout.addWidget(self.save_btn)
-
-        layout.addLayout(btn_layout)
-
-    def _load_models(self):
-        """加载可用模型列表"""
-        self.model_combo.clear()
-        registry = ModelRegistry(self.main_window.opencode_config)
-        models = registry.get_all_models()
-        self.model_combo.addItems(models)
-
-    def _load_agent_data(self):
-        config = self.main_window.ohmyopencode_config or {}
-        agent = config.get("agents", {}).get(self.agent_name, {})
-
-        self.name_edit.setText(self.agent_name)
-
-        model = agent.get("model", "")
-        if model:
-            self.model_combo.setCurrentText(model)
-
-        self.desc_edit.setPlainText(agent.get("description", ""))
-
-    def _on_save(self):
-        name = self.name_edit.text().strip()
-        if not name:
-            InfoBar.error(
-                tr("common.error"), tr("ohmyagent.dialog.key_required"), parent=self
-            )
-            return
-
-        config = self.main_window.ohmyopencode_config
-        if config is None:
-            config = {}
-            self.main_window.ohmyopencode_config = config
-
-        if "agents" not in config:
-            config["agents"] = {}
-
-        if not self.is_edit and name in config["agents"]:
-            InfoBar.error(
-                tr("common.error"), tr("ohmyagent.dialog.key_exists"), parent=self
-            )
-            return
-
-        config["agents"][name] = {
-            "model": self.model_combo.currentText(),
-            "description": self.desc_edit.toPlainText().strip(),
-        }
-
-        self.main_window.save_ohmyopencode_config()
-        self.accept()
-
-
-class PresetOhMyAgentDialog(BaseDialog):
-    """预设 Oh My Agent 选择对话框"""
-
-    def __init__(self, main_window, parent=None):
-        super().__init__(parent)
-        self.main_window = main_window
-
-        self.setWindowTitle(tr("ohmyagent.preset_dialog.title"))
-        self.setMinimumWidth(500)
-        self._setup_ui()
-
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-
-        layout.addWidget(SubtitleLabel(tr("ohmyagent.preset_dialog.subtitle"), self))
-
-        # 预设列表
-        self.list_widget = ListWidget(self)
-        for name, desc in PRESET_AGENTS.items():
-            self.list_widget.addItem(f"{name} - {desc}")
-        layout.addWidget(self.list_widget)
-
-        # 绑定模型
-        model_layout = QHBoxLayout()
-        model_layout.addWidget(BodyLabel(tr("ohmyagent.dialog.model_label"), self))
-        self.model_combo = ComboBox(self)
-        self._load_models()
-        model_layout.addWidget(self.model_combo)
-        layout.addLayout(model_layout)
-
-        # 按钮
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
-        self.cancel_btn = PushButton(tr("common.cancel"), self)
-        self.cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(self.cancel_btn)
-
-        self.add_btn = PrimaryPushButton(tr("common.add"), self)
-        self.add_btn.clicked.connect(self._on_add)
-        btn_layout.addWidget(self.add_btn)
-
-        layout.addLayout(btn_layout)
-
-    def _load_models(self):
-        self.model_combo.clear()
-        registry = ModelRegistry(self.main_window.opencode_config)
-        models = registry.get_all_models()
-        self.model_combo.addItems(models)
-
-    def _on_add(self):
-        current = self.list_widget.currentItem()
-        if not current:
-            InfoBar.warning(tr("common.warning"), "请选择一个预设 Agent", parent=self)
-            return
-
-        # 解析选中的预设
-        text = current.text()
-        name = text.split(" - ")[0]
-        desc = PRESET_AGENTS.get(name, "")
-
-        config = self.main_window.ohmyopencode_config
-        if config is None:
-            config = {}
-            self.main_window.ohmyopencode_config = config
-
-        if "agents" not in config:
-            config["agents"] = {}
-
-        if name in config["agents"]:
-            InfoBar.warning(tr("common.warning"), f'Agent "{name}" 已存在', parent=self)
-            return
-
-        config["agents"][name] = {
-            "model": self.model_combo.currentText(),
-            "description": desc,
-        }
-
-        self.main_window.save_ohmyopencode_config()
-        self.accept()
-
-
-# ==================== Category 页面 ====================
-class CategoryPage(BasePage):
-    """Category 管理页面"""
-
-    def __init__(self, main_window, parent=None):
-        super().__init__(tr("category.title"), parent)
-        self.main_window = main_window
-        self._setup_ui()
-        self._load_data()
-        # 连接配置变更信号
-        self.main_window.config_changed.connect(self._on_config_changed)
-
-    def _on_config_changed(self):
-        """配置变更时刷新数据"""
-        self._load_data()
-
-    def _setup_ui(self):
-        # 工具栏
-        toolbar = QHBoxLayout()
-
-        self.add_btn = PrimaryPushButton(FIF.ADD, tr("category.add_category"), self)
-        self.add_btn.clicked.connect(self._on_add)
-        toolbar.addWidget(self.add_btn)
-
-        self.preset_btn = PushButton(FIF.LIBRARY, tr("common.add_from_preset"), self)
-        self.preset_btn.clicked.connect(self._on_add_preset)
-        toolbar.addWidget(self.preset_btn)
-
-        self.edit_btn = PushButton(FIF.EDIT, "编辑", self)
-        self.edit_btn.clicked.connect(self._on_edit)
-        toolbar.addWidget(self.edit_btn)
-
-        self.delete_btn = PushButton(FIF.DELETE, "删除", self)
-        self.delete_btn.clicked.connect(self._on_delete)
-        toolbar.addWidget(self.delete_btn)
-
-        self.bulk_model_label = BodyLabel("批量模型:", self)
-        toolbar.addWidget(self.bulk_model_label)
-        self.bulk_model_combo = ComboBox(self)
-        self.bulk_model_combo.setMinimumWidth(220)
-        self.bulk_model_combo.currentIndexChanged.connect(self._on_bulk_model_changed)
-        toolbar.addWidget(self.bulk_model_combo)
-
-        toolbar.addStretch()
-        self._layout.addLayout(toolbar)
-
-        # Category 列表
-        self.table = TableWidget(self)
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(
-            ["名称", "绑定模型", "Temperature", "描述"]
-        )
-        # 调整列宽：名称20字符，Temperature12字符，剩余均分
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
-        header.resizeSection(0, 160)  # 名称 20字符约160px
-        header.setSectionResizeMode(1, QHeaderView.Stretch)  # 绑定模型 均分
-        header.setSectionResizeMode(2, QHeaderView.Fixed)
-        header.resizeSection(2, 100)  # Temperature 12字符约100px
-        header.setSectionResizeMode(3, QHeaderView.Stretch)  # 描述 均分
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.doubleClicked.connect(self._on_edit)
-        self._layout.addWidget(self.table)
-
-    def _load_data(self):
-        """加载 Category 数据"""
-        self.table.setRowCount(0)
-        config = self.main_window.ohmyopencode_config or {}
-        categories = config.get("categories", {})
-
-        # 添加类型检查，防止 categories 字段为非字典类型时崩溃
-        if not isinstance(categories, dict):
-            categories = {}
-
-        models = self._get_available_models()
-        self._refresh_bulk_model_combo(models)
-
-        for name, data in categories.items():
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(name))
-
-            model_combo = ComboBox(self.table)
-            model_combo.addItems(models)
-            current_model = data.get("model", "")
-            if current_model:
-                model_combo.setCurrentText(current_model)
-            model_combo.currentIndexChanged.connect(
-                partial(self._on_row_model_changed, name, model_combo)
-            )
-            self.table.setCellWidget(row, 1, model_combo)
-
-            self.table.setItem(
-                row, 2, QTableWidgetItem(str(data.get("temperature", 0.7)))
-            )
-            # 描述列添加 tooltip 显示全部
-            desc = data.get("description", "")
-            if not desc:
-                desc = PRESET_CATEGORIES.get(name, {}).get("description", "")
-            desc_item = QTableWidgetItem(desc[:30] + "..." if len(desc) > 30 else desc)
-            desc_item.setToolTip(desc)
-            self.table.setItem(row, 3, desc_item)
-
-    def _get_available_models(self) -> List[str]:
-        registry = ModelRegistry(self.main_window.opencode_config)
-        return registry.get_all_models()
-
-    def _refresh_bulk_model_combo(self, models: List[str]) -> None:
-        current = self.bulk_model_combo.currentText()
-        self.bulk_model_combo.blockSignals(True)
-        self.bulk_model_combo.clear()
-        self.bulk_model_combo.addItem("- 全部保持 -")
-        self.bulk_model_combo.addItems(models)
-        if current:
-            self.bulk_model_combo.setCurrentText(current)
-        self.bulk_model_combo.blockSignals(False)
-
-    def _on_row_model_changed(self, category_name: str, combo: ComboBox) -> None:
-        config = self.main_window.ohmyopencode_config
-        if config is None:
-            config = {}
-            self.main_window.ohmyopencode_config = config
-        categories = config.setdefault("categories", {})
-        if category_name not in categories:
-            return
-        categories[category_name]["model"] = combo.currentText()
-        self.main_window.save_ohmyopencode_config()
-
-    def _on_bulk_model_changed(self) -> None:
-        model = self.bulk_model_combo.currentText()
-        if model == "- 全部保持 -":
-            return
-        config = self.main_window.ohmyopencode_config
-        if config is None:
-            config = {}
-            self.main_window.ohmyopencode_config = config
-        categories = config.setdefault("categories", {})
-        if not categories:
-            return
-        for name in categories.keys():
-            categories[name]["model"] = model
-        self.main_window.save_ohmyopencode_config()
-        self._load_data()
-
-    def _on_add(self):
-        dialog = CategoryDialog(self.main_window, parent=self)
-        if dialog.exec_():
-            self._load_data()
-            self.show_success("成功", "Category 已添加")
-
-    def _on_add_preset(self):
-        dialog = PresetCategoryDialog(self.main_window, parent=self)
-        if dialog.exec_():
-            self._load_data()
-            self.show_success("成功", "预设 Category 已添加")
-
-    def _on_edit(self):
-        row = self.table.currentRow()
-        if row < 0:
-            self.show_warning(
-                tr("common.info"), tr("common.please_select_first", item="Category")
-            )
-            return
-
-        name = self.table.item(row, 0).text()
-        dialog = CategoryDialog(self.main_window, category_name=name, parent=self)
-        if dialog.exec_():
-            self._load_data()
-            self.show_success("成功", "Category 已更新")
-
-    def _on_delete(self):
-        row = self.table.currentRow()
-        if row < 0:
-            self.show_warning(
-                tr("common.info"), tr("common.please_select_first", item="Category")
-            )
-            return
-
-        name = self.table.item(row, 0).text()
-        w = FluentMessageBox(
-            tr("common.confirm_delete_title"),
-            tr("dialog.confirm_delete_category", name=name),
-            self,
-        )
-        if w.exec_():
-            config = self.main_window.ohmyopencode_config or {}
-            if "categories" in config and name in config["categories"]:
-                del config["categories"][name]
-                self.main_window.save_ohmyopencode_config()
-                self._load_data()
-                self.show_success(
-                    tr("common.success"), tr("dialog.category_deleted", name=name)
-                )
-
-
-class CategoryDialog(BaseDialog):
-    """Category 编辑对话框"""
-
-    def __init__(self, main_window, category_name: str = None, parent=None):
-        super().__init__(parent)
-        self.main_window = main_window
-        self.category_name = category_name
-        self.is_edit = category_name is not None
-
-        self.setWindowTitle(
-            "编辑 Category" if self.is_edit else tr("category.add_category")
-        )
-        self.setMinimumWidth(450)
-        self._setup_ui()
-
-        if self.is_edit:
-            self._load_category_data()
-
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-
-        # Category 名称
-        name_layout = QHBoxLayout()
-        name_layout.addWidget(BodyLabel("Category 名称:", self))
-        self.name_edit = LineEdit(self)
-        self.name_edit.setPlaceholderText(tr("dialog.placeholder_category_tags"))
-        self.name_edit.setToolTip(get_tooltip("category_name"))
-        if self.is_edit:
-            self.name_edit.setEnabled(False)
-        name_layout.addWidget(self.name_edit)
-        layout.addLayout(name_layout)
-
-        # 绑定模型
-        model_layout = QHBoxLayout()
-        model_layout.addWidget(BodyLabel("绑定模型:", self))
+        model_layout.addWidget(BodyLabel(tr("category.bind_model"), self))
         self.model_combo = ComboBox(self)
         self.model_combo.setToolTip(get_tooltip("category_model"))
         self._load_models()
@@ -12746,7 +12351,7 @@ class PresetCategoryDialog(BaseDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
 
-        layout.addWidget(SubtitleLabel("选择预设 Category", self))
+        layout.addWidget(SubtitleLabel(tr("category.select_preset_category"), self))
 
         # 预设列表
         self.list_widget = ListWidget(self)
@@ -12758,7 +12363,7 @@ class PresetCategoryDialog(BaseDialog):
 
         # 绑定模型
         model_layout = QHBoxLayout()
-        model_layout.addWidget(BodyLabel("绑定模型:", self))
+        model_layout.addWidget(BodyLabel(tr("category.bind_model"), self))
         self.model_combo = ComboBox(self)
         self._load_models()
         model_layout.addWidget(self.model_combo)
@@ -14748,7 +14353,7 @@ class SkillPage(BasePage):
         agent_edit_layout.setContentsMargins(12, 8, 12, 8)
 
         agent_pattern_layout = QHBoxLayout()
-        agent_pattern_layout.addWidget(BodyLabel("模式:", agent_edit_card))
+        agent_pattern_layout.addWidget(BodyLabel(tr("rules.pattern"), agent_edit_card))
         self.agent_perm_pattern_edit = LineEdit(agent_edit_card)
         self.agent_perm_pattern_edit.setPlaceholderText(
             tr("dialog.placeholder_deny_pattern")
@@ -14757,7 +14362,7 @@ class SkillPage(BasePage):
         agent_edit_layout.addLayout(agent_pattern_layout)
 
         agent_perm_layout = QHBoxLayout()
-        agent_perm_layout.addWidget(BodyLabel("权限:", agent_edit_card))
+        agent_perm_layout.addWidget(BodyLabel(tr("rules.permission"), agent_edit_card))
         self.agent_perm_level_combo = ComboBox(agent_edit_card)
         self.agent_perm_level_combo.addItems(["allow", "ask", "deny"])
         agent_perm_layout.addWidget(self.agent_perm_level_combo)
@@ -15207,7 +14812,7 @@ class RulesPage(BasePage):
         # 快捷路径
         quick_layout = QHBoxLayout()
         quick_layout.setSpacing(8)
-        quick_layout.addWidget(BodyLabel("快捷:", inst_card))
+        quick_layout.addWidget(BodyLabel(tr("rules.quick"), inst_card))
         for path in ["CONTRIBUTING.md", "docs/*.md", ".cursor/rules/*.md"]:
             btn = PushButton(path, inst_card)
             btn.setFixedHeight(32)
@@ -15230,7 +14835,7 @@ class RulesPage(BasePage):
         # 位置选择
         loc_layout = QHBoxLayout()
         loc_layout.setSpacing(12)
-        loc_layout.addWidget(BodyLabel("编辑位置:", agents_card))
+        loc_layout.addWidget(BodyLabel(tr("rules.edit_location"), agents_card))
         self.global_radio = RadioButton("全局", agents_card)
         self.global_radio.setChecked(True)
         self.global_radio.clicked.connect(self._load_agents_md)
@@ -17369,7 +16974,7 @@ class CLIExportPage(BasePage):
                 )
             )
         else:
-            self.backup_info_label.setText("最近备份: 无")
+            self.backup_info_label.setText(tr("cli_export.latest_backup_none"))
 
     def _update_preview(self):
         """更新配置预览"""
@@ -17706,7 +17311,7 @@ class CLIBackupRestoreDialog(QDialog):
         layout.setSpacing(16)
 
         # 说明
-        layout.addWidget(BodyLabel("选择要恢复的备份:"))
+        layout.addWidget(BodyLabel(tr("backup.select_backup")))
 
         # 备份列表
         self.backup_table = TableWidget(self)
@@ -17882,7 +17487,7 @@ class ImportPage(BasePage):
 
         # 手动选择文件
         manual_layout = QHBoxLayout()
-        manual_layout.addWidget(BodyLabel("手动选择:", detect_card))
+        manual_layout.addWidget(BodyLabel(tr("import.manual_select"), detect_card))
         self.manual_source_combo = ComboBox(detect_card)
         self.manual_source_combo.addItems(
             [
@@ -17935,15 +17540,15 @@ class ImportPage(BasePage):
         # 按钮
         btn_layout = QHBoxLayout()
 
-        preview_btn = PushButton("预览转换", preview_card)
+        preview_btn = PushButton(tr("import.preview_convert"), preview_card)
         preview_btn.clicked.connect(self._preview_convert)
         btn_layout.addWidget(preview_btn)
 
-        import_btn = PrimaryPushButton("导入到 OpenCode", preview_card)
+        import_btn = PrimaryPushButton(tr("import.import_to_opencode"), preview_card)
         import_btn.clicked.connect(self._import_selected)
         btn_layout.addWidget(import_btn)
 
-        confirm_btn = PushButton("确认映射", preview_card)
+        confirm_btn = PushButton(tr("import.confirm_mapping"), preview_card)
         confirm_btn.clicked.connect(self._confirm_mapping)
         btn_layout.addWidget(confirm_btn)
 
@@ -18046,7 +17651,7 @@ class ImportPage(BasePage):
             left_layout.addWidget(source_edit)
 
             right_layout = QVBoxLayout()
-            right_layout.addWidget(SubtitleLabel("转换后的 OpenCode 配置", dialog))
+            right_layout.addWidget(SubtitleLabel(tr("import.converted_config"), dialog))
             convert_edit = TextEdit(dialog)
             convert_edit.setReadOnly(True)
             convert_edit.setPlainText(
@@ -18205,7 +17810,7 @@ class ImportMappingDialog(BaseDialog):
         providers = self.converted.get("provider", {})
         if not providers:
             scroll_layout.addWidget(
-                BodyLabel("未检测到可导入的 Provider", scroll_container)
+                BodyLabel(tr("import.no_provider_detected"), scroll_container)
             )
         else:
             self.provider_edits = {}
