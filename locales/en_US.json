@@ -638,9 +638,25 @@
     "permission_config": "Permission Configuration",
     "global_permission": "Global Permission",
     "pattern": "Pattern",
+    "permission": "Permission",
     "add_permission": "Add Permission",
     "skill_saved": "Skill saved",
-    "skill_deleted": "Skill deleted"
+    "skill_deleted": "Skill deleted",
+    "permission_tab": {
+      "global_title": "Global Skill Permissions",
+      "global_subtitle": "Configure permission.skill permissions to control Skill loading behavior",
+      "add_button": "Add",
+      "delete_button": "Delete",
+      "pattern_label": "Pattern:",
+      "permission_label": "Permission:",
+      "save_permission": "Save Permission",
+      "agent_level_title": "Agent Level Configuration",
+      "agent_level_subtitle": "Configure Skill permissions for specific Agents or disable Skill tools",
+      "select_agent": "Select Agent:",
+      "disable_skill_tool": "Disable Skill Tool",
+      "agent_skill_permission": "Agent Skill Permission Configuration",
+      "save_agent_config": "Save Agent Configuration"
+    }
   },
   "settings": {
     "title": "Settings",

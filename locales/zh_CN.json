@@ -550,9 +550,25 @@
     "permission_config": "权限配置",
     "global_permission": "全局权限",
     "pattern": "模式",
+    "permission": "权限",
     "add_permission": "添加权限",
     "skill_saved": "Skill 已保存",
-    "skill_deleted": "Skill 已删除"
+    "skill_deleted": "Skill 已删除",
+    "permission_tab": {
+      "global_title": "全局 Skill 权限",
+      "global_subtitle": "配置 permission.skill 权限，控制 Skill 的加载行为",
+      "add_button": "添加",
+      "delete_button": "删除",
+      "pattern_label": "模式:",
+      "permission_label": "权限:",
+      "save_permission": "保存权限",
+      "agent_level_title": "Agent 级别配置",
+      "agent_level_subtitle": "为特定 Agent 配置 Skill 权限或禁用 Skill 工具",
+      "select_agent": "选择 Agent:",
+      "disable_skill_tool": "禁用 Skill 工具",
+      "agent_skill_permission": "Agent Skill 权限配置",
+      "save_agent_config": "保存 Agent 配置"
+    }
   },
   "monitor": {
     "title": "监控",

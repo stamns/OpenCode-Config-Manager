@@ -14619,20 +14619,24 @@ class SkillPage(BasePage):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 8, 0)
 
-        left_layout.addWidget(SubtitleLabel("全局 Skill 权限", left_widget))
         left_layout.addWidget(
-            CaptionLabel(
-                "配置 permission.skill 权限，控制 Skill 的加载行为", left_widget
-            )
+            SubtitleLabel(tr("skill.permission_tab.global_title"), left_widget)
+        )
+        left_layout.addWidget(
+            CaptionLabel(tr("skill.permission_tab.global_subtitle"), left_widget)
         )
 
         # 工具栏
         toolbar = QHBoxLayout()
-        add_perm_btn = PrimaryPushButton(FIF.ADD, "添加", left_widget)
+        add_perm_btn = PrimaryPushButton(
+            FIF.ADD, tr("skill.permission_tab.add_button"), left_widget
+        )
         add_perm_btn.clicked.connect(self._on_add_permission)
         toolbar.addWidget(add_perm_btn)
 
-        del_perm_btn = PushButton(FIF.DELETE, "删除", left_widget)
+        del_perm_btn = PushButton(
+            FIF.DELETE, tr("skill.permission_tab.delete_button"), left_widget
+        )
         del_perm_btn.clicked.connect(self._on_delete_permission)
         toolbar.addWidget(del_perm_btn)
 
@@ -14658,7 +14662,9 @@ class SkillPage(BasePage):
         edit_layout.setContentsMargins(12, 8, 12, 8)
 
         pattern_layout = QHBoxLayout()
-        pattern_layout.addWidget(BodyLabel("模式:", edit_card))
+        pattern_layout.addWidget(
+            BodyLabel(tr("skill.permission_tab.pattern_label"), edit_card)
+        )
         self.perm_pattern_edit = LineEdit(edit_card)
         self.perm_pattern_edit.setPlaceholderText(
             tr("dialog.placeholder_allow_pattern")
@@ -14668,7 +14674,9 @@ class SkillPage(BasePage):
         edit_layout.addLayout(pattern_layout)
 
         perm_sel_layout = QHBoxLayout()
-        perm_sel_layout.addWidget(BodyLabel("权限:", edit_card))
+        perm_sel_layout.addWidget(
+            BodyLabel(tr("skill.permission_tab.permission_label"), edit_card)
+        )
         self.perm_level_combo = ComboBox(edit_card)
         self.perm_level_combo.addItems(["allow", "ask", "deny"])
         self.perm_level_combo.setToolTip(get_tooltip("skill_permission"))
@@ -14676,7 +14684,9 @@ class SkillPage(BasePage):
         perm_sel_layout.addStretch()
         edit_layout.addLayout(perm_sel_layout)
 
-        save_perm_btn = PrimaryPushButton("保存权限", edit_card)
+        save_perm_btn = PrimaryPushButton(
+            tr("skill.permission_tab.save_permission"), edit_card
+        )
         save_perm_btn.clicked.connect(self._on_save_permission)
         edit_layout.addWidget(save_perm_btn)
 
@@ -14687,14 +14697,18 @@ class SkillPage(BasePage):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(8, 0, 0, 0)
 
-        right_layout.addWidget(SubtitleLabel("Agent 级别配置", right_widget))
         right_layout.addWidget(
-            CaptionLabel("为特定 Agent 配置 Skill 权限或禁用 Skill 工具", right_widget)
+            SubtitleLabel(tr("skill.permission_tab.agent_level_title"), right_widget)
+        )
+        right_layout.addWidget(
+            CaptionLabel(tr("skill.permission_tab.agent_level_subtitle"), right_widget)
         )
 
         # Agent 选择
         agent_layout = QHBoxLayout()
-        agent_layout.addWidget(BodyLabel("选择 Agent:", right_widget))
+        agent_layout.addWidget(
+            BodyLabel(tr("skill.permission_tab.select_agent"), right_widget)
+        )
         self.agent_combo = ComboBox(right_widget)
         self.agent_combo.addItems(["task", "plan", "code", "summarize"])
         self.agent_combo.currentTextChanged.connect(self._on_agent_changed)
@@ -14704,13 +14718,18 @@ class SkillPage(BasePage):
 
         # 禁用 Skill 工具
         self.disable_skill_check = CheckBox(
-            "禁用 Skill 工具 (tools.skill: false)", right_widget
+            tr("skill.permission_tab.disable_skill_tool") + " (tools.skill: false)",
+            right_widget,
         )
         self.disable_skill_check.stateChanged.connect(self._on_disable_skill_changed)
         right_layout.addWidget(self.disable_skill_check)
 
         # Agent 权限覆盖
-        right_layout.addWidget(BodyLabel("Agent 权限覆盖:", right_widget))
+        right_layout.addWidget(
+            BodyLabel(
+                tr("skill.permission_tab.agent_skill_permission") + ":", right_widget
+            )
+        )
         self.agent_perm_table = TableWidget(right_widget)
         self.agent_perm_table.setColumnCount(2)
         self.agent_perm_table.setHorizontalHeaderLabels(
