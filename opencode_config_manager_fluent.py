@@ -14459,13 +14459,11 @@ class SkillPage(BasePage):
 
         # 描述
         desc_layout = QHBoxLayout()
-        license_layout.addWidget(
-            BodyLabel(tr("skill.create_tab.license_label"), basic_card)
-        )
+        desc_layout.addWidget(BodyLabel(tr("skill.create_tab.desc_label"), basic_card))
         self.create_desc_edit = LineEdit(basic_card)
         self.create_desc_edit.setPlaceholderText(tr("dialog.placeholder_skill_desc"))
-        basic_layout.addLayout(desc_layout)
         desc_layout.addWidget(self.create_desc_edit)
+        basic_layout.addLayout(desc_layout)
 
         # License
         license_layout = QHBoxLayout()
