@@ -12046,11 +12046,11 @@ class OhMyAgentPage(BasePage):
         self.preset_btn.clicked.connect(self._on_add_preset)
         toolbar.addWidget(self.preset_btn)
 
-        self.edit_btn = PushButton(FIF.EDIT, "编辑", self)
+        self.edit_btn = PushButton(FIF.EDIT, tr("common.edit"), self)
         self.edit_btn.clicked.connect(self._on_edit)
         toolbar.addWidget(self.edit_btn)
 
-        self.delete_btn = PushButton(FIF.DELETE, "删除", self)
+        self.delete_btn = PushButton(FIF.DELETE, tr("common.delete"), self)
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
@@ -12437,11 +12437,11 @@ class CategoryPage(BasePage):
         self.preset_btn.clicked.connect(self._on_add_preset)
         toolbar.addWidget(self.preset_btn)
 
-        self.edit_btn = PushButton(FIF.EDIT, "编辑", self)
+        self.edit_btn = PushButton(FIF.EDIT, tr("common.edit"), self)
         self.edit_btn.clicked.connect(self._on_edit)
         toolbar.addWidget(self.edit_btn)
 
-        self.delete_btn = PushButton(FIF.DELETE, "删除", self)
+        self.delete_btn = PushButton(FIF.DELETE, tr("common.delete"), self)
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
@@ -14063,11 +14063,11 @@ class SkillUpdateDialog(MessageBoxBase):
 
         # 按钮布局
         btn_layout = QHBoxLayout()
-        self.select_all_btn = PushButton("全选", self.widget)
+        self.select_all_btn = PushButton(tr("common.select_all"), self.widget)
         self.select_all_btn.clicked.connect(self._on_select_all)
         btn_layout.addWidget(self.select_all_btn)
 
-        self.deselect_all_btn = PushButton("取消全选", self.widget)
+        self.deselect_all_btn = PushButton(tr("common.deselect_all"), self.widget)
         self.deselect_all_btn.clicked.connect(self._on_deselect_all)
         btn_layout.addWidget(self.deselect_all_btn)
         btn_layout.addStretch()
@@ -14078,7 +14078,7 @@ class SkillUpdateDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.table)
         self.viewLayout.addLayout(btn_layout)
 
-        self.yesButton.setText("更新选中")
+        self.yesButton.setText(tr("skill.update_selected"))
         self.cancelButton.setText(tr("common.cancel"))
 
         self.widget.setMinimumWidth(700)
@@ -14302,7 +14302,7 @@ class SkillPage(BasePage):
 
         # 操作按钮
         btn_layout = QHBoxLayout()
-        self.edit_skill_btn = PushButton(FIF.EDIT, "编辑", right_widget)
+        self.edit_skill_btn = PushButton(FIF.EDIT, tr("common.edit"), right_widget)
         self.edit_skill_btn.clicked.connect(self._on_edit_skill)
         self.edit_skill_btn.setEnabled(False)
         btn_layout.addWidget(self.edit_skill_btn)
@@ -14314,7 +14314,9 @@ class SkillPage(BasePage):
         self.scan_skill_btn.setEnabled(False)
         btn_layout.addWidget(self.scan_skill_btn)
 
-        self.delete_skill_btn = PushButton(FIF.DELETE, "删除", right_widget)
+        self.delete_skill_btn = PushButton(
+            FIF.DELETE, tr("common.delete"), right_widget
+        )
         self.delete_skill_btn.clicked.connect(self._on_delete_skill)
         self.delete_skill_btn.setEnabled(False)
         btn_layout.addWidget(self.delete_skill_btn)
@@ -14783,7 +14785,9 @@ class SkillPage(BasePage):
         add_agent_perm_btn.clicked.connect(self._on_add_agent_permission)
         agent_btn_layout.addWidget(add_agent_perm_btn)
 
-        del_agent_perm_btn = PushButton(FIF.DELETE, "删除", agent_edit_card)
+        del_agent_perm_btn = PushButton(
+            FIF.DELETE, tr("common.delete"), agent_edit_card
+        )
         del_agent_perm_btn.clicked.connect(self._on_delete_agent_permission)
         agent_btn_layout.addWidget(del_agent_perm_btn)
         agent_btn_layout.addStretch()
@@ -15211,7 +15215,7 @@ class RulesPage(BasePage):
         add_btn.clicked.connect(self._on_add_instruction)
         add_layout.addWidget(add_btn)
 
-        del_btn = PushButton(FIF.DELETE, "删除", inst_card)
+        del_btn = PushButton(FIF.DELETE, tr("common.delete"), inst_card)
         del_btn.setFixedHeight(36)
         del_btn.clicked.connect(self._on_delete_instruction)
         add_layout.addWidget(del_btn)
@@ -18381,7 +18385,7 @@ class BackupDialog(BaseDialog):
         restore_btn.clicked.connect(self._restore_backup)
         btn_layout.addWidget(restore_btn)
 
-        delete_btn = PushButton(FIF.DELETE, "删除备份", self)
+        delete_btn = PushButton(FIF.DELETE, tr("backup.delete_backup"), self)
         delete_btn.clicked.connect(self._delete_backup)
         btn_layout.addWidget(delete_btn)
 
