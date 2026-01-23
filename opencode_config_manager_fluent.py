@@ -923,6 +923,7 @@ from qfluentwidgets import (
     PushButton,
     PrimaryPushButton,
     TransparentPushButton,
+    TransparentToolButton,
     HyperlinkButton,
     HyperlinkLabel,
     ToolButton,
@@ -11553,10 +11554,10 @@ class MainWindow(FluentWindow):
 
     def _add_language_switcher(self):
         """添加语言切换按钮"""
-        # 创建语言切换按钮
-        self.lang_button = TransparentPushButton(FIF.GLOBE, "", self)
-        self.lang_button.setFixedSize(50, 36)  # 增大按钮尺寸以完整显示图标
-        self.lang_button.setIconSize(QSize(20, 20))  # 设置图标大小
+        # 创建语言切换按钮 - 使用 TransparentToolButton 以居中显示图标
+        self.lang_button = TransparentToolButton(FIF.GLOBE, self)
+        self.lang_button.setFixedSize(40, 36)
+        self.lang_button.setIconSize(QSize(18, 18))
         self.lang_button.setToolTip(tr("settings.language"))
         self.lang_button.clicked.connect(self._on_language_switch)
 
