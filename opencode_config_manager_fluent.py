@@ -863,6 +863,7 @@ from qfluentwidgets import (
     PrimaryPushButton,
     TransparentPushButton,
     HyperlinkButton,
+    HyperlinkLabel,
     ToolButton,
     LineEdit,
     TextEdit,
@@ -13056,8 +13057,15 @@ class SkillDiscovery:
                     if not skill_dir.is_dir():
                         continue
 
-                    skill_file = skill_dir / "SKILL.md"
-                    if not skill_file.exists():
+                    # 尝试查找 SKILL.md 或 SKILL.txt
+                    skill_file = None
+                    for filename in ["SKILL.md", "SKILL.txt"]:
+                        potential_file = skill_dir / filename
+                        if potential_file.exists():
+                            skill_file = potential_file
+                            break
+
+                    if not skill_file:
                         continue
 
                     skill = cls.parse_skill_file(skill_file)
@@ -13091,6 +13099,7 @@ class SkillMarket:
             "description": "ui_ux_pro_max_desc",
             "category": "ui_ux",
             "tags": ["ui", "ux", "design", "frontend"],
+            "path": ".opencode/skills/ui-ux-pro-max",
         },
         {
             "name": "canvas-design",
@@ -13248,14 +13257,6 @@ class SkillMarket:
             "tags": ["domain", "naming", "brainstorm"],
             "path": "domain-name-brainstormer",
         },
-        {
-            "name": "lead-research-assistant",
-            "repo": "ComposioHQ/awesome-claude-skills",
-            "description": "lead_research_assistant_desc",
-            "category": "business",
-            "tags": ["lead", "research", "sales"],
-            "path": "lead-research-assistant",
-        },
         # 生产力和组织类
         {
             "name": "file-organizer",
@@ -13402,10 +13403,23 @@ class SkillMarketDialog(MessageBoxBase):
         # 填充数据
         self._load_skills(SkillMarket.get_all_skills())
 
+        # 添加"浏览更多技能"链接
+        browse_more_layout = QHBoxLayout()
+        browse_more_layout.addStretch()
+
+        browse_more_label = HyperlinkLabel(
+            "https://skillsmp.com/", tr("skill.market_dialog.browse_more"), self.widget
+        )
+        browse_more_label.setToolTip("访问 SkillsMP.com 浏览更多社区技能")
+        browse_more_layout.addWidget(browse_more_label)
+
+        browse_more_layout.addStretch()
+
         # 布局
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addLayout(search_layout)
         self.viewLayout.addWidget(self.table)
+        self.viewLayout.addLayout(browse_more_layout)
 
         self.yesButton.setText(tr("skill.market_dialog.install_button"))
         self.yesButton.setEnabled(False)
@@ -13840,7 +13854,7 @@ class SkillInstaller:
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
                     zip_ref.extractall(temp_dir)
 
-                # 3. 查找 SKILL.md
+                # 3. 查找 SKILL.md 或 SKILL.txt
                 extracted_dir = Path(temp_dir) / f"{repo}-{branch}"
 
                 # 如果指定了子目录，则在子目录中查找
@@ -13851,18 +13865,24 @@ class SkillInstaller:
                 else:
                     skill_dir = extracted_dir
 
-                skill_md = skill_dir / "SKILL.md"
+                # 尝试查找 SKILL.md 或 SKILL.txt
+                skill_file = None
+                for filename in ["SKILL.md", "SKILL.txt"]:
+                    potential_file = skill_dir / filename
+                    if potential_file.exists():
+                        skill_file = potential_file
+                        break
 
-                if not skill_md.exists():
+                if not skill_file:
                     return (
                         False,
-                        f"未找到 SKILL.md 文件{f' (在 {subdir} 中)' if subdir else ''}",
+                        f"未找到 SKILL.md 或 SKILL.txt 文件{f' (在 {subdir} 中)' if subdir else ''}",
                     )
 
                 # 4. 解析 Skill 名称
-                skill = SkillDiscovery.parse_skill_file(skill_md)
+                skill = SkillDiscovery.parse_skill_file(skill_file)
                 if not skill:
-                    return False, "SKILL.md 格式错误"
+                    return False, "SKILL 文件格式错误"
 
                 # 5. 复制到目标目录
                 if progress_callback:
