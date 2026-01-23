@@ -605,7 +605,25 @@
       "table_code": "Code",
       "close_button": "Close",
       "scanning": "Scanning...",
-      "scan_complete": "Scan Complete"
+      "scan_complete": "Scan Complete",
+      "risk_os_system": "Execute system command (may execute malicious commands)",
+      "risk_subprocess": "Execute subprocess (may execute malicious programs)",
+      "risk_eval": "Execute dynamic code (critical security risk)",
+      "risk_exec": "Execute dynamic code (critical security risk)",
+      "risk_import": "Dynamic module import (may import malicious modules)",
+      "risk_remove": "Delete file (may delete important files)",
+      "risk_rmtree": "Delete directory (may delete important directories)",
+      "risk_requests": "Network request (may leak data)",
+      "risk_socket": "Network communication (may establish malicious connections)",
+      "level_safe": "Safe",
+      "level_low": "Low Risk",
+      "level_medium": "Medium Risk",
+      "level_high": "High Risk",
+      "level_critical": "Critical Risk",
+      "level_unknown": "Unknown",
+      "issues_found": "Found",
+      "issues_count": "potential issues:",
+      "no_issues": "No security issues found"
     },
     "create_tab": {
       "title": "Create/Edit SKILL.md",
@@ -718,7 +736,11 @@
     "compaction_settings": "Compaction Settings",
     "preview": "Configuration Preview",
     "save_settings": "Save Settings",
-    "settings_saved": "Settings saved"
+    "settings_saved": "Settings saved",
+    "card_title": "Context Compaction",
+    "description": "Context compaction is used to automatically compress session context when it approaches full capacity, saving tokens and maintaining session continuity.",
+    "auto_compress": "Auto Compress (auto) - Automatically compress session when context is full",
+    "prune_old_output": "Prune Old Output (prune) - Remove old tool outputs to save tokens"
   },
   "monitor": {
     "title": "Monitor",
@@ -749,7 +771,12 @@
     "start": "Start",
     "toggle_tooltip": "Start/Stop automatic chat latency detection",
     "model_provider": "Model/Provider",
-    "ping_latency": "Ping Latency"
+    "ping_latency": "Ping Latency",
+    "status_operational": "Operational",
+    "status_degraded": "Degraded",
+    "status_failed": "Failed",
+    "status_error": "Error",
+    "status_no_config": "Not Configured"
   },
   "cli_export": {
     "title": "CLI Export",
@@ -904,7 +931,19 @@
     "restore_confirm": "Are you sure you want to restore backup \"{name}\"?\nCurrent configuration will be overwritten.",
     "backup_success": "Backup created successfully",
     "restore_success": "Backup restored successfully",
-    "delete_success": "Backup deleted"
+    "delete_success": "Backup deleted",
+    "backup_opencode": "Backup OpenCode",
+    "backup_ohmyopencode": "Backup Oh My OpenCode",
+    "refresh": "Refresh",
+    "open_backup_dir": "Open Backup Directory",
+    "preview_content": "Preview Content",
+    "backup_list": "Backup List",
+    "config_file": "Config File",
+    "time": "Time",
+    "tag": "Tag",
+    "path": "Path",
+    "restore_selected": "Restore Selected Backup",
+    "close": "Close"
   },
   "import": {
     "title": "External Import",
@@ -924,7 +963,12 @@
     "import_success": "Import successful",
     "import_failed": "Import failed",
     "no_configs_detected": "No importable configurations detected",
-    "config_imported": "Imported configuration from {source}"
+    "config_imported": "Imported configuration from {source}",
+    "preview_card_title": "Configuration Preview and Conversion Result",
+    "preview_card_description": "Click 'Preview Conversion' to view side-by-side comparison in a popup.",
+    "select_config_file": "Select Configuration File",
+    "config_files": "Configuration Files (*.json *.jsonc *.toml);;All Files (*.*)",
+    "select_config_to_convert": "Please select a configuration to convert first"
   },
   "native_provider": {
     "title": "Native Provider",
@@ -968,6 +1012,14 @@
     "config_format_check": "Configuration Format Check",
     "msg_15": "\\n",
     "confirm_delete_backup": "Are you sure you want to delete this backup?",
+    "config_issues_detected": "The following issues were detected in the configuration file:",
+    "errors_count": "errors:",
+    "warnings_count": "warnings:",
+    "more_errors": "... and {count} more errors",
+    "more_warnings": "... and {count} more warnings",
+    "auto_fix_prompt": "Would you like to attempt automatic repair? (Original configuration will be backed up first)",
+    "config_issues_not_fixed": "Configuration Issues Not Fixed",
+    "config_issues_warning": "Some features may not work properly. It is recommended to manually check the configuration file",
     "placeholder_mcp_desc": "e.g., MCP server providing web scraping capabilities",
     "placeholder_mcp_tags": "e.g., stdio, web, search",
     "placeholder_agent_desc": "Agent function description",

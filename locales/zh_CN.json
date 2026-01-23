@@ -513,6 +513,11 @@
     "market_search": "搜索 Skills...",
     "market_category": "全部分类",
     "market_install": "安装选中",
+    "source_opencode_global": "🌐 OpenCode 全局",
+    "source_opencode_project": "📁 OpenCode 项目",
+    "source_claude_global": "🌐 Claude 全局",
+    "source_claude_project": "📁 Claude 项目",
+    "source_unknown": "❓ 未知",
     "market_dialog": {
       "title": "Skill 市场",
       "subtitle": "精选 Skills 集合",
@@ -621,7 +626,25 @@
       "table_code": "代码",
       "close_button": "关闭",
       "scanning": "正在扫描...",
-      "scan_complete": "扫描完成"
+      "scan_complete": "扫描完成",
+      "risk_os_system": "执行系统命令（可能执行恶意命令）",
+      "risk_subprocess": "执行子进程（可能执行恶意程序）",
+      "risk_eval": "执行动态代码（严重安全风险）",
+      "risk_exec": "执行动态代码（严重安全风险）",
+      "risk_import": "动态导入模块（可能导入恶意模块）",
+      "risk_remove": "删除文件（可能删除重要文件）",
+      "risk_rmtree": "删除目录（可能删除重要目录）",
+      "risk_requests": "网络请求（可能泄露数据）",
+      "risk_socket": "网络通信（可能建立恶意连接）",
+      "level_safe": "安全",
+      "level_low": "低风险",
+      "level_medium": "中风险",
+      "level_high": "高风险",
+      "level_critical": "严重风险",
+      "level_unknown": "未知",
+      "issues_found": "发现",
+      "issues_count": "个潜在问题:",
+      "no_issues": "未发现安全问题"
     },
     "create_tab": {
       "title": "创建/编辑 SKILL.md",
@@ -713,7 +736,12 @@
     "start": "启动",
     "toggle_tooltip": "启动/停止对话延迟自动检测",
     "model_provider": "模型/提供商",
-    "ping_latency": "Ping延迟"
+    "ping_latency": "Ping延迟",
+    "status_operational": "正常",
+    "status_degraded": "延迟",
+    "status_failed": "异常",
+    "status_error": "错误",
+    "status_no_config": "未配置"
   },
   "cli_export": {
     "title": "CLI 工具导出",
@@ -787,7 +815,12 @@
     "import_success": "导入成功",
     "import_failed": "导入失败",
     "no_configs_detected": "未检测到可导入的配置",
-    "config_imported": "已导入 {source} 的配置"
+    "config_imported": "已导入 {source} 的配置",
+    "preview_card_title": "配置预览与转换结果",
+    "preview_card_description": "点击"预览转换"在弹窗中查看左右对照。",
+    "select_config_file": "选择配置文件",
+    "config_files": "配置文件 (*.json *.jsonc *.toml);;所有文件 (*.*)",
+    "select_config_to_convert": "请先选择要转换的配置"
   },
   "permission": {
     "title": "权限管理",
@@ -823,7 +856,8 @@
     "delete_confirm_msg": "确定要删除 Category \"{name}\" 吗？",
     "category_added": "Category 已添加",
     "preset_category_added": "预设 Category 已添加",
-    "category_updated": "Category 已更新"
+    "category_updated": "Category 已更新",
+    "preset_dialog_title": "从预设添加 Category"
   },
   "ohmyagent": {
     "title": "Oh My Agent",
@@ -840,7 +874,18 @@
     "delete_confirm_msg": "确定要删除 Agent \"{name}\" 吗？",
     "agent_added": "Agent 已添加",
     "preset_agent_added": "预设 Agent 已添加",
-    "agent_updated": "Agent 已更新"
+    "agent_updated": "Agent 已更新",
+    "preset_dialog": {
+      "title": "从预设添加 Agent",
+      "subtitle": "选择预设 Agent",
+      "select_preset": "请选择一个预设 Agent",
+      "agent_exists": "Agent \"{name}\" 已存在"
+    },
+    "dialog": {
+      "title": "添加/编辑 Agent",
+      "subtitle": "配置 Agent 信息",
+      "model_label": "绑定模型:"
+    }
   },
   "help": {
     "title": "帮助",
@@ -875,7 +920,19 @@
     "restore_confirm": "确定要恢复备份 \"{name}\" 吗？\n当前配置将被覆盖。",
     "backup_success": "备份创建成功",
     "restore_success": "备份恢复成功",
-    "delete_success": "备份已删除"
+    "delete_success": "备份已删除",
+    "backup_opencode": "备份 OpenCode",
+    "backup_ohmyopencode": "备份 Oh My OpenCode",
+    "refresh": "刷新",
+    "open_backup_dir": "打开备份目录",
+    "preview_content": "预览内容",
+    "backup_list": "备份列表",
+    "config_file": "配置文件",
+    "time": "时间",
+    "tag": "标签",
+    "path": "路径",
+    "restore_selected": "恢复选中备份",
+    "close": "关闭"
   },
   "rules": {
     "title": "Rules 管理",
@@ -909,7 +966,11 @@
     "compaction_settings": "压缩设置",
     "preview": "配置预览",
     "save_settings": "保存设置",
-    "settings_saved": "设置已保存"
+    "settings_saved": "设置已保存",
+    "card_title": "上下文压缩 (Compaction)",
+    "description": "上下文压缩用于在会话上下文接近满时自动压缩，以节省 tokens 并保持会话连续性。",
+    "auto_compress": "自动压缩 (auto) - 当上下文已满时自动压缩会话",
+    "prune_old_output": "修剪旧输出 (prune) - 删除旧的工具输出以节省 tokens"
   },
   "settings": {
     "title": "设置",
@@ -968,6 +1029,14 @@
     "config_format_check": "配置格式检查",
     "msg_15": "\\n",
     "confirm_delete_backup": "确定要删除此备份吗？",
+    "config_issues_detected": "检测到配置文件存在以下问题：",
+    "errors_count": "个错误:",
+    "warnings_count": "个警告:",
+    "more_errors": "... 还有 {count} 个错误",
+    "more_warnings": "... 还有 {count} 个警告",
+    "auto_fix_prompt": "是否尝试自动修复？（会先备份原配置）",
+    "config_issues_not_fixed": "配置问题未修复",
+    "config_issues_warning": "部分功能可能无法正常工作，建议手动检查配置文件",
     "placeholder_mcp_desc": "如: 提供网页抓取能力的 MCP 服务器",
     "placeholder_mcp_tags": "如: stdio, web, search",
     "placeholder_agent_desc": "Agent 功能描述",

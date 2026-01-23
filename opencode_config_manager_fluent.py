@@ -737,11 +737,11 @@ class EnvVarDetector:
 
 
 STATUS_LABELS = {
-    "operational": "正常",
-    "degraded": "延迟",
-    "failed": "异常",
-    "error": "错误",
-    "no_config": "未配置",
+    "operational": "monitor.status_operational",
+    "degraded": "monitor.status_degraded",
+    "failed": "monitor.status_failed",
+    "error": "monitor.status_error",
+    "no_config": "monitor.status_no_config",
 }
 
 # 状态颜色 - 与 UIConfig 配色方案一致
@@ -11939,28 +11939,30 @@ class MainWindow(FluentWindow):
         warnings = [i for i in issues if i["level"] == "warning"]
 
         # 构建消息
-        msg_lines = ["检测到配置文件存在以下问题：\n"]
+        msg_lines = [tr("dialog.config_issues_detected") + "\n"]
 
         if errors:
-            msg_lines.append(f"❌ {len(errors)} 个错误:")
+            msg_lines.append(f"❌ {len(errors)} {tr('dialog.errors_count')}")
             for e in errors[:8]:
                 msg_lines.append(f"  • {e['message']}")
             if len(errors) > 8:
-                msg_lines.append(f"  ... 还有 {len(errors) - 8} 个错误")
+                msg_lines.append(tr("dialog.more_errors").format(count=len(errors) - 8))
             msg_lines.append("")
 
         if warnings:
-            msg_lines.append(f"⚠️ {len(warnings)} 个警告:")
+            msg_lines.append(f"⚠️ {len(warnings)} {tr('dialog.warnings_count')}")
             for w in warnings[:8]:
                 msg_lines.append(f"  • {w['message']}")
             if len(warnings) > 8:
-                msg_lines.append(f"  ... 还有 {len(warnings) - 8} 个警告")
+                msg_lines.append(
+                    tr("dialog.more_warnings").format(count=len(warnings) - 8)
+                )
 
-        msg_lines.append("\n是否尝试自动修复？（会先备份原配置）")
+        msg_lines.append("\n" + tr("dialog.auto_fix_prompt"))
 
         # 创建对话框
         dialog = FluentMessageBox(
-            tr("dialog.config_format_check"), tr("dialog.msg_15").join(msg_lines), self
+            tr("dialog.config_format_check"), "\n".join(msg_lines), self
         )
 
         if dialog.exec_():
@@ -11969,8 +11971,8 @@ class MainWindow(FluentWindow):
         else:
             # 用户取消，显示警告
             InfoBar.warning(
-                title="配置问题未修复",
-                content="部分功能可能无法正常工作，建议手动检查配置文件",
+                title=tr("dialog.config_issues_not_fixed"),
+                content=tr("dialog.config_issues_warning"),
                 orient=Qt.Orientation.Horizontal,
                 isClosable=True,
                 position=InfoBarPosition.TOP_RIGHT,
@@ -12392,7 +12394,11 @@ class PresetOhMyAgentDialog(BaseDialog):
     def _on_add(self):
         current = self.list_widget.currentItem()
         if not current:
-            InfoBar.warning(tr("common.warning"), "请选择一个预设 Agent", parent=self)
+            InfoBar.warning(
+                tr("common.warning"),
+                tr("ohmyagent.preset_dialog.select_preset"),
+                parent=self,
+            )
             return
 
         # 解析选中的预设
@@ -12409,7 +12415,11 @@ class PresetOhMyAgentDialog(BaseDialog):
             config["agents"] = {}
 
         if name in config["agents"]:
-            InfoBar.warning(tr("common.warning"), f'Agent "{name}" 已存在', parent=self)
+            InfoBar.warning(
+                tr("common.warning"),
+                tr("ohmyagent.preset_dialog.agent_exists", name=name),
+                parent=self,
+            )
             return
 
         config["agents"][name] = {
@@ -12770,7 +12780,7 @@ class PresetCategoryDialog(BaseDialog):
         super().__init__(parent)
         self.main_window = main_window
 
-        self.setWindowTitle("从预设添加 Category")
+        self.setWindowTitle(tr("category.preset_dialog_title"))
         self.setMinimumWidth(500)
         self._setup_ui()
 
@@ -13373,47 +13383,47 @@ class SkillSecurityScanner:
         {
             "pattern": r"os\.system\(",
             "level": "high",
-            "description": "执行系统命令（可能执行恶意命令）",
+            "description_key": "skill.security_dialog.risk_os_system",
         },
         {
             "pattern": r"subprocess\.(call|run|Popen)",
             "level": "high",
-            "description": "执行子进程（可能执行恶意程序）",
+            "description_key": "skill.security_dialog.risk_subprocess",
         },
         {
             "pattern": r"eval\(",
             "level": "critical",
-            "description": "执行动态代码（严重安全风险）",
+            "description_key": "skill.security_dialog.risk_eval",
         },
         {
             "pattern": r"exec\(",
             "level": "critical",
-            "description": "执行动态代码（严重安全风险）",
+            "description_key": "skill.security_dialog.risk_exec",
         },
         {
             "pattern": r"__import__\(",
             "level": "medium",
-            "description": "动态导入模块（可能导入恶意模块）",
+            "description_key": "skill.security_dialog.risk_import",
         },
         {
             "pattern": r"os\.remove\(",
             "level": "high",
-            "description": "删除文件（可能删除重要文件）",
+            "description_key": "skill.security_dialog.risk_remove",
         },
         {
             "pattern": r"shutil\.rmtree\(",
             "level": "high",
-            "description": "删除目录（可能删除重要目录）",
+            "description_key": "skill.security_dialog.risk_rmtree",
         },
         {
             "pattern": r"requests\.(get|post|put|delete)",
             "level": "low",
-            "description": "网络请求（可能泄露数据）",
+            "description_key": "skill.security_dialog.risk_requests",
         },
         {
             "pattern": r"socket\.",
             "level": "medium",
-            "description": "网络通信（可能建立恶意连接）",
+            "description_key": "skill.security_dialog.risk_socket",
         },
     ]
 
@@ -13432,7 +13442,7 @@ class SkillSecurityScanner:
             for pattern_info in cls.DANGEROUS_PATTERNS:
                 pattern = pattern_info["pattern"]
                 level = pattern_info["level"]
-                description = pattern_info["description"]
+                description_key = pattern_info["description_key"]
 
                 for line_num, line in enumerate(lines, 1):
                     if re.search(pattern, line):
@@ -13441,7 +13451,7 @@ class SkillSecurityScanner:
                                 "line": line_num,
                                 "code": line.strip(),
                                 "level": level,
-                                "description": description,
+                                "description_key": description_key,
                             }
                         )
 
@@ -13498,7 +13508,9 @@ class SecurityScanDialog(MessageBoxBase):
 
     def __init__(self, scan_result: Dict[str, Any], skill_name: str, parent=None):
         super().__init__(parent)
-        self.titleLabel = SubtitleLabel(f"安全扫描 - {skill_name}", self)
+        self.titleLabel = SubtitleLabel(
+            f"{tr('skill.security_dialog.title')} - {skill_name}", self
+        )
 
         score = scan_result["score"]
         level = scan_result["level"]
@@ -13506,7 +13518,9 @@ class SecurityScanDialog(MessageBoxBase):
 
         # 分数和等级
         score_layout = QHBoxLayout()
-        score_label = TitleLabel(f"安全评分: {score}/100", self.widget)
+        score_label = TitleLabel(
+            f"{tr('skill.security_dialog.score_label')} {score}/100", self.widget
+        )
         score_layout.addWidget(score_label)
 
         level_colors = {
@@ -13518,24 +13532,30 @@ class SecurityScanDialog(MessageBoxBase):
             "unknown": "#9E9E9E",
         }
         level_names = {
-            "safe": "安全",
-            "low": "低风险",
-            "medium": "中风险",
-            "high": "高风险",
-            "critical": "严重风险",
-            "unknown": "未知",
+            "safe": tr("skill.security_dialog.level_safe"),
+            "low": tr("skill.security_dialog.level_low"),
+            "medium": tr("skill.security_dialog.level_medium"),
+            "high": tr("skill.security_dialog.level_high"),
+            "critical": tr("skill.security_dialog.level_critical"),
+            "unknown": tr("skill.security_dialog.level_unknown"),
         }
 
-        level_label = StrongBodyLabel(level_names.get(level, "未知"), self.widget)
+        level_label = StrongBodyLabel(
+            level_names.get(level, tr("skill.security_dialog.level_unknown")),
+            self.widget,
+        )
         level_label.setStyleSheet(f"color: {level_colors.get(level, '#9E9E9E')};")
         score_layout.addWidget(level_label)
         score_layout.addStretch()
 
         # 问题列表
         if issues:
-            issues_label = BodyLabel(f"发现 {len(issues)} 个潜在问题:", self.widget)
+            issues_label = BodyLabel(
+                f"{tr('skill.security_dialog.issues_found')} {len(issues)} {tr('skill.security_dialog.issues_count')}",
+                self.widget,
+            )
         else:
-            issues_label = BodyLabel("未发现安全问题", self.widget)
+            issues_label = BodyLabel(tr("skill.security_dialog.no_issues"), self.widget)
 
         # 问题表格
         self.table = TableWidget(self.widget)
@@ -13565,7 +13585,9 @@ class SecurityScanDialog(MessageBoxBase):
 
             self.table.setItem(row, 0, QTableWidgetItem(str(issue["line"])))
             self.table.setItem(row, 1, QTableWidgetItem(issue["level"]))
-            self.table.setItem(row, 2, QTableWidgetItem(issue["description"]))
+            # 使用翻译键获取描述
+            description = tr(issue.get("description_key", ""))
+            self.table.setItem(row, 2, QTableWidgetItem(description))
             self.table.setItem(row, 3, QTableWidgetItem(issue["code"]))
 
         # 布局
@@ -13574,7 +13596,7 @@ class SecurityScanDialog(MessageBoxBase):
         self.viewLayout.addWidget(issues_label)
         self.viewLayout.addWidget(self.table)
 
-        self.yesButton.setText("确定")
+        self.yesButton.setText(tr("skill.security_dialog.close_button"))
         self.cancelButton.hide()
 
         self.widget.setMinimumWidth(900)
@@ -15462,27 +15484,23 @@ class CompactionPage(BasePage):
 
     def _setup_ui(self):
         # 说明卡片
-        desc_card = self.add_card("上下文压缩 (Compaction)")
+        desc_card = self.add_card(tr("compaction.card_title"))
         desc_layout = desc_card.layout()
 
         desc_layout.addWidget(
             BodyLabel(
-                "上下文压缩用于在会话上下文接近满时自动压缩，以节省 tokens 并保持会话连续性。",
+                tr("compaction.description"),
                 desc_card,
             )
         )
 
         # auto 选项
-        self.auto_check = CheckBox(
-            "自动压缩 (auto) - 当上下文已满时自动压缩会话", desc_card
-        )
+        self.auto_check = CheckBox(tr("compaction.auto_compress"), desc_card)
         self.auto_check.setChecked(True)
         desc_layout.addWidget(self.auto_check)
 
         # prune 选项
-        self.prune_check = CheckBox(
-            "修剪旧输出 (prune) - 删除旧的工具输出以节省 tokens", desc_card
-        )
+        self.prune_check = CheckBox(tr("compaction.prune_old_output"), desc_card)
         self.prune_check.setChecked(True)
         desc_layout.addWidget(self.prune_check)
 
@@ -16147,7 +16165,7 @@ class MonitorPage(BasePage):
             block.setFixedSize(6, 10)
             block.setStyleSheet(f"background: {color}; border-radius: 1px;")
             block.setToolTip(
-                f"{STATUS_LABELS.get(item.status, '未知')}: {item.checked_at.strftime('%H:%M:%S')}"
+                f"{tr(STATUS_LABELS.get(item.status, 'monitor.status_error'))}: {item.checked_at.strftime('%H:%M:%S')}"
             )
             layout.addWidget(block)
 
@@ -16200,7 +16218,7 @@ class MonitorPage(BasePage):
         if history:
             latest = history[-1]
             # 状态
-            status_label = STATUS_LABELS.get(latest.status, "未知")
+            status_label = tr(STATUS_LABELS.get(latest.status, "monitor.status_error"))
             status_item = QTableWidgetItem(f"● {status_label}")
             status_item.setForeground(
                 QColor(STATUS_COLORS.get(latest.status, "#9AA4B2"))
@@ -17999,9 +18017,13 @@ class ImportPage(BasePage):
         detect_layout.addWidget(self.config_table)
 
         # 预览卡片
-        preview_card = self.add_card("配置预览与转换结果")
+        preview_card = self.add_card(tr("import.preview_card_title"))
         preview_card.setStyleSheet(
             "SimpleCardWidget { background-color: transparent; border: none; }"
+        )
+        preview_layout = preview_card.layout()
+        preview_layout.addWidget(
+            BodyLabel(tr("import.preview_card_description"), preview_card)
         )
         preview_layout = preview_card.layout()
         preview_layout.addWidget(
@@ -18052,8 +18074,10 @@ class ImportPage(BasePage):
         if not source:
             return
 
-        file_filter = "配置文件 (*.json *.jsonc *.toml);;所有文件 (*.*)"
-        path, _ = QFileDialog.getOpenFileName(self, "选择配置文件", "", file_filter)
+        file_filter = tr("import.config_files")
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("import.select_config_file"), "", file_filter
+        )
         if not path:
             return
 
@@ -18083,7 +18107,7 @@ class ImportPage(BasePage):
         """预览转换结果"""
         row = self.config_table.currentRow()
         if row < 0:
-            self.show_warning(tr("common.info"), "请先选择要转换的配置")
+            self.show_warning(tr("common.info"), tr("import.select_config_to_convert"))
             return
 
         source = self.config_table.item(row, 0).text()
@@ -18391,7 +18415,7 @@ class BackupDialog(BaseDialog):
         self.main_window = main_window
         self.backup_manager = main_window.backup_manager
 
-        self.setWindowTitle("备份管理")
+        self.setWindowTitle(tr("backup.title"))
         self.setMinimumSize(600, 400)
         self._setup_ui()
         self._load_backups()
@@ -18403,37 +18427,44 @@ class BackupDialog(BaseDialog):
         # 工具栏
         toolbar = QHBoxLayout()
 
-        backup_opencode_btn = PrimaryPushButton(FIF.SAVE, "备份 OpenCode", self)
+        backup_opencode_btn = PrimaryPushButton(
+            FIF.SAVE, tr("backup.backup_opencode"), self
+        )
         backup_opencode_btn.clicked.connect(self._backup_opencode)
         toolbar.addWidget(backup_opencode_btn)
 
-        backup_ohmy_btn = PushButton(FIF.SAVE, "备份 Oh My OpenCode", self)
+        backup_ohmy_btn = PushButton(FIF.SAVE, tr("backup.backup_ohmyopencode"), self)
         backup_ohmy_btn.clicked.connect(self._backup_ohmyopencode)
         toolbar.addWidget(backup_ohmy_btn)
 
         toolbar.addStretch()
 
-        refresh_btn = PushButton(FIF.SYNC, "刷新", self)
+        refresh_btn = PushButton(FIF.SYNC, tr("backup.refresh"), self)
         refresh_btn.clicked.connect(self._load_backups)
         toolbar.addWidget(refresh_btn)
 
-        open_dir_btn = PushButton(FIF.FOLDER, "打开备份目录", self)
+        open_dir_btn = PushButton(FIF.FOLDER, tr("backup.open_backup_dir"), self)
         open_dir_btn.clicked.connect(self._open_backup_dir)
         toolbar.addWidget(open_dir_btn)
 
-        preview_btn = PushButton(FIF.VIEW, "预览内容", self)
+        preview_btn = PushButton(FIF.VIEW, tr("backup.preview_content"), self)
         preview_btn.clicked.connect(self._preview_backup)
         toolbar.addWidget(preview_btn)
 
         layout.addLayout(toolbar)
 
         # 备份列表
-        layout.addWidget(SubtitleLabel("备份列表", self))
+        layout.addWidget(SubtitleLabel(tr("backup.backup_list"), self))
 
         self.backup_table = TableWidget(self)
         self.backup_table.setColumnCount(4)
         self.backup_table.setHorizontalHeaderLabels(
-            ["配置文件", "时间", "标签", "路径"]
+            [
+                tr("backup.config_file"),
+                tr("backup.time"),
+                tr("backup.tag"),
+                tr("backup.path"),
+            ]
         )
         # 设置列宽：配置文件和标签固定，时间和路径自适应
         header = self.backup_table.horizontalHeader()
@@ -18452,7 +18483,7 @@ class BackupDialog(BaseDialog):
         # 操作按钮
         btn_layout = QHBoxLayout()
 
-        restore_btn = PrimaryPushButton("恢复选中备份", self)
+        restore_btn = PrimaryPushButton(tr("backup.restore_selected"), self)
         restore_btn.clicked.connect(self._restore_backup)
         btn_layout.addWidget(restore_btn)
 
@@ -18462,7 +18493,7 @@ class BackupDialog(BaseDialog):
 
         btn_layout.addStretch()
 
-        close_btn = PushButton("关闭", self)
+        close_btn = PushButton(tr("backup.close"), self)
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
 
