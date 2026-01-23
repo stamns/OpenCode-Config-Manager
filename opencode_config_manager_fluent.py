@@ -13053,147 +13053,103 @@ class SkillDiscovery:
 class SkillMarket:
     """Skill 市场 - 内置常用 Skills 列表"""
 
-    # 内置 Skill 列表
+    # 内置 Skill 列表（全部来自 Anthropic 官方仓库）
     FEATURED_SKILLS = [
         {
-            "name": "git-release",
-            "repo": "vercel-labs/git-release",
-            "description": "git_release_desc",
+            "name": "mcp-builder",
+            "repo": "anthropics/skills",
+            "description": "mcp_builder_desc",
             "category": "dev_tools",
-            "tags": ["git", "github", "release"],
+            "tags": ["mcp", "server", "protocol"],
+            "path": "skills/mcp-builder",
         },
         {
-            "name": "code-review",
-            "repo": "anthropics/code-review-skill",
-            "description": "code_review_desc",
-            "category": "code_quality",
-            "tags": ["review", "quality", "best-practices"],
+            "name": "web-artifacts-builder",
+            "repo": "anthropics/skills",
+            "description": "web_artifacts_builder_desc",
+            "category": "ui_ux",
+            "tags": ["web", "react", "frontend"],
+            "path": "skills/web-artifacts-builder",
         },
         {
-            "name": "test-generator",
-            "repo": "openai/test-generator-skill",
-            "description": "test_generator_desc",
+            "name": "canvas-design",
+            "repo": "anthropics/skills",
+            "description": "canvas_design_desc",
+            "category": "ui_ux",
+            "tags": ["design", "canvas", "art"],
+            "path": "skills/canvas-design",
+        },
+        {
+            "name": "theme-factory",
+            "repo": "anthropics/skills",
+            "description": "theme_factory_desc",
+            "category": "ui_ux",
+            "tags": ["theme", "styling", "design"],
+            "path": "skills/theme-factory",
+        },
+        {
+            "name": "algorithmic-art",
+            "repo": "anthropics/skills",
+            "description": "algorithmic_art_desc",
+            "category": "creative",
+            "tags": ["art", "generative", "creative"],
+            "path": "skills/algorithmic-art",
+        },
+        {
+            "name": "frontend-design",
+            "repo": "anthropics/skills",
+            "description": "frontend_design_desc",
+            "category": "ui_ux",
+            "tags": ["frontend", "design", "ui"],
+            "path": "skills/frontend-design",
+        },
+        {
+            "name": "webapp-testing",
+            "repo": "anthropics/skills",
+            "description": "webapp_testing_desc",
             "category": "testing",
-            "tags": ["testing", "unit-test", "automation"],
+            "tags": ["testing", "webapp", "automation"],
+            "path": "skills/webapp-testing",
         },
         {
-            "name": "documentation",
-            "repo": "anthropics/documentation-skill",
-            "description": "documentation_desc",
+            "name": "skill-creator",
+            "repo": "anthropics/skills",
+            "description": "skill_creator_desc",
+            "category": "dev_tools",
+            "tags": ["skill", "creator", "development"],
+            "path": "skills/skill-creator",
+        },
+        {
+            "name": "doc-coauthoring",
+            "repo": "anthropics/skills",
+            "description": "doc_coauthoring_desc",
             "category": "documentation",
-            "tags": ["docs", "documentation", "readme"],
+            "tags": ["documentation", "collaboration", "writing"],
+            "path": "skills/doc-coauthoring",
         },
         {
-            "name": "refactoring",
-            "repo": "openai/refactoring-skill",
-            "description": "refactoring_desc",
-            "category": "code_quality",
-            "tags": ["refactor", "optimization", "clean-code"],
+            "name": "brand-guidelines",
+            "repo": "anthropics/skills",
+            "description": "brand_guidelines_desc",
+            "category": "documentation",
+            "tags": ["brand", "guidelines", "design"],
+            "path": "skills/brand-guidelines",
         },
         {
-            "name": "security-audit",
-            "repo": "anthropics/security-audit-skill",
-            "description": "security_audit_desc",
-            "category": "security",
-            "tags": ["security", "vulnerability", "audit"],
+            "name": "internal-comms",
+            "repo": "anthropics/skills",
+            "description": "internal_comms_desc",
+            "category": "documentation",
+            "tags": ["communication", "internal", "team"],
+            "path": "skills/internal-comms",
         },
         {
-            "name": "api-design",
-            "repo": "openai/api-design-skill",
-            "description": "api_design_desc",
-            "category": "api",
-            "tags": ["api", "rest", "design"],
-        },
-        {
-            "name": "database-migration",
-            "repo": "vercel-labs/database-migration-skill",
-            "description": "database_migration_desc",
-            "category": "database",
-            "tags": ["database", "migration", "sql"],
-        },
-        {
-            "name": "ui-ux-pro-max",
-            "repo": "code-yeongyu/ui-ux-pro-max",
-            "description": "ui_ux_pro_max_desc",
-            "category": "ui_ux",
-            "tags": ["ui", "ux", "design", "frontend", "react"],
-        },
-        {
-            "name": "playwright",
-            "repo": "anthropics/playwright-skill",
-            "description": "playwright_desc",
-            "category": "testing",
-            "tags": ["browser", "automation", "testing", "scraping"],
-        },
-        {
-            "name": "docker-compose",
-            "repo": "vercel-labs/docker-compose-skill",
-            "description": "docker_compose_desc",
-            "category": "devops",
-            "tags": ["docker", "container", "devops", "deployment"],
-        },
-        {
-            "name": "ci-cd-pipeline",
-            "repo": "github/ci-cd-pipeline-skill",
-            "description": "ci_cd_pipeline_desc",
-            "category": "devops",
-            "tags": ["ci", "cd", "pipeline", "automation"],
-        },
-        {
-            "name": "performance-optimization",
-            "repo": "openai/performance-optimization-skill",
-            "description": "performance_optimization_desc",
-            "category": "performance",
-            "tags": ["performance", "optimization", "profiling"],
-        },
-        {
-            "name": "error-handling",
-            "repo": "anthropics/error-handling-skill",
-            "description": "error_handling_desc",
-            "category": "code_quality",
-            "tags": ["error", "exception", "handling", "logging"],
-        },
-        {
-            "name": "regex-helper",
-            "repo": "openai/regex-helper-skill",
-            "description": "regex_helper_desc",
-            "category": "dev_tools",
-            "tags": ["regex", "pattern", "matching", "validation"],
-        },
-        {
-            "name": "sql-query-optimizer",
-            "repo": "vercel-labs/sql-query-optimizer-skill",
-            "description": "sql_query_optimizer_desc",
-            "category": "database",
-            "tags": ["sql", "database", "optimization", "query"],
-        },
-        {
-            "name": "accessibility-checker",
-            "repo": "anthropics/accessibility-checker-skill",
-            "description": "accessibility_checker_desc",
-            "category": "ui_ux",
-            "tags": ["accessibility", "a11y", "wcag", "frontend"],
-        },
-        {
-            "name": "i18n-translator",
-            "repo": "openai/i18n-translator-skill",
-            "description": "i18n_translator_desc",
-            "category": "dev_tools",
-            "tags": ["i18n", "l10n", "translation", "localization"],
-        },
-        {
-            "name": "git-workflow",
-            "repo": "github/git-workflow-skill",
-            "description": "git_workflow_desc",
-            "category": "dev_tools",
-            "tags": ["git", "workflow", "branching", "collaboration"],
-        },
-        {
-            "name": "code-formatter",
-            "repo": "anthropics/code-formatter-skill",
-            "description": "code_formatter_desc",
-            "category": "code_quality",
-            "tags": ["formatting", "style", "prettier", "eslint"],
+            "name": "slack-gif-creator",
+            "repo": "anthropics/skills",
+            "description": "slack_gif_creator_desc",
+            "category": "creative",
+            "tags": ["slack", "gif", "creative"],
+            "path": "skills/slack-gif-creator",
         },
     ]
 
@@ -13640,6 +13596,7 @@ class SkillInstaller:
         repo: str,
         branch: str,
         target_dir: Path,
+        subdir: str = None,
         progress_callback=None,
     ) -> Tuple[bool, str]:
         """从 GitHub 安装 Skill
@@ -13649,6 +13606,7 @@ class SkillInstaller:
             repo: 仓库名
             branch: 分支名
             target_dir: 目标目录（skills 根目录）
+            subdir: 子目录路径（如 "skills/mcp-builder"）
             progress_callback: 进度回调函数
 
         Returns:
@@ -13685,10 +13643,22 @@ class SkillInstaller:
 
                 # 3. 查找 SKILL.md
                 extracted_dir = Path(temp_dir) / f"{repo}-{branch}"
-                skill_md = extracted_dir / "SKILL.md"
+
+                # 如果指定了子目录，则在子目录中查找
+                if subdir:
+                    skill_dir = extracted_dir / subdir
+                    if not skill_dir.exists():
+                        return False, f"子目录不存在: {subdir}"
+                else:
+                    skill_dir = extracted_dir
+
+                skill_md = skill_dir / "SKILL.md"
 
                 if not skill_md.exists():
-                    return False, "未找到 SKILL.md 文件"
+                    return (
+                        False,
+                        f"未找到 SKILL.md 文件{f' (在 {subdir} 中)' if subdir else ''}",
+                    )
 
                 # 4. 解析 Skill 名称
                 skill = SkillDiscovery.parse_skill_file(skill_md)
@@ -13703,7 +13673,7 @@ class SkillInstaller:
                 if skill_target.exists():
                     shutil.rmtree(skill_target)
 
-                shutil.copytree(extracted_dir, skill_target)
+                shutil.copytree(skill_dir, skill_target)
 
                 # 6. 获取最新 commit hash
                 commit_hash = None
@@ -13727,6 +13697,10 @@ class SkillInstaller:
                     "installed_at": datetime.now().isoformat(),
                     "commit_hash": commit_hash,
                 }
+
+                # 如果有子目录，记录下来
+                if subdir:
+                    meta["subdir"] = subdir
 
                 meta_file = skill_target / ".skill-meta.json"
                 with open(meta_file, "w", encoding="utf-8") as f:
@@ -13921,11 +13895,15 @@ class SkillUpdater:
             # 重新安装
             target_dir = skill.path.parent.parent  # skills 根目录
 
+            # 获取子目录路径（如果有）
+            subdir = meta.get("subdir", None)
+
             success, message = SkillInstaller.install_from_github(
                 meta["owner"],
                 meta["repo"],
                 meta.get("branch", "main"),
                 target_dir,
+                subdir=subdir,
                 progress_callback=progress_callback,
             )
 
@@ -15054,11 +15032,14 @@ class SkillPage(BasePage):
 
                         # 从市场安装
                         owner, repo_name = skill["repo"].split("/")
+                        # 获取子目录路径（如果有）
+                        subdir = skill.get("path", None)
                         success, message = SkillInstaller.install_from_github(
                             owner,
                             repo_name,
                             "main",
                             target_dir,
+                            subdir=subdir,
                             progress_callback=install_dialog.update_progress,
                         )
 
