@@ -14539,6 +14539,8 @@ class SkillPage(BasePage):
         # Skill 列表
         self.skill_list = ListWidget(left_widget)
         self.skill_list.itemClicked.connect(self._on_skill_selected)
+        # 确保显示垂直滚动条
+        self.skill_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         left_layout.addWidget(self.skill_list, 1)
 
         # 路径说明
