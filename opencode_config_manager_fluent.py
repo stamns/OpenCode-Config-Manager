@@ -11582,6 +11582,9 @@ class MainWindow(FluentWindow):
         # 添加语言切换按钮到导航栏底部
         self._add_language_switcher()
 
+        # 默认展开导航栏
+        QTimer.singleShot(100, lambda: self.navigationInterface.expand(useAni=False))
+
     def _update_nav_style(self):
         """根据窗口高度更新导航栏样式"""
         height = self.height()
@@ -11670,73 +11673,61 @@ class MainWindow(FluentWindow):
         self._refresh_all_ui_texts()
 
     def _refresh_all_ui_texts(self):
-        """刷新所有界面文本（动态切换语言）"""
+        """刷新所有界面文本（动态切换语言）- 优化版"""
         # 1. 更新窗口标题
         self.setWindowTitle(f"OCCM - OpenCode Config Manager v{APP_VERSION}")
 
-        # 2. 保存当前选中的页面索引
+        # 2. 保存当前选中的页面
+        current_widget = self.stackedWidget.currentWidget()
         current_index = self.stackedWidget.currentIndex()
 
-        # 3. 由于 QFluentWidgets 的 NavigationInterface 不支持直接更新文本
-        # 我们采用最简单的方案：重新初始化导航栏
-        # 这会清空所有导航项，然后重新添加
-
-        # 创建新的导航接口（这会清空旧的）
+        # 3. 禁用动画以减少卡顿
         old_nav = self.navigationInterface
+
+        # 创建新的导航接口
         self.navigationInterface = old_nav.__class__(self, True, True)
 
-        # 替换布局中的导航栏
+        # 快速替换导航栏
         self.hBoxLayout.replaceWidget(old_nav, self.navigationInterface)
-        old_nav.deleteLater()
 
-        # 重新初始化导航栏（包括设置宽度、字体等）
-        # 设置导航栏可折叠，自适应窗口大小
-        self.navigationInterface.setExpandWidth(200)  # 设置宽度为 200
-        self.navigationInterface.setCollapsible(True)  # 允许折叠
-
-        # 设置导航栏字体（正常粗细）
+        # 重新初始化导航栏设置
+        self.navigationInterface.setExpandWidth(200)
+        self.navigationInterface.setCollapsible(True)
         nav_font = QFont()
-        nav_font.setWeight(QFont.Normal)  # 正常粗细
+        nav_font.setWeight(QFont.Normal)
         self.navigationInterface.setFont(nav_font)
-
-        # 导航栏样式 - 紧凑布局
         self._update_nav_style()
 
         # 重新添加所有导航项
         self._init_navigation()
 
-        # 4. 恢复之前选中的页面
+        # 删除旧导航栏
+        old_nav.deleteLater()
+
+        # 4. 立即恢复当前页面
         if current_index >= 0:
             self.stackedWidget.setCurrentIndex(current_index)
-            # 强制刷新当前页面
-            current_widget = self.stackedWidget.currentWidget()
-            if current_widget and hasattr(current_widget, "_refresh_ui_texts"):
+
+        # 5. 立即展开导航栏（无动画）
+        self.navigationInterface.expand(useAni=False)
+
+        # 6. 强制刷新当前页面 - 重新加载页面内容
+        if current_widget:
+            # 先隐藏再显示，强制重绘
+            current_widget.hide()
+            current_widget.show()
+
+            # 如果页面有刷新方法，调用它
+            if hasattr(current_widget, "_refresh_ui_texts"):
                 current_widget._refresh_ui_texts()
 
-        # 5. 强制展开导航栏（避免切换后自动收缩）
-        QTimer.singleShot(100, lambda: self.navigationInterface.expand(useAni=False))
+            # 如果页面有加载数据方法，重新加载
+            if hasattr(current_widget, "_load_data"):
+                current_widget._load_data()
 
-        # 6. 通知所有页面刷新文本
-        for page in [
-            self.home_page,
-            self.provider_page,
-            self.native_provider_page,
-            self.model_page,
-            self.mcp_page,
-            self.opencode_agent_page,
-            self.permission_page,
-            self.skill_page,
-            self.rules_page,
-            self.compaction_page,
-            self.ohmy_agent_page,
-            self.category_page,
-            self.import_page,
-            self.cli_export_page,
-            self.monitor_page,
-            self.help_page,
-        ]:
-            if hasattr(page, "_refresh_ui_texts"):
-                page._refresh_ui_texts()
+            # 强制更新页面
+            current_widget.update()
+            current_widget.repaint()
 
     def _init_navigation(self):
         # ===== 顶部工具栏区域 =====
