@@ -1305,7 +1305,7 @@ class UIConfig:
         """
 
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 GITHUB_REPO = "icysaintdx/OpenCode-Config-Manager"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -5059,7 +5059,7 @@ class ModelFetchService(QObject):
 
 
 class VersionChecker(QObject):
-    """GitHub 版本检查服务 - 线程安全"""
+    """GitHub 版本检查服务 - 线程安全 + 速率限制处理"""
 
     # 信号：在主线程中安全地更新 UI
     update_available = pyqtSignal(str, str)  # (latest_version, release_url)
@@ -5070,23 +5070,38 @@ class VersionChecker(QObject):
         self.latest_version: Optional[str] = None
         self.release_url: Optional[str] = None
         self.checking = False
+        self.last_check_time = 0  # 上次检查时间戳
+        self.check_interval = 3600  # 检查间隔（秒），默认1小时
         # 连接信号到回调
         if callback:
             self.update_available.connect(callback)
 
     def check_update_async(self):
-        """异步检查更新"""
+        """异步检查更新 - 带速率限制保护"""
         if self.checking:
             return
+
+        # 检查是否在冷却期内
+        current_time = time.time()
+        if current_time - self.last_check_time < self.check_interval:
+            print(
+                f"Version check skipped: within cooldown period ({self.check_interval}s)"
+            )
+            return
+
         self.checking = True
         thread = threading.Thread(target=self._check_update, daemon=True)
         thread.start()
 
     def _check_update(self):
-        """检查 GitHub 最新版本"""
+        """检查 GitHub 最新版本 - 带错误处理和速率限制"""
         try:
             req = urllib.request.Request(
-                GITHUB_RELEASES_API, headers={"User-Agent": "OpenCode-Config-Manager"}
+                GITHUB_RELEASES_API,
+                headers={
+                    "User-Agent": "OpenCode-Config-Manager",
+                    "Accept": "application/vnd.github.v3+json",
+                },
             )
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode("utf-8"))
@@ -5095,8 +5110,20 @@ class VersionChecker(QObject):
                 if version_match:
                     self.latest_version = version_match.group(1)
                     self.release_url = data.get("html_url", GITHUB_URL + "/releases")
+                    # 更新最后检查时间
+                    self.last_check_time = time.time()
                     # 通过信号在主线程中安全地调用回调
                     self.update_available.emit(self.latest_version, self.release_url)
+        except urllib.error.HTTPError as e:
+            if e.code == 403:
+                # GitHub API 速率限制
+                print(f"Version check failed: GitHub API rate limit exceeded (403)")
+                # 增加冷却时间到 6 小时
+                self.check_interval = 21600
+            else:
+                print(f"Version check failed: HTTP {e.code} - {e.reason}")
+        except urllib.error.URLError as e:
+            print(f"Version check failed: Network error - {e.reason}")
         except Exception as e:
             print(f"Version check failed: {e}")
         finally:
