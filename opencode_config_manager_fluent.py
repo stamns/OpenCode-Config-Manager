@@ -11681,13 +11681,9 @@ class MainWindow(FluentWindow):
         current_widget = self.stackedWidget.currentWidget()
         current_index = self.stackedWidget.currentIndex()
 
-        # 3. 禁用动画以减少卡顿
+        # 3. 快速替换导航栏
         old_nav = self.navigationInterface
-
-        # 创建新的导航接口
         self.navigationInterface = old_nav.__class__(self, True, True)
-
-        # 快速替换导航栏
         self.hBoxLayout.replaceWidget(old_nav, self.navigationInterface)
 
         # 重新初始化导航栏设置
@@ -11711,12 +11707,8 @@ class MainWindow(FluentWindow):
         # 5. 立即展开导航栏（无动画）
         self.navigationInterface.expand(useAni=False)
 
-        # 6. 强制刷新当前页面 - 重新加载页面内容
+        # 6. 温和地刷新当前页面 - 只调用刷新方法，不强制重绘
         if current_widget:
-            # 先隐藏再显示，强制重绘
-            current_widget.hide()
-            current_widget.show()
-
             # 如果页面有刷新方法，调用它
             if hasattr(current_widget, "_refresh_ui_texts"):
                 current_widget._refresh_ui_texts()
@@ -11724,10 +11716,6 @@ class MainWindow(FluentWindow):
             # 如果页面有加载数据方法，重新加载
             if hasattr(current_widget, "_load_data"):
                 current_widget._load_data()
-
-            # 强制更新页面
-            current_widget.update()
-            current_widget.repaint()
 
     def _init_navigation(self):
         # ===== 顶部工具栏区域 =====
