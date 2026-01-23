@@ -671,6 +671,89 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
         test_endpoint="/models",
     ),
     NativeProviderConfig(
+        id="zhipu",
+        name="智谱 GLM",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField(
+                "baseURL",
+                "Base URL",
+                "text",
+                [],
+                "https://open.bigmodel.cn/api/paas/v4/",
+            ),
+        ],
+        env_vars=["ZHIPU_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="qwen",
+        name="千问 Qwen",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, "sk-..."),
+        ],
+        option_fields=[
+            OptionField(
+                "baseURL",
+                "Base URL",
+                "text",
+                [],
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+        ],
+        env_vars=["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="kimi",
+        name="Kimi (月之暗面)",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField(
+                "baseURL", "Base URL", "text", [], "https://api.moonshot.cn/v1"
+            ),
+        ],
+        env_vars=["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="yi",
+        name="零一万物 Yi",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField(
+                "baseURL", "Base URL", "text", [], "https://api.lingyiwanwu.com/v1"
+            ),
+        ],
+        env_vars=["YI_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="minimax",
+        name="MiniMax",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField(
+                "baseURL", "Base URL", "text", [], "https://api.minimax.chat/v1"
+            ),
+        ],
+        env_vars=["MINIMAX_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
         id="opencode",
         name="OpenCode Zen",
         sdk="@ai-sdk/openai-compatible",
@@ -721,6 +804,11 @@ class EnvVarDetector:
             "VERTEX_LOCATION",
         ],
         "deepseek": ["DEEPSEEK_API_KEY"],
+        "zhipu": ["ZHIPU_API_KEY"],
+        "qwen": ["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
+        "kimi": ["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "yi": ["YI_API_KEY"],
+        "minimax": ["MINIMAX_API_KEY"],
     }
 
     # 环境变量到认证字段的映射
@@ -11561,11 +11649,14 @@ class MainWindow(FluentWindow):
         self.lang_button.setToolTip(tr("settings.language"))
         self.lang_button.clicked.connect(self._on_language_switch)
 
-        # 添加到标题栏右侧（在最小化按钮之前）
+        # 添加到标题栏右侧，在最小化按钮的左侧
         # FluentWindow 标题栏布局：[图标][标题][Stretch][自定义按钮区][最小化][最大化][关闭]
-        # 我们需要在 Stretch 之后、最小化之前插入
-        # 通过 addWidget 添加到布局末尾，然后标题栏会自动将窗口控制按钮放在最后
-        self.titleBar.hBoxLayout.addWidget(self.lang_button, 0, Qt.AlignRight)
+        # 窗口控制按钮（最小化、最大化、关闭）通常在最后3个位置
+        # 我们需要插入到倒数第3个位置（最小化按钮之前）
+        layout = self.titleBar.hBoxLayout
+        count = layout.count()
+        insert_pos = max(0, count - 3)  # 在最小化按钮之前插入
+        layout.insertWidget(insert_pos, self.lang_button)
 
     def _on_language_switch(self):
         """切换语言（优化版 - 无闪烁过渡）"""
@@ -18663,6 +18754,13 @@ class BackupDialog(BaseDialog):
         header.setSectionResizeMode(2, QHeaderView.Fixed)
         header.resizeSection(2, 120)  # 标签列 80 → 120（增大以完整显示）
         header.setSectionResizeMode(3, QHeaderView.Stretch)  # 路径列自适应
+
+        # 设置表格文本换行，以便路径可以完整显示
+        self.backup_table.setWordWrap(True)
+        self.backup_table.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+
         self.backup_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.backup_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.backup_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -18698,9 +18796,15 @@ class BackupDialog(BaseDialog):
             self.backup_table.setItem(row, 0, QTableWidgetItem(backup["name"]))
             self.backup_table.setItem(row, 1, QTableWidgetItem(backup["timestamp"]))
             self.backup_table.setItem(row, 2, QTableWidgetItem(backup["tag"]))
-            path_item = QTableWidgetItem(str(backup["path"]))
-            path_item.setToolTip(str(backup["path"]))
+
+            # 路径列：显示完整路径，设置 tooltip
+            path_str = str(backup["path"])
+            path_item = QTableWidgetItem(path_str)
+            path_item.setToolTip(path_str)  # 鼠标悬停显示完整路径
             self.backup_table.setItem(row, 3, path_item)
+
+        # 设置表格自动调整行高以适应内容
+        self.backup_table.resizeRowsToContents()
 
     def _backup_opencode(self):
         """备份 OpenCode 配置"""
