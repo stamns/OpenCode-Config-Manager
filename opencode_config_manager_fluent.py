@@ -13128,11 +13128,18 @@ class SkillDiscovery:
                     if not skill_file:
                         continue
 
-                    skill = cls.parse_skill_file(skill_file)
-                    if skill and skill.name not in seen_names:
-                        skills.append(skill)
-                        seen_names.add(skill.name)
-            except Exception:
+                    try:
+                        skill = cls.parse_skill_file(skill_file)
+                        if skill and skill.name not in seen_names:
+                            skills.append(skill)
+                            seen_names.add(skill.name)
+                    except Exception as e:
+                        # 解析单个skill失败，记录但继续处理其他skills
+                        print(f"解析 skill 失败 {skill_dir.name}: {e}")
+                        continue
+            except Exception as e:
+                # 遍历目录失败，记录但继续处理其他路径
+                print(f"遍历目录失败 {base_path}: {e}")
                 continue
 
         return skills
