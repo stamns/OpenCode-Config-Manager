@@ -42,12 +42,55 @@
 
 ---
 
-## 🎯 v1.4.0 Latest Version
+## 🎯 v1.5.0 Latest Version
 
-### 🆕 New Features
+### 🌐 New Features
+#### **Complete Multi-Language Support** ⭐⭐⭐
+- **Bilingual Support**:
+  - Simplified Chinese (zh_CN)
+  - English (en_US)
+  - Auto-detect system language
+  - **Dynamic Language Switching**: Switch instantly without restart
+
+- **Translation Coverage**:
+  - 15 main pages (fully translated)
+  - 17 dialogs (fully translated)
+  - 400+ tr() function calls
+  - 900+ translation key-value pairs
+
+#### **Chinese AI Platform Support** ⭐
+- **5 New Chinese Platforms**:
+  - Zhipu GLM (glm-4-plus, glm-4-flash, etc.)
+  - Qwen (qwen-max, qwen-turbo, etc.)
+  - Kimi (Moonshot) (moonshot-v1-8k, moonshot-v1-32k, etc.)
+  - Yi (01.AI) (yi-lightning, yi-large, etc.)
+  - MiniMax (abab6.5s-chat, abab6.5g-chat, etc.)
+- **Technical Implementation**:
+  - All platforms use OpenAI-compatible SDK
+  - Support environment variable auto-detection
+  - Preset common models for quick selection
+
+### 🐛 Bug Fixes
+- **Fixed Win10 Startup Error** - `'bool' object has no attribute 'get'`
+  - Added config type checking in all pages
+  - Prevent crashes from config file format errors
+- **Fixed Language Switch Page Misalignment** - Removed forced redraw logic to avoid layout issues
+- **Fixed GitHub API Rate Limit** - Added cooldown mechanism (default 1 hour), extended to 6 hours on 403 errors
+- **Fixed Skill Marketplace** - Removed uninstallable ComposioHQ Skills, kept 12 available Skills
+
+### 🎨 UI Improvements
+- **Navigation Bar Width** - Set to 200px, fits Chinese/English menus
+- **Language Switch Button** - Moved to navigation bar bottom
+- **Menu Expanded by Default** - No need to manually click
+- **Window Height Increased** - From 820px to 870px
+
+---
+
+### 📝 v1.4.0 Feature Recap
+
 #### **Skill Marketplace** ⭐
 - **Built-in Skill Marketplace**:
-  - 8 curated Skills (Dev Tools, Code Quality, Testing, Documentation, Security, API, Database)
+  - 12 curated Skills (Dev Tools, Code Quality, Testing, Documentation, Security, API, Database)
   - Browse by category + search functionality
   - One-click installation to specified location
 
@@ -249,8 +292,14 @@ According to [OpenCode Official Documentation](https://opencode.ai/docs/models/)
 
 ### Latest Release
 
+**[v1.5.0](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/tag/v1.5.0)** - 2026-01-24
+- 🌐 Multi-Language Support - Simplified Chinese + English, dynamic switching without restart
+- 🇨🇳 Chinese AI Platforms - Support Zhipu GLM, Qwen, Kimi, Yi, MiniMax
+- 🐛 Bug Fixes - Fixed Win10 startup error, language switch page misalignment
+- 🎨 UI Improvements - Navigation bar width 200px, menu expanded by default
+
 **[v1.4.0](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/tag/v1.4.0)** - 2026-01-20
-- ⭐ Skill Marketplace - Built-in 20 curated Skills, browse by category + search
+- ⭐ Skill Marketplace - Built-in 12 curated Skills, browse by category + search
 - 🛡️ Security Scanning - Detect 9 dangerous code patterns, security scoring system
 - 🎨 UI Improvements - New marketplace button and security scan button
 
