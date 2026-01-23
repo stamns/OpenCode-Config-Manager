@@ -5393,6 +5393,12 @@ class BasePage(QWidget):
             parent=self,
         )
 
+    def _refresh_ui_texts(self):
+        """刷新界面文本（子类可重写此方法）"""
+        # 默认实现：不做任何操作
+        # 子类可以重写此方法来更新自己的界面文本
+        pass
+
 
 # ==================== 首页 ====================
 class HomePage(BasePage):
@@ -11653,30 +11659,113 @@ class MainWindow(FluentWindow):
         pass
 
     def _on_language_switch(self):
-        """切换语言（优化版 - 无闪烁过渡）"""
+        """切换语言（动态切换 - 无需重启）"""
         current_lang = _lang_manager.get_current_language()
         new_lang = "en_US" if current_lang == "zh_CN" else "zh_CN"
 
         # 切换语言
         _lang_manager.set_language(new_lang)
 
-        # 保存当前窗口状态
-        geometry = self.geometry()
+        # 刷新所有界面文本
+        self._refresh_all_ui_texts()
 
-        # 隐藏当前窗口（避免闪烁）
-        self.hide()
+    def _refresh_all_ui_texts(self):
+        """刷新所有界面文本（动态切换语言）"""
+        # 1. 更新窗口标题
+        self.setWindowTitle(f"OCCM - OpenCode Config Manager v{APP_VERSION}")
 
-        # 创建新窗口
-        new_window = MainWindow()
-        new_window.setGeometry(geometry)
+        # 2. 更新导航栏菜单项文本
+        # 注意：FluentWindow 的导航栏不支持直接更新文本，需要重建导航栏
+        # 但这会导致当前选中的页面丢失，所以我们采用另一种方案：
+        # 保存当前页面，清空导航栏，重新添加所有页面
 
-        # 显示新窗口
-        new_window.show()
-        new_window.raise_()
-        new_window.activateWindow()
+        # 保存当前选中的页面
+        current_interface = self.stackedWidget.currentWidget()
 
-        # 关闭当前窗口
-        self.close()
+        # 清空导航栏（保留页面实例）
+        self.navigationInterface.clear()
+
+        # 重新添加所有页面（使用新的翻译文本）
+        # ===== 顶部工具栏区域 =====
+        self.addSubInterface(self.home_page, FIF.HOME, tr("menu.home"))
+
+        # ===== OpenCode 配置分组 =====
+        self.addSubInterface(self.provider_page, FIF.PEOPLE, tr("menu.provider"))
+        self.addSubInterface(
+            self.native_provider_page, FIF.GLOBE, tr("menu.native_provider")
+        )
+        self.addSubInterface(self.model_page, FIF.ROBOT, tr("menu.model"))
+        self.addSubInterface(self.mcp_page, FIF.CLOUD, tr("menu.mcp"))
+        self.addSubInterface(
+            self.opencode_agent_page, FIF.COMMAND_PROMPT, tr("menu.agent")
+        )
+        self.addSubInterface(
+            self.permission_page, FIF.CERTIFICATE, tr("menu.permission")
+        )
+        self.addSubInterface(self.skill_page, FIF.BOOK_SHELF, tr("menu.skill"))
+        self.addSubInterface(self.rules_page, FIF.DOCUMENT, tr("menu.rules"))
+        self.addSubInterface(
+            self.compaction_page, FIF.ZIP_FOLDER, tr("menu.compaction")
+        )
+
+        # ===== Oh My OpenCode 配置分组 =====
+        self.addSubInterface(
+            self.ohmy_agent_page, FIF.EMOJI_TAB_SYMBOLS, tr("menu.ohmyagent")
+        )
+        self.addSubInterface(self.category_page, FIF.TAG, tr("menu.category"))
+
+        # ===== 工具分组 =====
+        self.addSubInterface(self.import_page, FIF.DOWNLOAD, tr("menu.import"))
+        self.addSubInterface(self.cli_export_page, FIF.SEND, tr("menu.export"))
+        self.addSubInterface(self.monitor_page, FIF.SPEED_HIGH, tr("menu.monitor"))
+
+        # ===== 工具菜单 =====
+        self.navigationInterface.addSeparator()
+        self.navigationInterface.addItem(
+            routeKey="theme",
+            icon=FIF.CONSTRACT,
+            text=tr("menu.theme"),
+            onClick=self._toggle_theme,
+        )
+        self.navigationInterface.addItem(
+            routeKey="backup",
+            icon=FIF.HISTORY,
+            text=tr("menu.backup"),
+            onClick=self._show_backup_dialog,
+        )
+        self.addSubInterface(self.help_page, FIF.HELP, tr("menu.help"))
+        self.navigationInterface.addItem(
+            routeKey="language",
+            icon=FIF.GLOBE,
+            text=tr("menu.language"),
+            onClick=self._on_language_switch,
+        )
+
+        # 恢复之前选中的页面
+        if current_interface:
+            self.stackedWidget.setCurrentWidget(current_interface)
+
+        # 3. 通知所有页面刷新文本
+        for page in [
+            self.home_page,
+            self.provider_page,
+            self.native_provider_page,
+            self.model_page,
+            self.mcp_page,
+            self.opencode_agent_page,
+            self.permission_page,
+            self.skill_page,
+            self.rules_page,
+            self.compaction_page,
+            self.ohmy_agent_page,
+            self.category_page,
+            self.import_page,
+            self.cli_export_page,
+            self.monitor_page,
+            self.help_page,
+        ]:
+            if hasattr(page, "_refresh_ui_texts"):
+                page._refresh_ui_texts()
 
     def _init_navigation(self):
         # ===== 顶部工具栏区域 =====
