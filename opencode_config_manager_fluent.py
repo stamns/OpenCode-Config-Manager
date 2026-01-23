@@ -871,6 +871,7 @@ from PyQt5.QtCore import (
     QMetaObject,
     Q_ARG,
     pyqtSlot,
+    QSize,
 )
 from PyQt5.QtGui import (
     QIcon,
@@ -11554,7 +11555,8 @@ class MainWindow(FluentWindow):
         """添加语言切换按钮"""
         # 创建语言切换按钮
         self.lang_button = TransparentPushButton(FIF.GLOBE, "", self)
-        self.lang_button.setFixedSize(40, 32)
+        self.lang_button.setFixedSize(50, 36)  # 增大按钮尺寸以完整显示图标
+        self.lang_button.setIconSize(QSize(20, 20))  # 设置图标大小
         self.lang_button.setToolTip(tr("settings.language"))
         self.lang_button.clicked.connect(self._on_language_switch)
 
