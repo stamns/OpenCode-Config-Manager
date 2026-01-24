@@ -8847,17 +8847,17 @@ class ModelDialog(BaseDialog):
         # Claude Thinking 快捷按钮
         claude_card = CardWidget(scroll_content)
         claude_layout = QVBoxLayout(claude_card)
-        claude_layout.setContentsMargins(8, 6, 8, 6)
-        claude_layout.setSpacing(6)
+        claude_layout.setContentsMargins(6, 4, 6, 4)
+        claude_layout.setSpacing(4)
         claude_layout.addWidget(
             CaptionLabel(tr("model.claude_thinking_config"), claude_card)
         )
         claude_btn_layout = QHBoxLayout()
-        claude_btn_layout.setSpacing(6)
+        claude_btn_layout.setSpacing(4)
 
         btn_thinking_type = PushButton("type=enabled", claude_card)
         btn_thinking_type.setToolTip(get_tooltip("option_thinking_type"))
-        btn_thinking_type.setFixedHeight(32)
+        btn_thinking_type.setFixedHeight(26)
         btn_thinking_type.clicked.connect(
             lambda: self._add_thinking_config("type", "enabled")
         )
@@ -8865,14 +8865,14 @@ class ModelDialog(BaseDialog):
 
         btn_budget = PushButton("budget=16000", claude_card)
         btn_budget.setToolTip(get_tooltip("option_thinking_budget"))
-        btn_budget.setFixedHeight(32)
+        btn_budget.setFixedHeight(26)
         btn_budget.clicked.connect(
             lambda: self._add_thinking_config("budgetTokens", 16000)
         )
         claude_btn_layout.addWidget(btn_budget)
 
         btn_full = PrimaryPushButton(tr("model.one_click_add"), claude_card)
-        btn_full.setFixedHeight(32)
+        btn_full.setFixedHeight(26)
         btn_full.clicked.connect(self._add_full_thinking_config)
         claude_btn_layout.addWidget(btn_full)
 
@@ -8882,13 +8882,13 @@ class ModelDialog(BaseDialog):
         # OpenAI 推理快捷按钮
         openai_card = CardWidget(scroll_content)
         openai_layout = QVBoxLayout(openai_card)
-        openai_layout.setContentsMargins(8, 6, 8, 6)
-        openai_layout.setSpacing(6)
+        openai_layout.setContentsMargins(6, 4, 6, 4)
+        openai_layout.setSpacing(4)
         openai_layout.addWidget(
             CaptionLabel(tr("model.openai_reasoning_config"), openai_card)
         )
         openai_btn_layout = QHBoxLayout()
-        openai_btn_layout.setSpacing(6)
+        openai_btn_layout.setSpacing(4)
 
         openai_presets = [
             ("reasoning", "high", "option_reasoningEffort"),
@@ -8898,7 +8898,7 @@ class ModelDialog(BaseDialog):
         for key, val, tooltip_key in openai_presets:
             btn = PushButton(f"{key}={val}", openai_card)
             btn.setToolTip(get_tooltip(tooltip_key))
-            btn.setFixedHeight(32)
+            btn.setFixedHeight(26)
             btn.clicked.connect(
                 lambda checked, k=key, v=val: self._add_option_preset(k, v)
             )
@@ -8910,23 +8910,23 @@ class ModelDialog(BaseDialog):
         # Gemini Thinking 快捷按钮
         gemini_card = CardWidget(scroll_content)
         gemini_layout = QVBoxLayout(gemini_card)
-        gemini_layout.setContentsMargins(8, 6, 8, 6)
-        gemini_layout.setSpacing(6)
+        gemini_layout.setContentsMargins(6, 4, 6, 4)
+        gemini_layout.setSpacing(4)
         gemini_layout.addWidget(
             CaptionLabel(tr("model.gemini_thinking_config"), gemini_card)
         )
         gemini_btn_layout = QHBoxLayout()
-        gemini_btn_layout.setSpacing(6)
+        gemini_btn_layout.setSpacing(4)
 
         btn_gemini_8k = PushButton("budget=8000", gemini_card)
         btn_gemini_8k.setToolTip(get_tooltip("option_thinking_budget"))
-        btn_gemini_8k.setFixedHeight(32)
+        btn_gemini_8k.setFixedHeight(26)
         btn_gemini_8k.clicked.connect(lambda: self._add_gemini_thinking_config(8000))
         gemini_btn_layout.addWidget(btn_gemini_8k)
 
         btn_gemini_16k = PushButton("budget=16000", gemini_card)
         btn_gemini_16k.setToolTip(get_tooltip("option_thinking_budget"))
-        btn_gemini_16k.setFixedHeight(32)
+        btn_gemini_16k.setFixedHeight(26)
         btn_gemini_16k.clicked.connect(lambda: self._add_gemini_thinking_config(16000))
         gemini_btn_layout.addWidget(btn_gemini_16k)
 
@@ -8949,14 +8949,14 @@ class ModelDialog(BaseDialog):
         self.options_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.options_table.setMinimumHeight(100)
         self.options_table.setMaximumHeight(150)
-        self.options_table.verticalHeader().setDefaultSectionSize(28)
-        self.options_table.horizontalHeader().setFixedHeight(35)
+        self.options_table.verticalHeader().setDefaultSectionSize(24)
+        self.options_table.horizontalHeader().setFixedHeight(28)
         self.options_table.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
         layout.addWidget(self.options_table)
 
         # 键值输入 - 单行紧凑布局
         input_layout = QHBoxLayout()
-        input_layout.setSpacing(8)
+        input_layout.setSpacing(6)
 
         key_label = BodyLabel(tr("model.key") + ":", scroll_content)
         key_label.setFixedWidth(24)
@@ -8964,7 +8964,7 @@ class ModelDialog(BaseDialog):
 
         self.option_key_edit = LineEdit(scroll_content)
         self.option_key_edit.setPlaceholderText("temperature")
-        self.option_key_edit.setFixedHeight(32)
+        self.option_key_edit.setFixedHeight(26)
         input_layout.addWidget(self.option_key_edit, 1)
 
         value_label = BodyLabel(tr("model.value") + ":", scroll_content)
@@ -8973,20 +8973,20 @@ class ModelDialog(BaseDialog):
 
         self.option_value_edit = LineEdit(scroll_content)
         self.option_value_edit.setPlaceholderText("0.7")
-        self.option_value_edit.setFixedHeight(32)
+        self.option_value_edit.setFixedHeight(26)
         input_layout.addWidget(self.option_value_edit, 1)
 
         layout.addLayout(input_layout)
 
         # 添加/删除按钮
         opt_btn_layout = QHBoxLayout()
-        opt_btn_layout.setSpacing(8)
+        opt_btn_layout.setSpacing(6)
         add_opt_btn = PrimaryPushButton(tr("model.add"), scroll_content)
-        add_opt_btn.setFixedHeight(32)
+        add_opt_btn.setFixedHeight(26)
         add_opt_btn.clicked.connect(self._add_option)
         opt_btn_layout.addWidget(add_opt_btn)
         del_opt_btn = PushButton(tr("model.delete_selected"), scroll_content)
-        del_opt_btn.setFixedHeight(32)
+        del_opt_btn.setFixedHeight(26)
         del_opt_btn.clicked.connect(self._delete_option)
         opt_btn_layout.addWidget(del_opt_btn)
         opt_btn_layout.addStretch()
@@ -9002,7 +9002,7 @@ class ModelDialog(BaseDialog):
     def _setup_variants_tab(self, parent):
         """设置 Variants Tab"""
         layout = QVBoxLayout(parent)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
         layout.setContentsMargins(4, 8, 4, 8)
 
         variants_label = BodyLabel(tr("model.variants_config_label"), parent)
@@ -9022,33 +9022,33 @@ class ModelDialog(BaseDialog):
         self.variants_table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.Stretch
         )
-        self.variants_table.setColumnWidth(0, 150)  # 变体名称列宽度
+        self.variants_table.setColumnWidth(0, 120)  # 变体名称列宽度
         self.variants_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.variants_table.setMinimumHeight(120)
-        self.variants_table.verticalHeader().setDefaultSectionSize(36)
-        self.variants_table.horizontalHeader().setMinimumHeight(32)
+        self.variants_table.setMinimumHeight(100)
+        self.variants_table.verticalHeader().setDefaultSectionSize(24)
+        self.variants_table.horizontalHeader().setMinimumHeight(28)
         self.variants_table.itemSelectionChanged.connect(self._on_variant_select)
         layout.addWidget(self.variants_table)
 
         # 变体名称输入
         name_layout = QHBoxLayout()
-        name_layout.setSpacing(8)
+        name_layout.setSpacing(6)
         name_label = BodyLabel(tr("model.variant_name_label"), parent)
-        name_label.setMinimumWidth(50)
+        name_label.setFixedWidth(60)
         name_layout.addWidget(name_label)
         self.variant_name_edit = LineEdit(parent)
         self.variant_name_edit.setPlaceholderText("high, low, thinking")
-        self.variant_name_edit.setMinimumHeight(36)
+        self.variant_name_edit.setFixedHeight(26)
         name_layout.addWidget(self.variant_name_edit)
         layout.addLayout(name_layout)
 
         # 预设名称按钮
         preset_layout = QHBoxLayout()
-        preset_layout.setSpacing(6)
+        preset_layout.setSpacing(4)
         preset_layout.addWidget(CaptionLabel(tr("model.preset_label") + ":", parent))
         for name in ["high", "low", "thinking", "fast", "default"]:
             btn = PushButton(name, parent)
-            btn.setMinimumHeight(30)
+            btn.setFixedHeight(24)
             btn.clicked.connect(
                 lambda checked, n=name: self.variant_name_edit.setText(n)
             )
@@ -9057,22 +9057,23 @@ class ModelDialog(BaseDialog):
         layout.addLayout(preset_layout)
 
         # JSON 配置编辑器
-        layout.addWidget(BodyLabel(tr("model.config_json_label"), parent))
+        config_label = BodyLabel(tr("model.config_json_label"), parent)
+        layout.addWidget(config_label)
         self.variant_config_edit = TextEdit(parent)
         self.variant_config_edit.setPlaceholderText('{"reasoningEffort": "high"}')
-        self.variant_config_edit.setMinimumHeight(80)
-        self.variant_config_edit.setMaximumHeight(100)
+        self.variant_config_edit.setMinimumHeight(60)
+        self.variant_config_edit.setMaximumHeight(80)
         layout.addWidget(self.variant_config_edit)
 
         # 添加/删除按钮
         var_btn_layout = QHBoxLayout()
-        var_btn_layout.setSpacing(8)
+        var_btn_layout.setSpacing(6)
         add_var_btn = PrimaryPushButton(tr("model.add_variant"), parent)
-        add_var_btn.setMinimumHeight(36)
+        add_var_btn.setFixedHeight(26)
         add_var_btn.clicked.connect(self._add_variant)
         var_btn_layout.addWidget(add_var_btn)
         del_var_btn = PushButton(tr("model.delete_variant"), parent)
-        del_var_btn.setMinimumHeight(36)
+        del_var_btn.setFixedHeight(26)
         del_var_btn.clicked.connect(self._delete_variant)
         var_btn_layout.addWidget(del_var_btn)
         var_btn_layout.addStretch()
