@@ -47,6 +47,12 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install PyQt5 PyQt-Fluent-Widgets requests pyinstaller
 
+      - name: 3.5 下载 UPX 压缩工具
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-win64.zip" -OutFile upx.zip
+          Expand-Archive upx.zip -DestinationPath .
+          Move-Item upx-4.2.4-win64\upx.exe .
+
       - name: 4. PyInstaller 打包
         run: |
           pyinstaller `
@@ -54,6 +60,7 @@ jobs:
             --onefile `
             --windowed `
             --noconsole `
+            --upx-dir . `
             --add-data "assets;assets" `
             --add-data "locales;locales" `
             --hidden-import qfluentwidgets `
@@ -108,10 +115,10 @@ jobs:
       - name: 1. 拉取项目源码
         uses: actions/checkout@v4
 
-      - name: 2. 配置 Python 3.10
+      - name: 2. 配置 Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: 2.1 读取版本号
         run: echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
@@ -147,22 +154,23 @@ jobs:
             --hidden-import=qfluentwidgets.widgets \
             --hidden-import=qfluentwidgets.components \
             --hidden-import=qfluentwidgets.common \
+            --hidden-import=qfluentwidgets.window \
+            --collect-data qfluentwidgets \
+            --collect-data PyQt5 \
             --exclude-module PyQt5.QtBluetooth \
             --exclude-module PyQt5.QtNfc \
             --exclude-module PyQt5.QtPositioning \
             --exclude-module PyQt5.QtGamepad \
-            --collect-all PyQt5 \
-            --collect-all qfluentwidgets \
             --noconfirm \
             --strip \
             opencode_config_manager_fluent.py
         shell: /bin/bash -e {0}
         env:
-          pythonLocation: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
-          PKG_CONFIG_PATH: /Users/runner/hostedtoolcache/Python/3.10.11/arm64/lib/pkgconfig
-          Python_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
-          Python2_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
-          Python3_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.10.11/arm64
+          pythonLocation: /Users/runner/hostedtoolcache/Python/3.11.11/arm64
+          PKG_CONFIG_PATH: /Users/runner/hostedtoolcache/Python/3.11.11/arm64/lib/pkgconfig
+          Python_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.11.11/arm64
+          Python2_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.11.11/arm64
+          Python3_ROOT_DIR: /Users/runner/hostedtoolcache/Python/3.11.11/arm64
 
       - name: 5. 清理扩展属性 + 签名 .app 包 (使用 entitlements)
         run: |
@@ -269,10 +277,10 @@ jobs:
       - name: 1. 拉取项目源码
         uses: actions/checkout@v4
 
-      - name: 2. 配置 Python 3.10
+      - name: 2. 配置 Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           architecture: x64
 
       - name: 2.1 读取版本号
@@ -321,12 +329,13 @@ jobs:
             --hidden-import=qfluentwidgets.widgets \
             --hidden-import=qfluentwidgets.components \
             --hidden-import=qfluentwidgets.common \
+            --hidden-import=qfluentwidgets.window \
+            --collect-data qfluentwidgets \
+            --collect-data PyQt5 \
             --exclude-module PyQt5.QtBluetooth \
             --exclude-module PyQt5.QtNfc \
             --exclude-module PyQt5.QtPositioning \
             --exclude-module PyQt5.QtGamepad \
-            --collect-all PyQt5 \
-            --collect-all qfluentwidgets \
             --noconfirm \
             --strip \
             --add-data "assets:assets" \
@@ -362,7 +371,8 @@ jobs:
           HERE=${SELF%/*}
           export PATH="${HERE}/usr/bin:${PATH}"
           export LD_LIBRARY_PATH="${HERE}/usr/bin:${LD_LIBRARY_PATH}"
-          exec "${HERE}/usr/bin/OCCM_${{ env.TAG_NAME }}" "$@"
+          # 使用通配符匹配可执行文件（避免硬编码版本号）
+          exec "${HERE}/usr/bin/"OCCM_* "$@"
           EOF
           chmod +x AppDir/AppRun
           
@@ -398,6 +408,14 @@ jobs:
           # 安装 fpm
           sudo gem install fpm
           
+          # 创建符号链接脚本 (安装后执行)
+          cat > postinst << 'EOFPOSTINST'
+          #!/bin/bash
+          # 创建符号链接到 /usr/local/bin
+          ln -sf /opt/occm/OCCM_* /usr/local/bin/occm
+          EOFPOSTINST
+          chmod +x postinst
+          
           # 创建 deb 包
           fpm -s dir -t deb \
             --name occm \
@@ -409,18 +427,19 @@ jobs:
             --architecture amd64 \
             --depends "libxcb-xinerama0" \
             --depends "libxcb-cursor0" \
+            --depends "libxcb-randr0" \
+            --depends "libxcb-xtest0" \
+            --depends "libxcb-shape0" \
+            --depends "libxcb-xfixes0" \
             --depends "libgl1" \
             --depends "libglib2.0-0" \
             --depends "libxkbcommon-x11-0" \
-            --after-install /dev/null \
+            --depends "libfontconfig1" \
+            --depends "libfreetype6" \
+            --after-install postinst \
             --package "dist/OCCM_${{ env.TAG_NAME }}-Linux-amd64.deb" \
             "dist/OCCM_${{ env.TAG_NAME }}/=/opt/occm" \
             "AppDir/OCCM.desktop=/usr/share/applications/occm.desktop"
-          
-          # 创建符号链接脚本 (安装后执行)
-          echo '#!/bin/bash' > postinst
-          echo 'ln -sf /opt/occm/OCCM_${{ env.TAG_NAME }} /usr/local/bin/occm' >> postinst
-          chmod +x postinst
         shell: /bin/bash -e {0}
 
       - name: 9. 上传构建产物
