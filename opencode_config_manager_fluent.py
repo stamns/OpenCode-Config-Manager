@@ -1016,6 +1016,7 @@ from qfluentwidgets import (
     HyperlinkLabel,
     ToolButton,
     LineEdit,
+    SearchLineEdit,
     TextEdit,
     PlainTextEdit,
     ComboBox,
