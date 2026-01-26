@@ -6,18 +6,49 @@ set -e
 APP_NAME="OCCM.app"
 INSTALL_DIR="/Applications"
 OLD_APP="$INSTALL_DIR/$APP_NAME"
-NEW_APP="$(dirname "$0")/$APP_NAME"
 
 echo "=========================================="
 echo "OCCM 安装/更新工具"
 echo "=========================================="
 
-# 检查新应用是否存在
-if [ ! -d "$NEW_APP" ]; then
+# 查找OCCM.app的位置（支持多种目录结构）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+NEW_APP=""
+
+# 尝试多个可能的位置
+if [ -d "$SCRIPT_DIR/$APP_NAME" ]; then
+    NEW_APP="$SCRIPT_DIR/$APP_NAME"
+elif [ -d "$SCRIPT_DIR/../$APP_NAME" ]; then
+    NEW_APP="$SCRIPT_DIR/../$APP_NAME"
+elif [ -d "/Volumes/OCCM/$APP_NAME" ]; then
+    NEW_APP="/Volumes/OCCM/$APP_NAME"
+elif [ -d "/Volumes/OpenCode Config Manager/$APP_NAME" ]; then
+    NEW_APP="/Volumes/OpenCode Config Manager/$APP_NAME"
+else
+    # 在当前目录及父目录搜索
+    FOUND=$(find "$SCRIPT_DIR" "$SCRIPT_DIR/.." -maxdepth 2 -name "$APP_NAME" -type d 2>/dev/null | head -1)
+    if [ -n "$FOUND" ]; then
+        NEW_APP="$FOUND"
+    fi
+fi
+
+# 检查是否找到应用
+if [ -z "$NEW_APP" ] || [ ! -d "$NEW_APP" ]; then
     echo "❌ 错误: 找不到 $APP_NAME"
-    echo "请确保此脚本与 OCCM.app 在同一目录"
+    echo ""
+    echo "请尝试以下方法："
+    echo "  1. 直接将 OCCM.app 拖入 /Applications 文件夹"
+    echo "  2. 确保此脚本与 OCCM.app 在同一目录"
+    echo "  3. 从 DMG 挂载点运行此脚本"
+    echo ""
+    echo "当前搜索路径："
+    echo "  - $SCRIPT_DIR"
+    echo "  - /Volumes/OCCM"
+    echo "  - /Volumes/OpenCode Config Manager"
     exit 1
 fi
+
+echo "✓ 找到应用: $NEW_APP"
 
 # 检查是否有旧版本
 if [ -d "$OLD_APP" ]; then
