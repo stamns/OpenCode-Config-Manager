@@ -13356,7 +13356,7 @@ class SkillMarket:
             "description": "ui_ux_pro_max_desc",
             "category": "ui_ux",
             "tags": ["ui", "ux", "design", "frontend"],
-            "subdir": None,  # SKILL.md在根目录
+            "subdir": ".claude/skills/ui-ux-pro-max",  # SKILL.md在这个子目录
         },
         {
             "name": "canvas-design",
