@@ -3,30 +3,30 @@
 
 set -e
 
-APP_NAME="OCCM.app"
 INSTALL_DIR="/Applications"
-OLD_APP="$INSTALL_DIR/$APP_NAME"
+FINAL_APP_NAME="OCCM.app"
+OLD_APP="$INSTALL_DIR/$FINAL_APP_NAME"
 
 echo "=========================================="
 echo "OCCM 安装/更新工具"
 echo "=========================================="
 
-# 查找OCCM.app的位置（支持多种目录结构）
+# 查找OCCM*.app的位置（支持带版本号的app名称）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NEW_APP=""
 
-# 尝试多个可能的位置
-if [ -d "$SCRIPT_DIR/$APP_NAME" ]; then
-    NEW_APP="$SCRIPT_DIR/$APP_NAME"
-elif [ -d "$SCRIPT_DIR/../$APP_NAME" ]; then
-    NEW_APP="$SCRIPT_DIR/../$APP_NAME"
-elif [ -d "/Volumes/OCCM/$APP_NAME" ]; then
-    NEW_APP="/Volumes/OCCM/$APP_NAME"
-elif [ -d "/Volumes/OpenCode Config Manager/$APP_NAME" ]; then
-    NEW_APP="/Volumes/OpenCode Config Manager/$APP_NAME"
+# 尝试多个可能的位置，使用通配符匹配 OCCM*.app
+if [ -n "$(find "$SCRIPT_DIR" -maxdepth 1 -name "OCCM*.app" -type d 2>/dev/null)" ]; then
+    NEW_APP=$(find "$SCRIPT_DIR" -maxdepth 1 -name "OCCM*.app" -type d 2>/dev/null | head -1)
+elif [ -n "$(find "$SCRIPT_DIR/.." -maxdepth 1 -name "OCCM*.app" -type d 2>/dev/null)" ]; then
+    NEW_APP=$(find "$SCRIPT_DIR/.." -maxdepth 1 -name "OCCM*.app" -type d 2>/dev/null | head -1)
+elif [ -n "$(find "/Volumes/OCCM" -maxdepth 1 -name "OCCM*.app" -type d 2>/dev/null)" ]; then
+    NEW_APP=$(find "/Volumes/OCCM" -maxdepth 1 -name "OCCM*.app" -type d 2>/dev/null | head -1)
+elif [ -n "$(find "/Volumes/OpenCode Config Manager" -maxdepth 1 -name "OCCM*.app" -type d 2>/dev/null)" ]; then
+    NEW_APP=$(find "/Volumes/OpenCode Config Manager" -maxdepth 1 -name "OCCM*.app" -type d 2>/dev/null | head -1)
 else
-    # 在当前目录及父目录搜索
-    FOUND=$(find "$SCRIPT_DIR" "$SCRIPT_DIR/.." -maxdepth 2 -name "$APP_NAME" -type d 2>/dev/null | head -1)
+    # 在当前目录及父目录搜索（支持更深层级）
+    FOUND=$(find "$SCRIPT_DIR" "$SCRIPT_DIR/.." -maxdepth 2 -name "OCCM*.app" -type d 2>/dev/null | head -1)
     if [ -n "$FOUND" ]; then
         NEW_APP="$FOUND"
     fi
@@ -34,17 +34,20 @@ fi
 
 # 检查是否找到应用
 if [ -z "$NEW_APP" ] || [ ! -d "$NEW_APP" ]; then
-    echo "❌ 错误: 找不到 $APP_NAME"
+    echo "❌ 错误: 找不到 OCCM*.app"
     echo ""
     echo "请尝试以下方法："
     echo "  1. 直接将 OCCM.app 拖入 /Applications 文件夹"
-    echo "  2. 确保此脚本与 OCCM.app 在同一目录"
+    echo "  2. 确保此脚本与 OCCM*.app 在同一目录"
     echo "  3. 从 DMG 挂载点运行此脚本"
     echo ""
     echo "当前搜索路径："
     echo "  - $SCRIPT_DIR"
     echo "  - /Volumes/OCCM"
     echo "  - /Volumes/OpenCode Config Manager"
+    echo ""
+    echo "调试信息："
+    ls -la "$SCRIPT_DIR" 2>/dev/null || echo "  无法列出当前目录"
     exit 1
 fi
 
@@ -78,9 +81,9 @@ else
     echo "首次安装 OCCM"
 fi
 
-# 复制新版本
+# 复制新版本（重命名为标准名称）
 echo "正在安装新版本..."
-cp -R "$NEW_APP" "$INSTALL_DIR/"
+cp -R "$NEW_APP" "$OLD_APP"
 
 # 移除隔离属性
 echo "正在移除隔离属性..."
