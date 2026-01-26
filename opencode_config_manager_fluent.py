@@ -2862,6 +2862,111 @@ class ConfigPaths:
         cls._custom_import_paths[source_type] = path
 
 
+# ==================== JSON语法高亮器 ====================
+class JsonSyntaxHighlighter(QSyntaxHighlighter):
+    """JSON语法高亮器 - 支持彩色括号、关键字高亮"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_formats()
+
+    def _setup_formats(self):
+        """设置高亮格式"""
+        # 键名（属性名）- 蓝色
+        self.key_format = QTextCharFormat()
+        self.key_format.setForeground(QColor("#9CDCFE"))  # 浅蓝色
+
+        # 字符串值 - 橙色
+        self.string_format = QTextCharFormat()
+        self.string_format.setForeground(QColor("#CE9178"))  # 橙色
+
+        # 数字 - 浅绿色
+        self.number_format = QTextCharFormat()
+        self.number_format.setForeground(QColor("#B5CEA8"))  # 浅绿色
+
+        # 布尔值和null - 紫色
+        self.keyword_format = QTextCharFormat()
+        self.keyword_format.setForeground(QColor("#569CD6"))  # 蓝紫色
+
+        # 括号 - 彩色括号
+        self.bracket_colors = [
+            QColor("#FFD700"),  # 金色
+            QColor("#DA70D6"),  # 兰花紫
+            QColor("#87CEEB"),  # 天蓝色
+            QColor("#FF6347"),  # 番茄红
+            QColor("#98FB98"),  # 淡绿色
+            QColor("#DDA0DD"),  # 梅红色
+        ]
+
+    def highlightBlock(self, text):
+        """高亮当前文本块"""
+        # 高亮键名（"key":）
+        import re
+
+        for match in re.finditer(r'"([^"\\]|\\.)*"\s*:', text):
+            self.setFormat(
+                match.start(), match.end() - match.start() - 1, self.key_format
+            )
+
+        # 高亮字符串值（不是键名的字符串）
+        in_key = False
+        i = 0
+        while i < len(text):
+            if text[i] == '"':
+                # 找到字符串的结束位置
+                j = i + 1
+                while j < len(text):
+                    if text[j] == '"' and text[j - 1] != "\\":
+                        break
+                    j += 1
+
+                # 检查是否是键名（后面跟着冒号）
+                is_key = False
+                k = j + 1
+                while k < len(text) and text[k] in " \t":
+                    k += 1
+                if k < len(text) and text[k] == ":":
+                    is_key = True
+
+                if not is_key:
+                    self.setFormat(i, j - i + 1, self.string_format)
+
+                i = j + 1
+            else:
+                i += 1
+
+        # 高亮数字
+        for match in re.finditer(r"\b-?\d+\.?\d*\b", text):
+            self.setFormat(
+                match.start(), match.end() - match.start(), self.number_format
+            )
+
+        # 高亮关键字（true, false, null）
+        for match in re.finditer(r"\b(true|false|null)\b", text):
+            self.setFormat(
+                match.start(), match.end() - match.start(), self.keyword_format
+            )
+
+        # 高亮括号（彩色括号）
+        bracket_stack = []
+        for i, char in enumerate(text):
+            if char in "{[":
+                level = len(bracket_stack) % len(self.bracket_colors)
+                bracket_format = QTextCharFormat()
+                bracket_format.setForeground(self.bracket_colors[level])
+                bracket_format.setFontWeight(QFont.Bold)
+                self.setFormat(i, 1, bracket_format)
+                bracket_stack.append(char)
+            elif char in "}]":
+                if bracket_stack:
+                    bracket_stack.pop()
+                level = len(bracket_stack) % len(self.bracket_colors)
+                bracket_format = QTextCharFormat()
+                bracket_format.setForeground(self.bracket_colors[level])
+                bracket_format.setFontWeight(QFont.Bold)
+                self.setFormat(i, 1, bracket_format)
+
+
 class ConfigManager:
     """配置文件读写管理 - 支持 JSON 和 JSONC (带注释的JSON)"""
 
@@ -5733,7 +5838,7 @@ class HomePage(BasePage):
         self.validation_details.setPlainText(self._format_validation_details(issues))
 
     def _view_config_file(self, config_path: Path):
-        """查看配置文件（带语法高亮）"""
+        """查看配置文件（带语法高亮和编辑功能）"""
         try:
             # 读取文件内容
             with open(config_path, "r", encoding="utf-8") as f:
@@ -5742,13 +5847,13 @@ class HomePage(BasePage):
             # 创建对话框
             dialog = QDialog(self)
             dialog.setWindowTitle(f"查看配置文件 - {config_path.name}")
-            dialog.resize(800, 600)
+            dialog.resize(900, 700)
 
             layout = QVBoxLayout(dialog)
             layout.setSpacing(12)
 
-            # 创建文本编辑器
-            text_edit = PlainTextEdit(dialog)
+            # 创建文本编辑器（使用QTextEdit以支持语法高亮）
+            text_edit = QTextEdit(dialog)
             text_edit.setReadOnly(True)
             text_edit.setPlainText(content)
 
@@ -5758,24 +5863,58 @@ class HomePage(BasePage):
                 font = QFont("Courier New", 10)
             text_edit.setFont(font)
 
-            # 设置样式（深色主题的JSON高亮效果）
-            text_edit.setStyleSheet("""
-                QPlainTextEdit {
-                    background-color: #1e1e1e;
-                    color: #d4d4d4;
-                    border: 1px solid #3e3e3e;
-                    border-radius: 4px;
-                    padding: 8px;
-                }
-            """)
+            # 应用JSON语法高亮
+            highlighter = JsonSyntaxHighlighter(text_edit.document())
+
+            # 设置样式（深色主题）
+            if isDarkTheme():
+                text_edit.setStyleSheet("""
+                    QTextEdit {
+                        background-color: #1e1e1e;
+                        color: #d4d4d4;
+                        border: 1px solid #3e3e3e;
+                        border-radius: 4px;
+                        padding: 8px;
+                        selection-background-color: #264f78;
+                    }
+                """)
+            else:
+                text_edit.setStyleSheet("""
+                    QTextEdit {
+                        background-color: #ffffff;
+                        color: #000000;
+                        border: 1px solid #d0d0d0;
+                        border-radius: 4px;
+                        padding: 8px;
+                        selection-background-color: #add6ff;
+                    }
+                """)
 
             layout.addWidget(text_edit)
 
-            # 关闭按钮
+            # 按钮布局
             btn_layout = QHBoxLayout()
             btn_layout.addStretch()
 
-            close_btn = PrimaryPushButton("关闭", dialog)
+            # 编辑按钮
+            edit_btn = PushButton("编辑", dialog)
+            edit_btn.clicked.connect(
+                lambda: self._enable_edit_mode(
+                    text_edit, edit_btn, save_btn, config_path
+                )
+            )
+            btn_layout.addWidget(edit_btn)
+
+            # 保存按钮（初始禁用）
+            save_btn = PrimaryPushButton("保存", dialog)
+            save_btn.setEnabled(False)
+            save_btn.clicked.connect(
+                lambda: self._save_config_file(text_edit, config_path, dialog)
+            )
+            btn_layout.addWidget(save_btn)
+
+            # 关闭按钮
+            close_btn = PushButton("关闭", dialog)
             close_btn.clicked.connect(dialog.accept)
             btn_layout.addWidget(close_btn)
 
@@ -5785,6 +5924,86 @@ class HomePage(BasePage):
 
         except Exception as e:
             self.show_error("错误", f"无法读取配置文件: {str(e)}")
+
+    def _enable_edit_mode(
+        self,
+        text_edit: QTextEdit,
+        edit_btn: PushButton,
+        save_btn: PrimaryPushButton,
+        config_path: Path,
+    ):
+        """启用编辑模式"""
+        # 自动备份
+        try:
+            self.main_window.backup_manager.backup_file(config_path)
+            InfoBar.success("已备份", f"已自动备份配置文件", parent=self)
+        except Exception as e:
+            self.show_warning("备份失败", f"无法备份配置文件: {str(e)}")
+            return
+
+        # 启用编辑
+        text_edit.setReadOnly(False)
+        edit_btn.setEnabled(False)
+        save_btn.setEnabled(True)
+
+        # 修改样式以指示可编辑状态
+        if isDarkTheme():
+            text_edit.setStyleSheet("""
+                QTextEdit {
+                    background-color: #2d2d2d;
+                    color: #d4d4d4;
+                    border: 2px solid #007acc;
+                    border-radius: 4px;
+                    padding: 8px;
+                    selection-background-color: #264f78;
+                }
+            """)
+        else:
+            text_edit.setStyleSheet("""
+                QTextEdit {
+                    background-color: #fffef7;
+                    color: #000000;
+                    border: 2px solid #007acc;
+                    border-radius: 4px;
+                    padding: 8px;
+                    selection-background-color: #add6ff;
+                }
+            """)
+
+    def _save_config_file(
+        self, text_edit: QTextEdit, config_path: Path, dialog: QDialog
+    ):
+        """保存配置文件"""
+        try:
+            content = text_edit.toPlainText()
+
+            # 验证JSON格式
+            try:
+                import json
+
+                json.loads(content)
+            except json.JSONDecodeError as e:
+                self.show_error("JSON格式错误", f"配置文件格式不正确:\n{str(e)}")
+                return
+
+            # 保存文件
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            # 重新加载配置
+            if "opencode.json" in config_path.name:
+                self.main_window.opencode_config = ConfigManager.load_json(config_path)
+            elif "oh-my-opencode.json" in config_path.name:
+                self.main_window.ohmyopencode_config = ConfigManager.load_json(
+                    config_path
+                )
+
+            self.show_success("保存成功", "配置文件已保存")
+            self.main_window.notify_config_changed()
+            dialog.accept()
+
+        except Exception as e:
+            self.show_error("保存失败", f"无法保存配置文件: {str(e)}")
 
     def _copy_to_clipboard(self, text: str):
         """复制文本到剪贴板"""
