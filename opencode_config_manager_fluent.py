@@ -11607,7 +11607,7 @@ class PresetOpenCodeAgentDialog(BaseDialog):
 
 # ==================== Permission 页面 ====================
 class PermissionPage(BasePage):
-    """权限管理页面"""
+    """权限管理页面 - 包含权限设置和上下文压缩"""
 
     def __init__(self, main_window, parent=None):
         super().__init__(tr("permission.title"), parent)
@@ -11616,18 +11616,55 @@ class PermissionPage(BasePage):
         self._load_data()
 
     def _setup_ui(self):
+        # 标签页切换
+        self.pivot = Pivot(self)
+        self.pivot.addItem(routeKey="permission", text=tr("permission.title"))
+        self.pivot.addItem(routeKey="compaction", text=tr("compaction.title"))
+        self.pivot.setCurrentItem("permission")
+        self.pivot.currentItemChanged.connect(self._on_tab_changed)
+        self._layout.addWidget(self.pivot)
+
+        # 堆叠窗口
+        self.stack = QStackedWidget(self)
+
+        # 权限管理页面
+        self.permission_widget = self._create_permission_widget()
+        self.stack.addWidget(self.permission_widget)
+
+        # 上下文压缩页面
+        self.compaction_widget = self._create_compaction_widget()
+        self.stack.addWidget(self.compaction_widget)
+
+        self._layout.addWidget(self.stack, 1)
+
+    def _on_tab_changed(self, route_key: str):
+        """切换标签页"""
+        if route_key == "permission":
+            self.stack.setCurrentIndex(0)
+        else:
+            self.stack.setCurrentIndex(1)
+
+    def _create_permission_widget(self) -> QWidget:
+        """创建权限管理部件"""
+        widget = QWidget(self)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
         # 工具栏
         toolbar = QHBoxLayout()
 
-        self.add_btn = PrimaryPushButton(FIF.ADD, tr("permission.add_permission"), self)
+        self.add_btn = PrimaryPushButton(
+            FIF.ADD, tr("permission.add_permission"), widget
+        )
         self.add_btn.clicked.connect(self._on_add)
         toolbar.addWidget(self.add_btn)
 
-        self.edit_btn = PushButton(FIF.EDIT, tr("common.edit"), self)
+        self.edit_btn = PushButton(FIF.EDIT, tr("common.edit"), widget)
         self.edit_btn.clicked.connect(self._on_edit)
         toolbar.addWidget(self.edit_btn)
 
-        self.delete_btn = PushButton(FIF.DELETE, tr("common.delete"), self)
+        self.delete_btn = PushButton(FIF.DELETE, tr("common.delete"), widget)
         self.delete_btn.clicked.connect(self._on_delete)
         toolbar.addWidget(self.delete_btn)
 
@@ -11635,14 +11672,14 @@ class PermissionPage(BasePage):
 
         # 快捷按钮
         for tool in ["Bash", "Read", "Write", "Edit", "WebFetch"]:
-            btn = PushButton(tool, self)
+            btn = PushButton(tool, widget)
             btn.clicked.connect(lambda checked, t=tool: self._quick_add(t))
             toolbar.addWidget(btn)
 
-        self._layout.addLayout(toolbar)
+        layout.addLayout(toolbar)
 
         # 权限列表
-        self.table = TableWidget(self)
+        self.table = TableWidget(widget)
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(
             [tr("permission.tool_name"), tr("permission.permission_level")]
@@ -11652,9 +11689,79 @@ class PermissionPage(BasePage):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.doubleClicked.connect(self._on_edit)
-        self._layout.addWidget(self.table)
+        layout.addWidget(self.table)
+
+        return widget
+
+    def _create_compaction_widget(self) -> QWidget:
+        """创建上下文压缩部件"""
+        widget = QWidget(self)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(12)
+
+        # 说明卡片
+        desc_card = SimpleCardWidget(widget)
+        desc_layout = QVBoxLayout(desc_card)
+        desc_layout.setContentsMargins(16, 12, 16, 12)
+
+        title_label = StrongBodyLabel(tr("compaction.card_title"), desc_card)
+        desc_layout.addWidget(title_label)
+
+        desc_layout.addWidget(
+            BodyLabel(
+                tr("compaction.description"),
+                desc_card,
+            )
+        )
+
+        # auto 选项
+        self.auto_check = CheckBox(tr("compaction.auto_compress"), desc_card)
+        self.auto_check.setChecked(True)
+        desc_layout.addWidget(self.auto_check)
+
+        # prune 选项
+        self.prune_check = CheckBox(tr("compaction.prune_old_output"), desc_card)
+        self.prune_check.setChecked(True)
+        desc_layout.addWidget(self.prune_check)
+
+        # 保存按钮
+        save_btn = PrimaryPushButton(tr("compaction.save_settings"), desc_card)
+        save_btn.clicked.connect(self._on_save_compaction)
+        desc_layout.addWidget(save_btn)
+
+        layout.addWidget(desc_card)
+
+        # 配置预览卡片
+        preview_card = SimpleCardWidget(widget)
+        preview_layout = QVBoxLayout(preview_card)
+        preview_layout.setContentsMargins(16, 12, 16, 12)
+
+        preview_title = StrongBodyLabel(tr("compaction.preview"), preview_card)
+        preview_layout.addWidget(preview_title)
+
+        self.preview_edit = TextEdit(preview_card)
+        self.preview_edit.setReadOnly(True)
+        self.preview_edit.setMaximumHeight(150)
+        preview_layout.addWidget(self.preview_edit)
+
+        layout.addWidget(preview_card)
+
+        layout.addStretch()
+
+        # 连接信号更新预览
+        self.auto_check.stateChanged.connect(self._update_compaction_preview)
+        self.prune_check.stateChanged.connect(self._update_compaction_preview)
+
+        return widget
 
     def _load_data(self):
+        """加载权限和压缩配置数据"""
+        self._load_permission_data()
+        self._load_compaction_data()
+
+    def _load_permission_data(self):
+        """加载权限数据"""
         self.table.setRowCount(0)
         config = self.main_window.opencode_config or {}
         permissions = config.get("permission", {})
@@ -11672,10 +11779,48 @@ class PermissionPage(BasePage):
             self.table.setItem(row, 0, QTableWidgetItem(tool))
             self.table.setItem(row, 1, QTableWidgetItem(str(level)))
 
+    def _load_compaction_data(self):
+        """加载 Compaction 配置"""
+        config = self.main_window.opencode_config or {}
+        compaction = config.get("compaction", {})
+
+        self.auto_check.setChecked(compaction.get("auto", True))
+        self.prune_check.setChecked(compaction.get("prune", True))
+
+        self._update_compaction_preview()
+
+    def _update_compaction_preview(self):
+        """更新配置预览"""
+        import json
+
+        config = {
+            "compaction": {
+                "auto": self.auto_check.isChecked(),
+                "prune": self.prune_check.isChecked(),
+            }
+        }
+        self.preview_edit.setPlainText(json.dumps(config, indent=2, ensure_ascii=False))
+
+    def _on_save_compaction(self):
+        """保存压缩配置"""
+        config = self.main_window.opencode_config
+        if config is None:
+            config = {}
+            self.main_window.opencode_config = config
+
+        config["compaction"] = {
+            "auto": self.auto_check.isChecked(),
+            "prune": self.prune_check.isChecked(),
+        }
+
+        self.main_window.save_opencode_config()
+        self._update_compaction_preview()
+        self.show_success(tr("common.success"), tr("compaction.settings_saved"))
+
     def _on_add(self):
         dialog = PermissionDialog(self.main_window, parent=self)
         if dialog.exec_():
-            self._load_data()
+            self._load_permission_data()
             self.show_success(tr("common.success"), tr("permission.permission_saved"))
 
     def _on_edit(self):
@@ -11688,7 +11833,7 @@ class PermissionPage(BasePage):
         level = self.table.item(row, 1).text()
         dialog = PermissionDialog(self.main_window, tool=tool, level=level, parent=self)
         if dialog.exec_():
-            self._load_data()
+            self._load_permission_data()
             self.show_success(tr("common.success"), tr("permission.permission_saved"))
 
     def _quick_add(self, tool: str):
@@ -11702,7 +11847,7 @@ class PermissionPage(BasePage):
 
         config["permission"][tool] = "allow"
         self.main_window.save_opencode_config()
-        self._load_data()
+        self._load_permission_data()
         self.show_success(
             tr("common.success"),
             tr("permission.permission_added", tool=tool, level="allow"),
@@ -11719,7 +11864,7 @@ class PermissionPage(BasePage):
         if "permission" in config and tool in config["permission"]:
             del config["permission"][tool]
             self.main_window.save_opencode_config()
-            self._load_data()
+            self._load_permission_data()
             self.show_success(
                 tr("common.success"), tr("permission.permission_deleted_msg", tool=tool)
             )
@@ -12241,7 +12386,7 @@ class MainWindow(FluentWindow):
             self.opencode_agent_page, FIF.COMMAND_PROMPT, tr("menu.agent")
         )
 
-        # Permission 页面
+        # Permission 页面（包含权限设置和上下文压缩）
         self.permission_page = PermissionPage(self)
         self.addSubInterface(
             self.permission_page, FIF.CERTIFICATE, tr("menu.permission")
@@ -12251,30 +12396,13 @@ class MainWindow(FluentWindow):
         self.skill_page = SkillPage(self)
         self.addSubInterface(self.skill_page, FIF.BOOK_SHELF, tr("menu.skill"))
 
-        # Plugin 页面
+        # Plugin 页面（包含插件管理和Oh My OpenCode管理）
         self.plugin_page = PluginPage(self)
         self.addSubInterface(self.plugin_page, FIF.APPLICATION, "Plugin")
 
         # Rules 页面
         self.rules_page = RulesPage(self)
         self.addSubInterface(self.rules_page, FIF.DOCUMENT, tr("menu.rules"))
-
-        # Compaction 页面
-        self.compaction_page = CompactionPage(self)
-        self.addSubInterface(
-            self.compaction_page, FIF.ZIP_FOLDER, tr("menu.compaction")
-        )
-
-        # ===== Oh My OpenCode 配置分组 =====
-        # Oh My Agent 页面
-        self.ohmy_agent_page = OhMyAgentPage(self)
-        self.addSubInterface(
-            self.ohmy_agent_page, FIF.EMOJI_TAB_SYMBOLS, tr("menu.ohmyagent")
-        )
-
-        # Category 页面
-        self.category_page = CategoryPage(self)
-        self.addSubInterface(self.category_page, FIF.TAG, tr("menu.category"))
 
         # ===== 工具分组 =====
         # Import 页面
@@ -19672,21 +19800,64 @@ PRESET_PLUGINS = [
 
 
 class PluginPage(BasePage):
-    """Plugin 插件管理页面"""
+    """Plugin 插件管理页面 - 包含插件管理和Oh My OpenCode管理"""
 
     def __init__(self, main_window, parent=None):
         super().__init__("Plugin 插件管理", parent)
         self.main_window = main_window
         self._setup_ui()
         self._load_plugins()
+        # 连接配置变更信号
+        self.main_window.config_changed.connect(self._on_config_changed)
+
+    def _on_config_changed(self):
+        """配置变更时刷新数据"""
+        self._load_plugins()
+        self._load_ohmy_data()
 
     def _setup_ui(self):
         """初始化UI"""
+        # 标签页切换
+        self.pivot = Pivot(self)
+        self.pivot.addItem(routeKey="plugins", text="插件管理")
+        self.pivot.addItem(routeKey="ohmyopencode", text="Oh My OpenCode")
+        self.pivot.setCurrentItem("plugins")
+        self.pivot.currentItemChanged.connect(self._on_tab_changed)
+        self._layout.addWidget(self.pivot)
+
+        # 堆叠窗口
+        self.stack = QStackedWidget(self)
+
+        # 插件管理页面
+        self.plugins_widget = self._create_plugins_widget()
+        self.stack.addWidget(self.plugins_widget)
+
+        # Oh My OpenCode 管理页面
+        self.ohmy_widget = self._create_ohmy_widget()
+        self.stack.addWidget(self.ohmy_widget)
+
+        self._layout.addWidget(self.stack, 1)
+
+    def _on_tab_changed(self, route_key: str):
+        """切换标签页"""
+        if route_key == "plugins":
+            self.stack.setCurrentIndex(0)
+        else:
+            self.stack.setCurrentIndex(1)
+            self._load_ohmy_data()
+
+    def _create_plugins_widget(self) -> QWidget:
+        """创建插件管理部件"""
+        widget = QWidget(self)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
         # 顶部按钮栏
         btn_layout = QHBoxLayout()
 
         # 搜索框
-        self.search_edit = SearchLineEdit(self)
+        self.search_edit = SearchLineEdit(widget)
         self.search_edit.setPlaceholderText("搜索插件...")
         self.search_edit.setFixedWidth(300)
         self.search_edit.textChanged.connect(self._on_search)
@@ -19695,24 +19866,24 @@ class PluginPage(BasePage):
         btn_layout.addStretch()
 
         # 安装插件按钮
-        self.install_btn = PrimaryPushButton("➕ 安装插件", self)
+        self.install_btn = PrimaryPushButton("➕ 安装插件", widget)
         self.install_btn.clicked.connect(self._on_install)
         btn_layout.addWidget(self.install_btn)
 
         # 检查更新按钮
-        self.check_update_btn = PushButton("🔄 检查更新", self)
+        self.check_update_btn = PushButton("🔄 检查更新", widget)
         self.check_update_btn.clicked.connect(self._on_check_updates)
         btn_layout.addWidget(self.check_update_btn)
 
         # 插件市场按钮
-        self.market_btn = PushButton("🛒 插件市场", self)
+        self.market_btn = PushButton("🛒 插件市场", widget)
         self.market_btn.clicked.connect(self._on_open_market)
         btn_layout.addWidget(self.market_btn)
 
-        self._layout.addLayout(btn_layout)
+        layout.addLayout(btn_layout)
 
         # 插件列表表格
-        self.table = TableWidget(self)
+        self.table = TableWidget(widget)
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(
             ["插件名称", "版本", "类型", "状态", "描述", "操作"]
@@ -19737,7 +19908,362 @@ class PluginPage(BasePage):
         )
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._layout.addWidget(self.table, 1)
+        layout.addWidget(self.table, 1)
+
+        return widget
+
+    def _create_ohmy_widget(self) -> QWidget:
+        """创建Oh My OpenCode管理部件"""
+        widget = QWidget(self)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(12)
+
+        # 检测状态卡片
+        status_card = SimpleCardWidget(widget)
+        status_layout = QVBoxLayout(status_card)
+        status_layout.setContentsMargins(16, 12, 16, 12)
+
+        status_title = StrongBodyLabel("Oh My OpenCode 状态", status_card)
+        status_layout.addWidget(status_title)
+
+        # 状态行
+        status_row = QHBoxLayout()
+        self.ohmy_status_label = BodyLabel("检测中...", status_card)
+        status_row.addWidget(self.ohmy_status_label)
+        status_row.addStretch()
+
+        # 配置按钮
+        self.ohmy_config_btn = PushButton("配置 Oh My OpenCode", status_card)
+        self.ohmy_config_btn.clicked.connect(self._on_config_ohmy)
+        status_row.addWidget(self.ohmy_config_btn)
+
+        status_layout.addLayout(status_row)
+        layout.addWidget(status_card)
+
+        # Agent 管理卡片
+        agent_card = SimpleCardWidget(widget)
+        agent_layout = QVBoxLayout(agent_card)
+        agent_layout.setContentsMargins(16, 12, 16, 12)
+
+        agent_title = StrongBodyLabel(tr("ohmyagent.title"), agent_card)
+        agent_layout.addWidget(agent_title)
+
+        # Agent 工具栏
+        agent_toolbar = QHBoxLayout()
+
+        self.ohmy_add_agent_btn = PrimaryPushButton(
+            FIF.ADD, tr("ohmyagent.add_agent"), agent_card
+        )
+        self.ohmy_add_agent_btn.clicked.connect(self._on_add_ohmy_agent)
+        agent_toolbar.addWidget(self.ohmy_add_agent_btn)
+
+        self.ohmy_preset_btn = PushButton(
+            FIF.LIBRARY, tr("common.add_from_preset"), agent_card
+        )
+        self.ohmy_preset_btn.clicked.connect(self._on_add_ohmy_preset)
+        agent_toolbar.addWidget(self.ohmy_preset_btn)
+
+        self.ohmy_edit_btn = PushButton(FIF.EDIT, tr("common.edit"), agent_card)
+        self.ohmy_edit_btn.clicked.connect(self._on_edit_ohmy_agent)
+        agent_toolbar.addWidget(self.ohmy_edit_btn)
+
+        self.ohmy_delete_btn = PushButton(FIF.DELETE, tr("common.delete"), agent_card)
+        self.ohmy_delete_btn.clicked.connect(self._on_delete_ohmy_agent)
+        agent_toolbar.addWidget(self.ohmy_delete_btn)
+
+        agent_toolbar.addStretch()
+        agent_layout.addLayout(agent_toolbar)
+
+        # Agent 列表
+        self.ohmy_agent_table = TableWidget(agent_card)
+        self.ohmy_agent_table.setColumnCount(3)
+        self.ohmy_agent_table.setHorizontalHeaderLabels(
+            [tr("common.name"), tr("ohmyagent.model"), tr("common.description")]
+        )
+        self.ohmy_agent_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
+        self.ohmy_agent_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.ohmy_agent_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.ohmy_agent_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.ohmy_agent_table.doubleClicked.connect(self._on_edit_ohmy_agent)
+        self.ohmy_agent_table.setMaximumHeight(200)
+        agent_layout.addWidget(self.ohmy_agent_table)
+
+        layout.addWidget(agent_card)
+
+        # Category 管理卡片
+        category_card = SimpleCardWidget(widget)
+        category_layout = QVBoxLayout(category_card)
+        category_layout.setContentsMargins(16, 12, 16, 12)
+
+        category_title = StrongBodyLabel(tr("category.title"), category_card)
+        category_layout.addWidget(category_title)
+
+        # Category 工具栏
+        category_toolbar = QHBoxLayout()
+
+        self.ohmy_add_category_btn = PrimaryPushButton(
+            FIF.ADD, tr("category.add_category"), category_card
+        )
+        self.ohmy_add_category_btn.clicked.connect(self._on_add_ohmy_category)
+        category_toolbar.addWidget(self.ohmy_add_category_btn)
+
+        self.ohmy_category_preset_btn = PushButton(
+            FIF.LIBRARY, tr("common.add_from_preset"), category_card
+        )
+        self.ohmy_category_preset_btn.clicked.connect(self._on_add_ohmy_category_preset)
+        category_toolbar.addWidget(self.ohmy_category_preset_btn)
+
+        self.ohmy_category_edit_btn = PushButton(
+            FIF.EDIT, tr("common.edit"), category_card
+        )
+        self.ohmy_category_edit_btn.clicked.connect(self._on_edit_ohmy_category)
+        category_toolbar.addWidget(self.ohmy_category_edit_btn)
+
+        self.ohmy_category_delete_btn = PushButton(
+            FIF.DELETE, tr("common.delete"), category_card
+        )
+        self.ohmy_category_delete_btn.clicked.connect(self._on_delete_ohmy_category)
+        category_toolbar.addWidget(self.ohmy_category_delete_btn)
+
+        category_toolbar.addStretch()
+        category_layout.addLayout(category_toolbar)
+
+        # Category 列表
+        self.ohmy_category_table = TableWidget(category_card)
+        self.ohmy_category_table.setColumnCount(3)
+        self.ohmy_category_table.setHorizontalHeaderLabels(
+            [tr("common.name"), "Temperature", tr("common.description")]
+        )
+        self.ohmy_category_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
+        self.ohmy_category_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.ohmy_category_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.ohmy_category_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.ohmy_category_table.doubleClicked.connect(self._on_edit_ohmy_category)
+        self.ohmy_category_table.setMaximumHeight(200)
+        category_layout.addWidget(self.ohmy_category_table)
+
+        layout.addWidget(category_card)
+
+        layout.addStretch()
+
+        return widget
+
+    def _load_ohmy_data(self):
+        """加载Oh My OpenCode数据"""
+        # 检测oh-my-opencode是否安装
+        config = self.main_window.opencode_config or {}
+        plugins = config.get("plugins", [])
+        ohmy_installed = False
+
+        if isinstance(plugins, list):
+            for plugin in plugins:
+                if isinstance(plugin, str) and "oh-my-opencode" in plugin:
+                    ohmy_installed = True
+                    break
+                elif isinstance(plugin, dict) and "oh-my-opencode" in plugin.get(
+                    "name", ""
+                ):
+                    ohmy_installed = True
+                    break
+
+        if ohmy_installed:
+            self.ohmy_status_label.setText("✅ Oh My OpenCode 已安装")
+            self.ohmy_status_label.setStyleSheet("color: #4CAF50;")
+        else:
+            self.ohmy_status_label.setText("❌ Oh My OpenCode 未安装")
+            self.ohmy_status_label.setStyleSheet("color: #f44336;")
+
+        # 加载Agent数据
+        self._load_ohmy_agents()
+
+        # 加载Category数据
+        self._load_ohmy_categories()
+
+    def _load_ohmy_agents(self):
+        """加载Oh My Agent数据"""
+        self.ohmy_agent_table.setRowCount(0)
+        config = self.main_window.ohmyopencode_config or {}
+        agents = config.get("agents", {})
+
+        if not isinstance(agents, dict):
+            agents = {}
+
+        for name, data in agents.items():
+            if not isinstance(data, dict):
+                continue
+
+            row = self.ohmy_agent_table.rowCount()
+            self.ohmy_agent_table.insertRow(row)
+            self.ohmy_agent_table.setItem(row, 0, QTableWidgetItem(name))
+            self.ohmy_agent_table.setItem(
+                row, 1, QTableWidgetItem(data.get("model", ""))
+            )
+
+            desc = data.get("description", "")
+            if not desc:
+                desc = PRESET_AGENTS.get(name, "")
+            desc_item = QTableWidgetItem(desc[:50] + "..." if len(desc) > 50 else desc)
+            desc_item.setToolTip(desc)
+            self.ohmy_agent_table.setItem(row, 2, desc_item)
+
+    def _load_ohmy_categories(self):
+        """加载Oh My Category数据"""
+        self.ohmy_category_table.setRowCount(0)
+        config = self.main_window.ohmyopencode_config or {}
+        categories = config.get("categories", {})
+
+        if not isinstance(categories, dict):
+            categories = {}
+
+        for name, data in categories.items():
+            if not isinstance(data, dict):
+                continue
+
+            row = self.ohmy_category_table.rowCount()
+            self.ohmy_category_table.insertRow(row)
+            self.ohmy_category_table.setItem(row, 0, QTableWidgetItem(name))
+            self.ohmy_category_table.setItem(
+                row, 1, QTableWidgetItem(str(data.get("temperature", 0.7)))
+            )
+
+            desc = data.get("description", "")
+            if not desc:
+                desc = PRESET_CATEGORIES.get(name, {}).get("description", "")
+            desc_item = QTableWidgetItem(desc[:30] + "..." if len(desc) > 30 else desc)
+            desc_item.setToolTip(desc)
+            self.ohmy_category_table.setItem(row, 2, desc_item)
+
+    def _on_config_ohmy(self):
+        """配置Oh My OpenCode"""
+        # 打开oh-my-opencode.json配置文件
+        config_path = ConfigPaths.get_ohmyopencode_config()
+        if config_path.exists():
+            import subprocess
+            import sys
+
+            if sys.platform == "win32":
+                subprocess.Popen(["notepad", str(config_path)])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(config_path)])
+            else:
+                subprocess.Popen(["xdg-open", str(config_path)])
+        else:
+            self.show_warning("提示", "配置文件不存在，请先安装Oh My OpenCode插件")
+
+    def _on_add_ohmy_agent(self):
+        """添加Oh My Agent"""
+        dialog = OhMyAgentDialog(self.main_window, parent=self)
+        if dialog.exec_():
+            self._load_ohmy_agents()
+            self.show_success(tr("common.success"), tr("ohmyagent.agent_added"))
+
+    def _on_add_ohmy_preset(self):
+        """从预设添加Oh My Agent"""
+        dialog = PresetOhMyAgentDialog(self.main_window, parent=self)
+        if dialog.exec_():
+            self._load_ohmy_agents()
+            self.show_success(tr("common.success"), tr("ohmyagent.preset_agent_added"))
+
+    def _on_edit_ohmy_agent(self):
+        """编辑Oh My Agent"""
+        row = self.ohmy_agent_table.currentRow()
+        if row < 0:
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Agent")
+            )
+            return
+
+        name = self.ohmy_agent_table.item(row, 0).text()
+        dialog = OhMyAgentDialog(self.main_window, agent_name=name, parent=self)
+        if dialog.exec_():
+            self._load_ohmy_agents()
+            self.show_success(tr("common.success"), tr("ohmyagent.agent_updated"))
+
+    def _on_delete_ohmy_agent(self):
+        """删除Oh My Agent"""
+        row = self.ohmy_agent_table.currentRow()
+        if row < 0:
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Agent")
+            )
+            return
+
+        name = self.ohmy_agent_table.item(row, 0).text()
+        w = FluentMessageBox(
+            tr("common.confirm_delete_title"),
+            tr("dialog.confirm_delete_agent", name=name),
+            self,
+        )
+        if w.exec_():
+            config = self.main_window.ohmyopencode_config or {}
+            if "agents" in config and name in config["agents"]:
+                del config["agents"][name]
+                self.main_window.save_ohmyopencode_config()
+                self._load_ohmy_agents()
+                self.show_success(
+                    tr("common.success"), tr("dialog.agent_deleted", name=name)
+                )
+
+    def _on_add_ohmy_category(self):
+        """添加Oh My Category"""
+        dialog = CategoryDialog(self.main_window, parent=self)
+        if dialog.exec_():
+            self._load_ohmy_categories()
+            self.show_success(tr("common.success"), tr("category.category_added"))
+
+    def _on_add_ohmy_category_preset(self):
+        """从预设添加Oh My Category"""
+        dialog = PresetCategoryDialog(self.main_window, parent=self)
+        if dialog.exec_():
+            self._load_ohmy_categories()
+            self.show_success(
+                tr("common.success"), tr("category.preset_category_added")
+            )
+
+    def _on_edit_ohmy_category(self):
+        """编辑Oh My Category"""
+        row = self.ohmy_category_table.currentRow()
+        if row < 0:
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Category")
+            )
+            return
+
+        name = self.ohmy_category_table.item(row, 0).text()
+        dialog = CategoryDialog(self.main_window, category_name=name, parent=self)
+        if dialog.exec_():
+            self._load_ohmy_categories()
+            self.show_success(tr("common.success"), tr("category.category_updated"))
+
+    def _on_delete_ohmy_category(self):
+        """删除Oh My Category"""
+        row = self.ohmy_category_table.currentRow()
+        if row < 0:
+            self.show_warning(
+                tr("common.info"), tr("common.please_select_first", item="Category")
+            )
+            return
+
+        name = self.ohmy_category_table.item(row, 0).text()
+        w = FluentMessageBox(
+            tr("common.confirm_delete_title"),
+            tr("dialog.confirm_delete_category", name=name),
+            self,
+        )
+        if w.exec_():
+            config = self.main_window.ohmyopencode_config or {}
+            if "categories" in config and name in config["categories"]:
+                del config["categories"][name]
+                self.main_window.save_ohmyopencode_config()
+                self._load_ohmy_categories()
+                self.show_success(
+                    tr("common.success"), tr("dialog.category_deleted", name=name)
+                )
 
     def _load_plugins(self):
         """加载插件列表"""
