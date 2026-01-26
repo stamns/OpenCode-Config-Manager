@@ -683,7 +683,7 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
                 "Base URL",
                 "text",
                 [],
-                "https://open.bigmodel.cn/api/paas/v4/",
+                "https://open.bigmodel.cn/api/coding/paas/v4",
             ),
         ],
         env_vars=["ZHIPU_API_KEY"],
@@ -1490,17 +1490,6 @@ SDK必须与模型厂商匹配，否则无法正常调用！""",
 • 支持环境变量引用: {env:ANTHROPIC_API_KEY}
 • 不要将密钥提交到代码仓库
 • 定期轮换密钥""",
-    "provider_model_list_url": """模型列表地址 (modelListUrl) ⓘ
-
-【作用】用于拉取 Provider 支持的模型列表
-
-【使用场景】
-• API 地址不支持标准 /v1/models 时，填写自定义模型列表接口
-• 私有部署或中转站需要自定义路径
-
-【格式示例】
-• https://api.example.com/v1/models
-• /custom/models""",
     "provider_timeout": """请求超时 (timeout) ⓘ
 
 【作用】API请求的最大等待时间
@@ -5069,17 +5058,7 @@ class ModelFetchService(QObject):
 
     def _build_urls(self, options: Dict[str, Any]) -> List[str]:
         base_url = (options.get("baseURL") or "").strip()
-        model_list_url = (options.get("modelListUrl") or "").strip()
         urls: List[str] = []
-
-        if model_list_url:
-            if model_list_url.startswith("http://") or model_list_url.startswith(
-                "https://"
-            ):
-                urls.append(model_list_url)
-            elif base_url:
-                urls.append(base_url.rstrip("/") + "/" + model_list_url.lstrip("/"))
-            return urls
 
         if not base_url:
             return urls
@@ -6275,7 +6254,7 @@ class ProviderPage(BasePage):
         config = self.main_window.opencode_config or {}
         provider = config.get("provider", {}).get(provider_name, {})
         options = provider.get("options", {}) if isinstance(provider, dict) else {}
-        if not options.get("baseURL") and not options.get("modelListUrl"):
+        if not options.get("baseURL"):
             self.show_warning(tr("common.info"), tr("provider.no_base_url"))
             return
 
@@ -8073,20 +8052,6 @@ class ProviderDialog(BaseDialog):
         key_layout.addWidget(self.key_edit)
         layout.addLayout(key_layout)
 
-        # 模型列表地址
-        model_list_layout = QHBoxLayout()
-        model_list_label = BodyLabel(tr("provider.model_list_url") + ":", self)
-        model_list_label.setMinimumWidth(90)
-        model_list_layout.addWidget(model_list_label)
-        self.model_list_url_edit = LineEdit(self)
-        self.model_list_url_edit.setPlaceholderText(
-            tr("provider.placeholder_model_list")
-        )
-        self.model_list_url_edit.setToolTip(get_tooltip("provider_model_list_url"))
-        self.model_list_url_edit.setMinimumHeight(36)
-        model_list_layout.addWidget(self.model_list_url_edit)
-        layout.addLayout(model_list_layout)
-
         # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -8112,7 +8077,6 @@ class ProviderDialog(BaseDialog):
         options = provider.get("options", {}) if isinstance(provider, dict) else {}
         self.url_edit.setText(options.get("baseURL", ""))
         self.key_edit.setText(options.get("apiKey", ""))
-        self.model_list_url_edit.setText(options.get("modelListUrl", ""))
 
     def _on_save(self):
         name = self.name_edit.text().strip()
@@ -8142,14 +8106,13 @@ class ProviderDialog(BaseDialog):
         provider_data["options"] = {
             "baseURL": self.url_edit.text().strip(),
             "apiKey": self.key_edit.text().strip(),
-            "modelListUrl": self.model_list_url_edit.text().strip(),
         }
 
         config["provider"][name] = provider_data
         self.main_window.save_opencode_config()
 
         options = provider_data.get("options", {})
-        if options.get("baseURL") or options.get("modelListUrl"):
+        if options.get("baseURL"):
             if not hasattr(self.main_window, "_model_fetch_service"):
                 self.main_window._model_fetch_service = ModelFetchService(
                     self.main_window
