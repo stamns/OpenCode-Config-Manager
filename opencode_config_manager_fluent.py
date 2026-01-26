@@ -15399,7 +15399,10 @@ class SkillPage(BasePage):
             if skill:
                 # 弹出安装位置选择对话框
                 install_dialog = SkillInstallDialog(self)
-                install_dialog.source_edit.setText(skill["repo"])
+
+                # 显示具体的skill名称，而不是仓库名
+                skill_display_name = f"{skill['name']} (from {skill['repo']})"
+                install_dialog.source_edit.setText(skill_display_name)
                 install_dialog.source_edit.setReadOnly(True)
 
                 if install_dialog.exec_():
@@ -15416,6 +15419,9 @@ class SkillPage(BasePage):
 
                         # 自动检测分支 (main 或 master)
                         branch = SkillInstaller.detect_default_branch(owner, repo_name)
+
+                        # 更新进度提示
+                        install_dialog.update_progress(f"正在安装 {skill['name']}...")
 
                         success, message = SkillInstaller.install_from_github(
                             owner,
