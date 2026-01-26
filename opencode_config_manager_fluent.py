@@ -986,6 +986,7 @@ from PyQt5.QtWidgets import (
     QSplitter,
     QScrollArea,
     QSizePolicy,
+    QTableWidget,
     QTableWidgetItem,
     QHeaderView,
     QAbstractItemView,
