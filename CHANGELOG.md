@@ -4,6 +4,147 @@
 
 ---
 
+## [v1.6.0] - 2026-01-27 02:42
+**版本代号**: 插件管理与界面优化版
+**文档总数**: 4
+
+### 🆕 新增功能
+#### **Plugin插件管理功能** ⭐⭐⭐
+- **功能**: 完整的插件管理系统
+- **位置**: 导航菜单 → Plugin管理
+- **核心功能**:
+  - 插件安装：支持从GitHub URL安装插件
+  - 插件卸载：一键卸载已安装插件
+  - 插件市场：浏览和搜索可用插件
+  - 插件信息：查看插件详情、版本、作者
+- **文档**: [Plugin插件管理功能完成报告](docs/feature/Plugin插件管理功能完成报告.md)
+- **文件**: `opencode_config_manager_fluent.py` (新增593行)
+
+#### **配置文件查看功能** ⭐⭐
+- **功能**: 首页新增配置文件查看器
+- **核心功能**:
+  - JSON语法高亮显示
+  - 深色主题适配
+  - 跨行括号高亮
+  - 括号匹配提示
+  - 一键编辑配置文件
+- **位置**: 首页 → 配置文件查看区域
+- **文件**: `opencode_config_manager_fluent.py` (新增509行)
+
+#### **自动检测已配置的原生Provider** ⭐
+- **功能**: 自动检测系统环境变量中已配置的原生Provider
+- **检测范围**: 
+  - Anthropic (ANTHROPIC_API_KEY)
+  - OpenAI (OPENAI_API_KEY)
+  - Google (GOOGLE_API_KEY)
+  - Azure (AZURE_API_KEY)
+  - 等12个官方Provider
+- **位置**: 原生Provider页面 → "检测已配置"按钮
+- **文件**: `opencode_config_manager_fluent.py` (新增38行)
+
+### 🐛 Bug修复
+#### **翻译缺失问题** ⭐
+- **问题**: 中文模式下部分字段显示英文
+- **原因**: 
+  - Provider页面硬编码"Provider"、"SDK"
+  - 原生Provider页面硬编码"检测已配置"
+  - Rules页面硬编码"错误"、"保存失败"
+- **修复**: 
+  - 替换所有硬编码文本为tr()函数调用
+  - 添加缺失的翻译键到zh_CN.json和en_US.json
+  - 新增翻译键：common.sdk、common.provider、native_provider.provider_name、native_provider.detect_configured、rules.save_failed
+- **文档**: [原生Provider与CLI导出功能说明](docs/technical/原生Provider与CLI导出功能说明.md)
+- **文件**: `opencode_config_manager_fluent.py` (修改221行), `locales/zh_CN.json` (新增5个键), `locales/en_US.json` (新增5个键)
+
+#### **Plugin页面启动错误** ⭐
+- **问题**: 启动时报错"QTableWidget未导入"、"SearchLineEdit未导入"
+- **原因**: 新增Plugin页面时遗漏必要的PyQt5组件导入
+- **修复**: 添加QTableWidget和SearchLineEdit导入语句
+- **文件**: `opencode_config_manager_fluent.py` (新增2行)
+
+#### **macOS崩溃问题** ⭐
+- **问题**: macOS系统启动时崩溃
+- **原因**: 导航栏在窗口显示前展开导致布局错误
+- **修复**: 调整导航栏展开时机，在窗口显示后再展开
+- **文件**: `opencode_config_manager_fluent.py` (修改6行)
+
+#### **Mac安装脚本问题**
+- **问题**: 安装脚本无法适配多种目录结构
+- **原因**: 脚本假设固定的目录结构
+- **修复**: 支持多种目录结构的自动检测
+- **文件**: `install_update.sh` (修改39行)
+
+#### **配置检测问题**
+- **问题**: @ai-sdk/openai-compatible包未被识别为有效npm包
+- **原因**: 有效npm包列表不完整
+- **修复**: 添加@ai-sdk/openai-compatible到有效npm包列表
+- **文件**: `opencode_config_manager_fluent.py` (新增1行)
+
+#### **Skill市场问题** (4个修复)
+- **问题1**: Skill市场选择逻辑错误
+- **问题2**: Skill市场安装显示问题
+- **问题3**: ui-ux-pro-max skill安装问题
+- **问题4**: Skill管理的4个问题
+- **修复**: 修复选择逻辑、安装显示、特定skill安装、管理功能
+- **文件**: `opencode_config_manager_fluent.py` (修改29行)
+
+#### **智谱GLM配置问题**
+- **问题**: 智谱GLM配置包含非标准modelListUrl字段
+- **原因**: 早期版本遗留的非标准字段
+- **修复**: 移除非标准modelListUrl字段，修复智谱GLM配置
+- **文件**: `opencode_config_manager_fluent.py` (删除40行)
+
+### 🎨 UI优化
+#### **Oh My OpenCode管理界面优化** ⭐
+- **优化**: 使用标签页切换Agent和Category
+- **改进**: 
+  - 采用Pivot标签页组件
+  - Agent和Category分页显示
+  - 界面更清晰直观
+- **文件**: `opencode_config_manager_fluent.py` (新增228行，删除75行)
+
+#### **导航菜单精简** ⭐
+- **优化**: 精简导航菜单，合并相关功能页面
+- **改进**: 
+  - 减少菜单项数量
+  - 合并相关功能
+  - 提升导航效率
+- **文件**: `opencode_config_manager_fluent.py` (新增565行，删除39行)
+
+#### **配置查看器优化**
+- **优化**: 深色主题、跨行括号高亮、括号匹配、编辑按钮
+- **改进**: 
+  - 深色主题适配
+  - 跨行括号高亮显示
+  - 括号匹配提示
+  - 一键编辑按钮
+- **文件**: `opencode_config_manager_fluent.py` (新增206行，删除30行)
+
+### 📚 文档更新
+- [Plugin插件管理功能完成报告](docs/feature/Plugin插件管理功能完成报告.md) ⭐
+- [OpenCode插件系统技术设计文档](docs/technical/OpenCode插件系统技术设计文档.md) ⭐
+- [原生Provider与CLI导出功能说明](docs/technical/原生Provider与CLI导出功能说明.md) ⭐
+- [Provider页面合并实施方案](docs/technical/Provider-merge-plan.md) (未完成)
+
+### 🔧 技术实现
+- **Plugin管理系统**: 完整的插件安装、卸载、市场功能
+- **配置文件查看器**: JSON语法高亮、深色主题、括号匹配
+- **原生Provider检测**: 环境变量自动检测
+- **翻译系统完善**: 补充缺失的翻译键
+- **UI组件优化**: Pivot标签页、导航菜单精简
+
+### 📁 文件变更
+- 更新：`opencode_config_manager_fluent.py` (新增2,390行，删除253行)
+- 更新：`locales/zh_CN.json` (新增5个翻译键)
+- 更新：`locales/en_US.json` (新增5个翻译键)
+- 更新：`install_update.sh` (修改39行)
+- 新增：`docs/feature/Plugin插件管理功能完成报告.md` (323行)
+- 新增：`docs/technical/OpenCode插件系统技术设计文档.md` (449行)
+- 新增：`docs/technical/原生Provider与CLI导出功能说明.md` (357行)
+- 新增：`docs/technical/Provider-merge-plan.md` (未完成)
+
+---
+
 ## [v1.5.0] - 2026-01-24 00:52
 **版本代号**: 多语言支持版
 

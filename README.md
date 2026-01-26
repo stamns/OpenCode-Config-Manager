@@ -42,21 +42,62 @@
 
 ---
 
-## 🎯 v1.5.0 Latest Version
+## 🎯 v1.6.0 Latest Version
 
-### 🌐 New Features
+### 🆕 New Features
+#### **Plugin Management System** ⭐⭐⭐
+- **Complete Plugin Management**:
+  - Install plugins from GitHub URL
+  - One-click uninstall installed plugins
+  - Browse and search plugin marketplace
+  - View plugin details, version, and author
+- **Technical Implementation**:
+  - GitHub API integration for plugin information
+  - JSON-based plugin metadata management
+  - Fuzzy search for plugin name, description, and author
+
+#### **Config File Viewer** ⭐⭐
+- **Visual Config Viewer**:
+  - JSON syntax highlighting
+  - Dark theme adaptation
+  - Cross-line bracket highlighting
+  - Bracket matching hints
+  - One-click edit config files
+- **Location**: Home page → Config file viewer area
+
+#### **Auto-Detect Native Providers** ⭐
+- **Environment Variable Detection**:
+  - Auto-detect 12 official providers (Anthropic, OpenAI, Google, Azure, etc.)
+  - One-click detection via "Detect Configured" button
+  - Display detection results in table format
+- **Location**: Native Provider page → "Detect Configured" button
+
+### 🐛 Bug Fixes
+- **Translation Issues** - Fixed hard-coded English text in Chinese mode
+  - Added missing translation keys (common.sdk, common.provider, etc.)
+  - Replaced all hard-coded text with tr() function calls
+- **Plugin Page Startup Errors** - Fixed missing QTableWidget and SearchLineEdit imports
+- **macOS Crash Issue** - Fixed navigation bar expand timing issue
+- **Mac Install Script** - Support multiple directory structures
+- **Config Detection** - Added @ai-sdk/openai-compatible to valid npm package list
+- **Skill Marketplace Issues** - Fixed 4 issues (selection logic, install display, etc.)
+- **Zhipu GLM Config** - Removed non-standard modelListUrl field
+
+### 🎨 UI Improvements
+- **Oh My OpenCode Interface** - Use Pivot tabs to switch between Agent and Category
+- **Navigation Menu Simplification** - Merged related function pages, reduced menu items
+- **Config Viewer Optimization** - Dark theme, cross-line bracket highlighting, bracket matching
+
+---
+
+### 📝 v1.5.0 Feature Recap
+
 #### **Complete Multi-Language Support** ⭐⭐⭐
 - **Bilingual Support**:
   - Simplified Chinese (zh_CN)
   - English (en_US)
   - Auto-detect system language
   - **Dynamic Language Switching**: Switch instantly without restart
-
-- **Translation Coverage**:
-  - 15 main pages (fully translated)
-  - 17 dialogs (fully translated)
-  - 400+ tr() function calls
-  - 900+ translation key-value pairs
 
 #### **Chinese AI Platform Support** ⭐
 - **5 New Chinese Platforms**:
@@ -65,24 +106,6 @@
   - Kimi (Moonshot) (moonshot-v1-8k, moonshot-v1-32k, etc.)
   - Yi (01.AI) (yi-lightning, yi-large, etc.)
   - MiniMax (abab6.5s-chat, abab6.5g-chat, etc.)
-- **Technical Implementation**:
-  - All platforms use OpenAI-compatible SDK
-  - Support environment variable auto-detection
-  - Preset common models for quick selection
-
-### 🐛 Bug Fixes
-- **Fixed Win10 Startup Error** - `'bool' object has no attribute 'get'`
-  - Added config type checking in all pages
-  - Prevent crashes from config file format errors
-- **Fixed Language Switch Page Misalignment** - Removed forced redraw logic to avoid layout issues
-- **Fixed GitHub API Rate Limit** - Added cooldown mechanism (default 1 hour), extended to 6 hours on 403 errors
-- **Fixed Skill Marketplace** - Removed uninstallable ComposioHQ Skills, kept 12 available Skills
-
-### 🎨 UI Improvements
-- **Navigation Bar Width** - Set to 200px, fits Chinese/English menus
-- **Language Switch Button** - Moved to navigation bar bottom
-- **Menu Expanded by Default** - No need to manually click
-- **Window Height Increased** - From 820px to 870px
 
 ---
 
@@ -291,6 +314,13 @@ According to [OpenCode Official Documentation](https://opencode.ai/docs/models/)
 ## 📋 Version History
 
 ### Latest Release
+
+**[v1.6.0](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/tag/v1.6.0)** - 2026-01-27
+- 🔌 Plugin Management System - Complete plugin install/uninstall/marketplace functionality
+- 📄 Config File Viewer - JSON syntax highlighting, dark theme, bracket matching
+- 🔍 Auto-Detect Native Providers - Environment variable detection for 12 official providers
+- 🐛 Bug Fixes - Fixed translation issues, Plugin page startup errors, macOS crash
+- 🎨 UI Improvements - Pivot tabs for Oh My OpenCode, navigation menu simplification
 
 **[v1.5.0](https://github.com/icysaintdx/OpenCode-Config-Manager/releases/tag/v1.5.0)** - 2026-01-24
 - 🌐 Multi-Language Support - Simplified Chinese + English, dynamic switching without restart

@@ -8,6 +8,148 @@ All version update records.
 
 ---
 
+## [v1.6.0] - 2026-01-27 02:42
+**Version Codename**: Plugin Management & UI Optimization
+
+### 🆕 New Features
+#### **Plugin Management System** ⭐⭐⭐
+- **Complete Plugin Management**:
+  - Install plugins from GitHub URL
+  - One-click uninstall installed plugins
+  - Browse and search plugin marketplace
+  - View plugin details, version, and author
+- **Technical Implementation**:
+  - GitHub API integration for plugin information
+  - JSON-based plugin metadata management
+  - Fuzzy search for plugin name, description, and author
+- **Location**: Navigation menu → Plugin Management
+- **Files**: `opencode_config_manager_fluent.py` (+593 lines)
+
+#### **Config File Viewer** ⭐⭐
+- **Visual Config Viewer**:
+  - JSON syntax highlighting
+  - Dark theme adaptation
+  - Cross-line bracket highlighting
+  - Bracket matching hints
+  - One-click edit config files
+- **Location**: Home page → Config file viewer area
+- **Files**: `opencode_config_manager_fluent.py` (+509 lines)
+
+#### **Auto-Detect Native Providers** ⭐
+- **Environment Variable Detection**:
+  - Auto-detect 12 official providers (Anthropic, OpenAI, Google, Azure, etc.)
+  - One-click detection via "Detect Configured" button
+  - Display detection results in table format
+- **Location**: Native Provider page → "Detect Configured" button
+- **Files**: `opencode_config_manager_fluent.py` (+38 lines)
+
+### 🐛 Bug Fixes
+#### **Translation Issues** ⭐
+- **Problem**: Hard-coded English text in Chinese mode
+- **Root Cause**: 
+  - Provider page hard-coded "Provider", "SDK"
+  - Native Provider page hard-coded "检测已配置"
+  - Rules page hard-coded "错误", "保存失败"
+- **Fix**: 
+  - Replaced all hard-coded text with tr() function calls
+  - Added missing translation keys to zh_CN.json and en_US.json
+  - New keys: common.sdk, common.provider, native_provider.provider_name, native_provider.detect_configured, rules.save_failed
+- **Files**: `opencode_config_manager_fluent.py` (221 lines modified), `locales/zh_CN.json` (+5 keys), `locales/en_US.json` (+5 keys)
+
+#### **Plugin Page Startup Errors** ⭐
+- **Problem**: Startup error "QTableWidget not imported", "SearchLineEdit not imported"
+- **Root Cause**: Missing necessary PyQt5 component imports when adding Plugin page
+- **Fix**: Added QTableWidget and SearchLineEdit import statements
+- **Files**: `opencode_config_manager_fluent.py` (+2 lines)
+
+#### **macOS Crash Issue** ⭐
+- **Problem**: macOS system crashes on startup
+- **Root Cause**: Navigation bar expanded before window display causing layout errors
+- **Fix**: Adjusted navigation bar expand timing, expand after window display
+- **Files**: `opencode_config_manager_fluent.py` (6 lines modified)
+
+#### **Mac Install Script Issue**
+- **Problem**: Install script cannot adapt to multiple directory structures
+- **Root Cause**: Script assumes fixed directory structure
+- **Fix**: Support automatic detection of multiple directory structures
+- **Files**: `install_update.sh` (39 lines modified)
+
+#### **Config Detection Issue**
+- **Problem**: @ai-sdk/openai-compatible package not recognized as valid npm package
+- **Root Cause**: Incomplete valid npm package list
+- **Fix**: Added @ai-sdk/openai-compatible to valid npm package list
+- **Files**: `opencode_config_manager_fluent.py` (+1 line)
+
+#### **Skill Marketplace Issues** (4 fixes)
+- **Problem 1**: Skill marketplace selection logic error
+- **Problem 2**: Skill marketplace install display issue
+- **Problem 3**: ui-ux-pro-max skill install issue
+- **Problem 4**: 4 issues in Skill management
+- **Fix**: Fixed selection logic, install display, specific skill install, management functions
+- **Files**: `opencode_config_manager_fluent.py` (29 lines modified)
+
+#### **Zhipu GLM Config Issue**
+- **Problem**: Zhipu GLM config contains non-standard modelListUrl field
+- **Root Cause**: Legacy non-standard field from early version
+- **Fix**: Removed non-standard modelListUrl field, fixed Zhipu GLM config
+- **Files**: `opencode_config_manager_fluent.py` (-40 lines)
+
+#### **MiniMax Config Update**
+- **Problem**: MiniMax config does not support Coding Plan endpoint
+- **Fix**: Updated MiniMax config to support Coding Plan endpoint
+- **Files**: `opencode_config_manager_fluent.py` (9 lines modified)
+
+### 🎨 UI Improvements
+#### **Oh My OpenCode Interface Optimization** ⭐
+- **Optimization**: Use Pivot tabs to switch between Agent and Category
+- **Improvements**: 
+  - Adopted Pivot tab component
+  - Agent and Category displayed in separate pages
+  - Interface more clear and intuitive
+- **Files**: `opencode_config_manager_fluent.py` (+228 lines, -75 lines)
+
+#### **Navigation Menu Simplification** ⭐
+- **Optimization**: Simplified navigation menu, merged related function pages
+- **Improvements**: 
+  - Reduced menu item count
+  - Merged related functions
+  - Improved navigation efficiency
+- **Files**: `opencode_config_manager_fluent.py` (+565 lines, -39 lines)
+
+#### **Config Viewer Optimization**
+- **Optimization**: Dark theme, cross-line bracket highlighting, bracket matching, edit button
+- **Improvements**: 
+  - Dark theme adaptation
+  - Cross-line bracket highlighting display
+  - Bracket matching hints
+  - One-click edit button
+- **Files**: `opencode_config_manager_fluent.py` (+206 lines, -30 lines)
+
+### 📚 Documentation Updates
+- [Plugin Management Feature Completion Report](docs/feature/Plugin插件管理功能完成报告.md) ⭐
+- [OpenCode Plugin System Technical Design Document](docs/technical/OpenCode插件系统技术设计文档.md) ⭐
+- [Native Provider & CLI Export Feature Description](docs/technical/原生Provider与CLI导出功能说明.md) ⭐
+- [Provider Page Merge Implementation Plan](docs/technical/Provider-merge-plan.md) (Incomplete)
+
+### 🔧 Technical Implementation
+- **Plugin Management System**: Complete plugin install, uninstall, marketplace functionality
+- **Config File Viewer**: JSON syntax highlighting, dark theme, bracket matching
+- **Native Provider Detection**: Environment variable auto-detection
+- **Translation System Improvement**: Supplemented missing translation keys
+- **UI Component Optimization**: Pivot tabs, navigation menu simplification
+
+### 📁 File Changes
+- Updated: `opencode_config_manager_fluent.py` (+2,390 lines, -253 lines)
+- Updated: `locales/zh_CN.json` (+5 translation keys)
+- Updated: `locales/en_US.json` (+5 translation keys)
+- Updated: `install_update.sh` (39 lines modified)
+- Added: `docs/feature/Plugin插件管理功能完成报告.md` (323 lines)
+- Added: `docs/technical/OpenCode插件系统技术设计文档.md` (449 lines)
+- Added: `docs/technical/原生Provider与CLI导出功能说明.md` (357 lines)
+- Added: `docs/technical/Provider-merge-plan.md` (Incomplete)
+
+---
+
 ## [v1.4.0] - 2026-01-20 18:00
 **Version Codename**: Skill Marketplace & Security Scanning
 
