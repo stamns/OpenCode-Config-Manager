@@ -12807,15 +12807,15 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.home_page, FIF.HOME, tr("menu.home"))
 
         # ===== OpenCode 配置分组 =====
-        # Provider 页面
+        # Provider 页面（已合并自定义和原生Provider）
         self.provider_page = ProviderPage(self)
         self.addSubInterface(self.provider_page, FIF.PEOPLE, tr("menu.provider"))
 
-        # 原生 Provider 页面
-        self.native_provider_page = NativeProviderPage(self)
-        self.addSubInterface(
-            self.native_provider_page, FIF.GLOBE, tr("menu.native_provider")
-        )
+        # 原生 Provider 页面（已合并到 Provider 页面）
+        # self.native_provider_page = NativeProviderPage(self)
+        # self.addSubInterface(
+        #     self.native_provider_page, FIF.GLOBE, tr("menu.native_provider")
+        # )
 
         # Model 页面
         self.model_page = ModelPage(self)
