@@ -3154,6 +3154,10 @@ class ConfigManager:
                     # 跳过到行尾
                     while i < len(content) and content[i] != "\n":
                         i += 1
+                    # 保留换行符（如果存在）
+                    if i < len(content) and content[i] == "\n":
+                        result.append("\n")
+                        i += 1
                     continue
 
                 # 检测多行注释 /* */
@@ -3187,10 +3191,21 @@ class ConfigManager:
                 # 尝试直接解析 JSON
                 try:
                     return json.loads(content)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e1:
                     # 如果失败，尝试移除注释后再解析 (JSONC)
-                    stripped_content = ConfigManager.strip_jsonc_comments(content)
-                    return json.loads(stripped_content)
+                    try:
+                        stripped_content = ConfigManager.strip_jsonc_comments(content)
+                        return json.loads(stripped_content)
+                    except json.JSONDecodeError as e2:
+                        # 详细记录解析失败原因
+                        print(f"Load failed {path}:")
+                        print(f"  - 标准JSON解析失败: {e1}")
+                        print(f"  - JSONC解析失败: {e2}")
+                        print(f"  - 文件大小: {len(content)} 字节")
+                        # 打印前200个字符用于调试
+                        preview = content[:200].replace("\n", "\\n")
+                        print(f"  - 文件预览: {preview}...")
+                        return None
         except Exception as e:
             print(f"Load failed {path}: {e}")
         return None
