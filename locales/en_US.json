@@ -139,6 +139,8 @@
   },
   "provider": {
     "title": "Provider Management",
+    "custom_provider": "Custom Provider",
+    "native_provider": "Native Provider",
     "add_provider": "Add Provider",
     "edit_provider": "Edit Provider",
     "delete_provider": "Delete Provider",

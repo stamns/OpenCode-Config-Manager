@@ -139,6 +139,8 @@
   },
   "provider": {
     "title": "Provider 管理",
+    "custom_provider": "自定义 Provider",
+    "native_provider": "原生 Provider",
     "add_provider": "添加 Provider",
     "edit_provider": "编辑 Provider",
     "delete_provider": "删除 Provider",
