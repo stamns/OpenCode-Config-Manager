@@ -12890,6 +12890,7 @@ class AgentGroupEditDialog(QDialog):
 
         # Agent配置 - 使用Pivot标签页
         agent_pivot = Pivot(self)
+        agent_pivot.setFixedHeight(40)  # 设置固定高度，使标签页更明显
         agent_pivot.addItem(
             routeKey="opencode",
             text=tr("agent_group.edit.opencode_agents"),
@@ -12901,6 +12902,12 @@ class AgentGroupEditDialog(QDialog):
             onClick=lambda: agent_stacked.setCurrentIndex(1),
         )
         layout.addWidget(agent_pivot)
+
+        # 添加分隔线，使标签页和内容区域更明显
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
 
         # 标签页内容容器（使用滚动区域包裹表格）
         agent_stacked = QStackedWidget()
@@ -13003,14 +13010,7 @@ class AgentGroupEditDialog(QDialog):
         for i, agent_id in enumerate(opencode_agents):
             # 启用复选框
             check_item = QTableWidgetItem()
-            # build是必选Agent
-            if agent_id == "build":
-                check_item.setCheckState(Qt.Checked)
-                check_item.setFlags(
-                    check_item.flags() & ~Qt.ItemIsUserCheckable
-                )  # 不可修改
-            else:
-                check_item.setCheckState(Qt.Unchecked)
+            check_item.setCheckState(Qt.Unchecked)
             self.opencode_table.setItem(i, 0, check_item)
 
             # Agent ID
@@ -13051,14 +13051,7 @@ class AgentGroupEditDialog(QDialog):
         for i, agent_id in enumerate(omo_agents):
             # 启用复选框
             check_item = QTableWidgetItem()
-            # sisyphus-junior是必选Agent
-            if agent_id == "sisyphus-junior":
-                check_item.setCheckState(Qt.Checked)
-                check_item.setFlags(
-                    check_item.flags() & ~Qt.ItemIsUserCheckable
-                )  # 不可修改
-            else:
-                check_item.setCheckState(Qt.Unchecked)
+            check_item.setCheckState(Qt.Unchecked)
             self.omo_table.setItem(i, 0, check_item)
 
             # Agent ID
