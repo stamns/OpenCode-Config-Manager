@@ -6594,8 +6594,9 @@ class ProviderPage(BasePage):
         return result
 
     def _on_config_changed(self):
-        """配置变更时刷新数据"""
-        self._load_data()
+        """配置变更时刷新两个标签页的数据"""
+        self._load_custom_data()
+        self._load_native_data()
 
     def _setup_ui(self):
         """初始化UI - 使用Pivot标签页"""
@@ -6626,6 +6627,157 @@ class ProviderPage(BasePage):
             self.stack.setCurrentIndex(0)
         else:
             self.stack.setCurrentIndex(1)
+
+    def _create_custom_provider_widget(self) -> QWidget:
+        """创建自定义Provider管理部件"""
+        widget = QWidget(self)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
+        # 工具栏
+        toolbar = QHBoxLayout()
+
+        self.custom_add_btn = PrimaryPushButton(
+            FIF.ADD, tr("provider.add_provider"), widget
+        )
+        self.custom_add_btn.clicked.connect(self._on_custom_add)
+        toolbar.addWidget(self.custom_add_btn)
+
+        self.custom_edit_btn = PushButton(FIF.EDIT, tr("common.edit"), widget)
+        self.custom_edit_btn.clicked.connect(self._on_custom_edit)
+        toolbar.addWidget(self.custom_edit_btn)
+
+        self.custom_delete_btn = PushButton(FIF.DELETE, tr("common.delete"), widget)
+        self.custom_delete_btn.clicked.connect(self._on_custom_delete)
+        toolbar.addWidget(self.custom_delete_btn)
+
+        self.custom_fetch_models_btn = PushButton(
+            FIF.SYNC, tr("provider.fetch_models"), widget
+        )
+        self.custom_fetch_models_btn.clicked.connect(self._on_custom_fetch_models)
+        toolbar.addWidget(self.custom_fetch_models_btn)
+
+        self.custom_export_cli_btn = PushButton(
+            FIF.SEND, tr("provider.export_to_cli"), widget
+        )
+        self.custom_export_cli_btn.clicked.connect(self._on_custom_export_to_cli)
+        toolbar.addWidget(self.custom_export_cli_btn)
+
+        self.custom_query_balance_btn = PushButton(
+            FIF.MARKET, tr("provider.query_balance"), widget
+        )
+        self.custom_query_balance_btn.clicked.connect(self._on_custom_query_balance)
+        toolbar.addWidget(self.custom_query_balance_btn)
+
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # Provider 列表表格
+        self.custom_table = TableWidget(widget)
+        self.custom_table.setColumnCount(5)
+        self.custom_table.setHorizontalHeaderLabels(
+            [
+                tr("common.name"),
+                tr("provider.display_name"),
+                tr("provider.sdk_type"),
+                tr("provider.api_address"),
+                tr("provider.model_count"),
+            ]
+        )
+
+        # 表格配置
+        header = self.custom_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.resizeSection(0, 120)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.resizeSection(2, 180)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        header.resizeSection(4, 60)
+
+        self.custom_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.custom_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.custom_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.custom_table.doubleClicked.connect(self._on_custom_edit)
+
+        layout.addWidget(self.custom_table)
+
+        return widget
+
+    def _create_native_provider_widget(self) -> QWidget:
+        """创建原生Provider管理部件"""
+        widget = QWidget(self)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
+        # 工具栏
+        toolbar = QHBoxLayout()
+
+        self.native_config_btn = PrimaryPushButton(
+            FIF.SETTING, tr("native_provider.config_provider"), widget
+        )
+        self.native_config_btn.clicked.connect(self._on_native_config)
+        toolbar.addWidget(self.native_config_btn)
+
+        self.native_detect_btn = PushButton(
+            FIF.SEARCH, tr("native_provider.detect_configured"), widget
+        )
+        self.native_detect_btn.clicked.connect(self._on_native_detect_configured)
+        toolbar.addWidget(self.native_detect_btn)
+
+        self.native_test_btn = PushButton(
+            FIF.WIFI, tr("native_provider.test_connection"), widget
+        )
+        self.native_test_btn.clicked.connect(self._on_native_test)
+        toolbar.addWidget(self.native_test_btn)
+
+        self.native_delete_btn = PushButton(
+            FIF.DELETE, tr("native_provider.delete_config"), widget
+        )
+        self.native_delete_btn.clicked.connect(self._on_native_delete)
+        toolbar.addWidget(self.native_delete_btn)
+
+        self.native_query_balance_btn = PushButton(
+            FIF.MARKET, tr("provider.query_balance"), widget
+        )
+        self.native_query_balance_btn.clicked.connect(self._on_native_query_balance)
+        toolbar.addWidget(self.native_query_balance_btn)
+
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # Provider 列表表格
+        self.native_table = TableWidget(widget)
+        self.native_table.setColumnCount(4)
+        self.native_table.setHorizontalHeaderLabels(
+            [
+                tr("native_provider.provider_name"),
+                tr("provider.sdk_type"),
+                tr("native_provider.status"),
+                tr("native_provider.env_vars"),
+            ]
+        )
+
+        # 表格配置
+        header = self.native_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.resizeSection(0, 160)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.resizeSection(2, 80)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+
+        self.native_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.native_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.native_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.native_table.doubleClicked.connect(self._on_native_config)
+
+        layout.addWidget(self.native_table)
+
+        return widget
 
     def _load_data(self):
         """加载 Provider 数据"""
