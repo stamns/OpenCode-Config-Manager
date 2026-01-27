@@ -4,6 +4,55 @@
 
 ---
 
+## [v1.7.0] - 2026-01-28
+**版本代号**: Provider配置标准化版
+
+### 🆕 新增功能
+#### **Provider配置标准化** ⭐⭐⭐
+- **auth.json格式修正**:
+  - 修正AuthManager auth.json格式，符合OpenCode官方标准
+  - 官方格式: `{"provider": {"type": "api", "key": "xxx"}}`
+  - 旧格式: `{"provider": {"apiKey": "xxx"}}` ❌
+  - 新增 `type` 字段，修正字段名 `apiKey` → `key`
+- **Provider命名修正**:
+  - 智谱AI: `zhipu` → `zhipuai` + `zhipuai-coding-plan` (两个独立Provider)
+  - GitHub Copilot: `copilot` → `github-copilot`
+  - Google Vertex AI: `vertexai` → `google-vertex`
+  - Moonshot AI: `kimi` → `moonshot`
+- **新增Z.AI Provider支持**:
+  - 新增 `zai` Provider (常规版本)
+  - 新增 `zai-coding-plan` Provider (Coding Plan版本)
+  - API端点: `https://api.z.ai/api/paas/v4` 和 `https://api.z.ai/api/coding/paas/v4`
+- **首页新增auth.json路径显示**:
+  - 显示auth.json文件路径
+  - 支持查看和复制按钮
+- **更新环境变量检测器**:
+  - 更新所有重命名Provider的环境变量映射
+  - 支持新增Provider的环境变量检测
+
+### 📊 统计数据
+- **修正Provider数量**: 7个 (zhipu, copilot, vertexai, kimi + 3个新增)
+- **新增Provider数量**: 4个 (zhipuai, zai, zai-coding-plan, zhipuai-coding-plan)
+- **支持Provider总数**: 23个 (12个国际 + 11个中国)
+
+### 📝 技术文档
+- 新增5篇技术文档:
+  - `Provider配置验证结果.md` - 完整验证报告
+  - `Provider配置修正完成报告.md` - 详细修正报告
+  - `Provider修正计划.md` - 修正任务清单
+  - `所有Provider命名验证.md` - Provider命名验证
+  - `原生Provider配置调研报告.md` - 原始调研文档
+
+### 🔧 技术细节
+- **API端点差异**:
+  - 智谱常规版: `https://open.bigmodel.cn/api/paas/v4`
+  - 智谱Coding Plan: `https://open.bigmodel.cn/api/coding/paas/v4` (注意 `/coding/` 路径)
+  - Z.AI常规版: `https://api.z.ai/api/paas/v4`
+  - Z.AI Coding Plan: `https://api.z.ai/api/coding/paas/v4`
+- **环境变量统一**: 所有智谱和Z.AI Provider使用 `ZHIPU_API_KEY` 环境变量
+
+---
+
 ## [v1.6.0] - 2026-01-27 02:42
 **版本代号**: 插件管理与界面优化版
 **文档总数**: 4

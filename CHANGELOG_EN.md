@@ -8,6 +8,55 @@ All version update records.
 
 ---
 
+## [v1.7.0] - 2026-01-28
+**Version Codename**: Provider Configuration Standardization
+
+### 🆕 New Features
+#### **Provider Configuration Standardization** ⭐⭐⭐
+- **auth.json Format Fix**:
+  - Fixed AuthManager auth.json format to comply with OpenCode official standard
+  - Official format: `{"provider": {"type": "api", "key": "xxx"}}`
+  - Old format: `{"provider": {"apiKey": "xxx"}}` ❌
+  - Added `type` field, fixed field name `apiKey` → `key`
+- **Provider Naming Fixes**:
+  - Zhipu AI: `zhipu` → `zhipuai` + `zhipuai-coding-plan` (two separate providers)
+  - GitHub Copilot: `copilot` → `github-copilot`
+  - Google Vertex AI: `vertexai` → `google-vertex`
+  - Moonshot AI: `kimi` → `moonshot`
+- **Added Z.AI Provider Support**:
+  - Added `zai` Provider (regular version)
+  - Added `zai-coding-plan` Provider (Coding Plan version)
+  - API endpoints: `https://api.z.ai/api/paas/v4` and `https://api.z.ai/api/coding/paas/v4`
+- **Added auth.json Path Display on Home Page**:
+  - Display auth.json file path
+  - Support view and copy buttons
+- **Updated Environment Variable Detector**:
+  - Updated environment variable mappings for all renamed providers
+  - Support environment variable detection for new providers
+
+### 📊 Statistics
+- **Fixed Providers**: 7 (zhipu, copilot, vertexai, kimi + 3 new additions)
+- **New Providers**: 4 (zhipuai, zai, zai-coding-plan, zhipuai-coding-plan)
+- **Total Providers Supported**: 23 (12 international + 11 Chinese)
+
+### 📝 Technical Documentation
+- Added 5 technical documents:
+  - `Provider配置验证结果.md` - Complete verification report
+  - `Provider配置修正完成报告.md` - Detailed fix report
+  - `Provider修正计划.md` - Fix task list
+  - `所有Provider命名验证.md` - Provider naming verification
+  - `原生Provider配置调研报告.md` - Original research document
+
+### 🔧 Technical Details
+- **API Endpoint Differences**:
+  - Zhipu Regular: `https://open.bigmodel.cn/api/paas/v4`
+  - Zhipu Coding Plan: `https://open.bigmodel.cn/api/coding/paas/v4` (note `/coding/` path)
+  - Z.AI Regular: `https://api.z.ai/api/paas/v4`
+  - Z.AI Coding Plan: `https://api.z.ai/api/coding/paas/v4`
+- **Unified Environment Variable**: All Zhipu and Z.AI providers use `ZHIPU_API_KEY` environment variable
+
+---
+
 ## [v1.6.0] - 2026-01-27 02:42
 **Version Codename**: Plugin Management & UI Optimization
 

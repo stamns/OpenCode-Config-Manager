@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OpenCode & Oh My OpenCode 配置管理器 v1.2.0 (QFluentWidgets 版本)
+OpenCode & Oh My OpenCode 配置管理器 v1.7.0 (QFluentWidgets 版本)
 一个可视化的GUI工具，用于管理OpenCode和Oh My OpenCode的配置文件
 
 基于 PyQt5 + QFluentWidgets 重写，提供现代化 Fluent Design 界面
@@ -413,9 +413,20 @@ class AuthManager:
 
         Returns:
             Provider 的认证配置字典，不存在时返回 None
+            返回格式兼容旧格式：{'apiKey': 'xxx'} 用于UI显示
         """
         auth_data = self.read_auth()
-        return auth_data.get(provider_id)
+        provider_auth = auth_data.get(provider_id)
+
+        if not provider_auth:
+            return None
+
+        # 如果是新格式 {"type": "api", "key": "xxx"}，转换为UI兼容格式
+        if "key" in provider_auth and "type" in provider_auth:
+            return {"apiKey": provider_auth["key"], "type": provider_auth["type"]}
+
+        # 保持原格式（用于特殊Provider或旧数据）
+        return provider_auth
 
     def set_provider_auth(self, provider_id: str, auth_config: Dict[str, Any]) -> None:
         """设置指定 Provider 的认证信息
@@ -425,7 +436,18 @@ class AuthManager:
             auth_config: 认证配置字典（如 {'apiKey': 'sk-xxx'}）
         """
         auth_data = self.read_auth()
-        auth_data[provider_id] = auth_config
+
+        # 转换为OpenCode官方格式：{"type": "api", "key": "xxx"}
+        # 支持输入格式：{'apiKey': 'xxx'} 或 {'key': 'xxx'}
+        api_key = auth_config.get("apiKey") or auth_config.get("key")
+        auth_type = auth_config.get("type", "api")  # 默认为api类型
+
+        if api_key:
+            auth_data[provider_id] = {"type": auth_type, "key": api_key}
+        else:
+            # 如果没有apiKey/key字段，保持原样（用于特殊Provider如AWS）
+            auth_data[provider_id] = auth_config
+
         self.write_auth(auth_data)
 
     def delete_provider_auth(self, provider_id: str) -> bool:
@@ -582,7 +604,7 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
         test_endpoint=None,
     ),
     NativeProviderConfig(
-        id="copilot",
+        id="github-copilot",
         name="GitHub Copilot",
         sdk="@ai-sdk/openai",
         auth_fields=[
@@ -634,7 +656,7 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
         test_endpoint="/models",
     ),
     NativeProviderConfig(
-        id="vertexai",
+        id="google-vertex",
         name="Google Vertex AI",
         sdk="@ai-sdk/google-vertex",
         auth_fields=[
@@ -671,8 +693,27 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
         test_endpoint="/models",
     ),
     NativeProviderConfig(
-        id="zhipu",
-        name="智谱 GLM",
+        id="zhipuai",
+        name="Zhipu AI (智谱GLM)",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField(
+                "baseURL",
+                "Base URL",
+                "text",
+                [],
+                "https://open.bigmodel.cn/api/paas/v4",
+            ),
+        ],
+        env_vars=["ZHIPU_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="zhipuai-coding-plan",
+        name="Zhipu AI Coding Plan (智谱GLM编码套餐)",
         sdk="@ai-sdk/openai-compatible",
         auth_fields=[
             AuthField("apiKey", "API Key", "password", True, ""),
@@ -684,6 +725,44 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
                 "text",
                 [],
                 "https://open.bigmodel.cn/api/coding/paas/v4",
+            ),
+        ],
+        env_vars=["ZHIPU_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="zai",
+        name="Z.AI",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField(
+                "baseURL",
+                "Base URL",
+                "text",
+                [],
+                "https://api.z.ai/api/paas/v4",
+            ),
+        ],
+        env_vars=["ZHIPU_API_KEY"],
+        test_endpoint="/models",
+    ),
+    NativeProviderConfig(
+        id="zai-coding-plan",
+        name="Z.AI Coding Plan",
+        sdk="@ai-sdk/openai-compatible",
+        auth_fields=[
+            AuthField("apiKey", "API Key", "password", True, ""),
+        ],
+        option_fields=[
+            OptionField(
+                "baseURL",
+                "Base URL",
+                "text",
+                [],
+                "https://api.z.ai/api/coding/paas/v4",
             ),
         ],
         env_vars=["ZHIPU_API_KEY"],
@@ -709,8 +788,8 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
         test_endpoint="/models",
     ),
     NativeProviderConfig(
-        id="kimi",
-        name="Kimi (月之暗面)",
+        id="moonshot",
+        name="Moonshot AI (Kimi)",
         sdk="@ai-sdk/openai-compatible",
         auth_fields=[
             AuthField("apiKey", "API Key", "password", True, ""),
@@ -720,7 +799,7 @@ NATIVE_PROVIDERS: List[NativeProviderConfig] = [
                 "baseURL", "Base URL", "text", [], "https://api.moonshot.cn/v1"
             ),
         ],
-        env_vars=["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        env_vars=["MOONSHOT_API_KEY"],
         test_endpoint="/models",
     ),
     NativeProviderConfig(
@@ -805,15 +884,18 @@ class EnvVarDetector:
         "xai": ["XAI_API_KEY"],
         "groq": ["GROQ_API_KEY"],
         "openrouter": ["OPENROUTER_API_KEY"],
-        "vertexai": [
+        "google-vertex": [
             "GOOGLE_APPLICATION_CREDENTIALS",
             "GOOGLE_CLOUD_PROJECT",
             "VERTEX_LOCATION",
         ],
         "deepseek": ["DEEPSEEK_API_KEY"],
-        "zhipu": ["ZHIPU_API_KEY"],
+        "zhipuai": ["ZHIPU_API_KEY"],
+        "zhipuai-coding-plan": ["ZHIPU_API_KEY"],
+        "zai": ["ZHIPU_API_KEY"],
+        "zai-coding-plan": ["ZHIPU_API_KEY"],
         "qwen": ["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
-        "kimi": ["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "moonshot": ["MOONSHOT_API_KEY"],
         "yi": ["YI_API_KEY"],
         "minimax": ["MINIMAX_API_KEY"],
     }
@@ -5844,6 +5926,30 @@ class HomePage(BasePage):
         ohmy_layout.addWidget(self.ohmy_reset_btn)
 
         paths_layout.addLayout(ohmy_layout)
+
+        # Auth 文件路径
+        auth_layout = QHBoxLayout()
+        auth_layout.addWidget(create_path_label("Auth File:"))
+        auth_manager = AuthManager()
+        self.auth_path_label = CaptionLabel(str(auth_manager.auth_path), paths_card)
+        self.auth_path_label.setToolTip(str(auth_manager.auth_path))
+        auth_layout.addWidget(self.auth_path_label, 1)
+
+        auth_view_btn = ToolButton(FIF.VIEW, paths_card)
+        auth_view_btn.setToolTip("查看认证文件")
+        auth_view_btn.clicked.connect(
+            lambda: self._view_config_file(auth_manager.auth_path)
+        )
+        auth_layout.addWidget(auth_view_btn)
+
+        auth_copy_btn = ToolButton(FIF.COPY, paths_card)
+        auth_copy_btn.setToolTip(tr("common.copy"))
+        auth_copy_btn.clicked.connect(
+            lambda: self._copy_to_clipboard(str(auth_manager.auth_path))
+        )
+        auth_layout.addWidget(auth_copy_btn)
+
+        paths_layout.addLayout(auth_layout)
 
         # 备份目录路径
         backup_layout = QHBoxLayout()
