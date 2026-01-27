@@ -12854,8 +12854,8 @@ class AgentGroupEditDialog(QDialog):
     def _init_ui(self):
         """初始化UI"""
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)  # 减少间距：15 -> 10
+        layout.setContentsMargins(15, 15, 15, 15)  # 减少边距：20 -> 15
 
         # 标题
         title = (
@@ -12866,18 +12866,10 @@ class AgentGroupEditDialog(QDialog):
         title_label = TitleLabel(title)
         layout.addWidget(title_label)
 
-        # 滚动区域
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setSpacing(15)
-
-        # 基本信息
+        # 基本信息（不使用滚动区域，直接放在顶部）
         basic_group = QGroupBox(tr("agent_group.edit.basic_info"))
         basic_layout = QFormLayout(basic_group)
+        basic_layout.setVerticalSpacing(8)  # 减少表单行间距
 
         self.name_edit = LineEdit()
         self.name_edit.setPlaceholderText(tr("agent_group.edit.name_placeholder"))
@@ -12891,10 +12883,10 @@ class AgentGroupEditDialog(QDialog):
 
         self.desc_edit = TextEdit()
         self.desc_edit.setPlaceholderText(tr("agent_group.edit.desc_placeholder"))
-        self.desc_edit.setFixedHeight(60)
+        self.desc_edit.setFixedHeight(50)  # 减少高度：60 -> 50
         basic_layout.addRow(tr("agent_group.edit.description"), self.desc_edit)
 
-        scroll_layout.addWidget(basic_group)
+        layout.addWidget(basic_group)
 
         # Agent配置 - 使用Pivot标签页
         agent_pivot = Pivot(self)
@@ -12908,15 +12900,15 @@ class AgentGroupEditDialog(QDialog):
             text=tr("agent_group.edit.omo_agents"),
             onClick=lambda: agent_stacked.setCurrentIndex(1),
         )
-        scroll_layout.addWidget(agent_pivot)
+        layout.addWidget(agent_pivot)
 
-        # 标签页内容容器
+        # 标签页内容容器（使用滚动区域包裹表格）
         agent_stacked = QStackedWidget()
 
         # OpenCode Agent配置页
         opencode_page = QWidget()
         opencode_page_layout = QVBoxLayout(opencode_page)
-        opencode_page_layout.setContentsMargins(0, 10, 0, 0)
+        opencode_page_layout.setContentsMargins(0, 5, 0, 0)  # 减少上边距：10 -> 5
 
         self.opencode_table = TableWidget()
         self.opencode_table.setColumnCount(4)
@@ -12942,7 +12934,7 @@ class AgentGroupEditDialog(QDialog):
         # Oh My OpenCode Agent配置页
         omo_page = QWidget()
         omo_page_layout = QVBoxLayout(omo_page)
-        omo_page_layout.setContentsMargins(0, 10, 0, 0)
+        omo_page_layout.setContentsMargins(0, 5, 0, 0)  # 减少上边距：10 -> 5
 
         self.omo_table = TableWidget()
         self.omo_table.setColumnCount(3)
@@ -12963,14 +12955,11 @@ class AgentGroupEditDialog(QDialog):
 
         agent_stacked.addWidget(omo_page)
 
-        scroll_layout.addWidget(agent_stacked)
+        # 将标签页内容添加到布局（占据剩余空间）
+        layout.addWidget(agent_stacked, 1)  # stretch factor = 1，占据剩余空间
 
         # 初始化Agent列表
         self._init_agent_tables()
-
-        # 设置滚动区域
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll)
 
         # 底部按钮
         btn_layout = QHBoxLayout()
@@ -13075,7 +13064,7 @@ class AgentGroupEditDialog(QDialog):
             # Agent ID
             self.omo_table.setItem(i, 1, QTableWidgetItem(agent_id))
 
-            # Description - 从配置中获取
+            # Description - 从配置中获取，如果没有则使用预设描述
             description = ""
             if main_window and hasattr(main_window, "ohmyopencode_config"):
                 omo_config = main_window.ohmyopencode_config or {}
@@ -13084,6 +13073,10 @@ class AgentGroupEditDialog(QDialog):
                     agent_data = agent_config[agent_id]
                     if isinstance(agent_data, dict):
                         description = agent_data.get("description", "")
+
+            # 如果配置中没有描述，使用预设描述
+            if not description:
+                description = PRESET_AGENTS.get(agent_id, "")
 
             desc_item = QTableWidgetItem(description)
             self.omo_table.setItem(i, 2, desc_item)
