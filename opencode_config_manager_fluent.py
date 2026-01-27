@@ -1419,7 +1419,7 @@ DEGRADED_THRESHOLD_MS = 6000
 # ==================== 版本检查配置 ====================
 STARTUP_VERSION_CHECK_ENABLED = True  # 启动时是否检查版本
 IMMEDIATE_VERSION_CHECK_MS = 5000  # 启动后首次检查延迟 (5秒)
-UPDATE_INTERVAL_MS = 60 * 1000  # 定时检查间隔 (1分钟)
+UPDATE_INTERVAL_MS = 60 * 60 * 1000  # 定时检查间隔 (1小时)
 
 
 def get_resource_path(relative_path: str) -> Path:
@@ -4302,14 +4302,32 @@ class ConfigValidator:
         返回问题列表: [{"level": "error/warning", "path": "provider.xxx", "message": "..."}]
         """
         issues = []
-        if not config:
+
+        # 区分 None 和空字典
+        if config is None:
             issues.append(
-                {"level": "error", "path": "root", "message": "配置文件为空或无法解析"}
+                {
+                    "level": "error",
+                    "path": "root",
+                    "message": "配置文件无法解析或读取失败",
+                }
             )
             return issues
+
         if not isinstance(config, dict):
             issues.append(
                 {"level": "error", "path": "root", "message": "配置根必须是对象类型"}
+            )
+            return issues
+
+        # 空配置降级为警告（而非错误）
+        if not config or config == {}:
+            issues.append(
+                {
+                    "level": "warning",
+                    "path": "root",
+                    "message": "配置为空，尚未添加任何Provider",
+                }
             )
             return issues
 
@@ -5407,6 +5425,7 @@ class VersionChecker(QObject):
 
     # 信号：在主线程中安全地更新 UI
     update_available = pyqtSignal(str, str)  # (latest_version, release_url)
+    check_failed = pyqtSignal(str)  # 新增：检查失败信号
 
     def __init__(self, callback=None, parent=None):
         super().__init__(parent)
@@ -5459,17 +5478,25 @@ class VersionChecker(QObject):
                     # 通过信号在主线程中安全地调用回调
                     self.update_available.emit(self.latest_version, self.release_url)
         except urllib.error.HTTPError as e:
+            error_msg = ""
             if e.code == 403:
                 # GitHub API 速率限制
-                print(f"Version check failed: GitHub API rate limit exceeded (403)")
+                error_msg = f"GitHub API速率限制（403），将在6小时后重试"
+                print(f"Version check failed: {error_msg}")
                 # 增加冷却时间到 6 小时
                 self.check_interval = 21600
             else:
-                print(f"Version check failed: HTTP {e.code} - {e.reason}")
+                error_msg = f"HTTP {e.code} - {e.reason}"
+                print(f"Version check failed: {error_msg}")
+            self.check_failed.emit(error_msg)
         except urllib.error.URLError as e:
-            print(f"Version check failed: Network error - {e.reason}")
+            error_msg = f"网络错误 - {e.reason}"
+            print(f"Version check failed: {error_msg}")
+            self.check_failed.emit(error_msg)
         except Exception as e:
-            print(f"Version check failed: {e}")
+            error_msg = str(e)
+            print(f"Version check failed: {error_msg}")
+            self.check_failed.emit(error_msg)
         finally:
             self.checking = False
 
