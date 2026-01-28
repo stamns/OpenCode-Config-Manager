@@ -10214,21 +10214,24 @@ class ModelPage(BasePage):
 
     def _on_config_changed(self):
         """配置变更时刷新 Provider 列表和模型"""
-        current_provider = self.provider_combo.currentText()
+        current_provider = self.provider_combo.currentData()  # 获取当前的 provider_key
         self._load_providers()
         # 尝试恢复之前选中的 Provider
-        idx = self.provider_combo.findText(current_provider)
-        if idx >= 0:
-            self.provider_combo.setCurrentIndex(idx)
-        elif self.provider_combo.count() > 0:
-            self.provider_combo.setCurrentIndex(0)
+        for i in range(self.provider_combo.count()):
+            if self.provider_combo.itemData(i) == current_provider:
+                self.provider_combo.setCurrentIndex(i)
+                break
+        else:
+            # 如果没找到，选择第一个
+            if self.provider_combo.count() > 0:
+                self.provider_combo.setCurrentIndex(0)
 
     def _setup_ui(self):
         # Provider 选择
         provider_layout = QHBoxLayout()
         provider_layout.addWidget(BodyLabel(tr("model.select_provider"), self))
         self.provider_combo = ComboBox(self)
-        self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
+        self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         provider_layout.addWidget(self.provider_combo)
         provider_layout.addStretch()
         self._layout.addLayout(provider_layout)
@@ -10295,12 +10298,38 @@ class ModelPage(BasePage):
         self.provider_combo.clear()
         config = self.main_window.opencode_config or {}
         providers = config.get("provider", {})
-        for name in providers.keys():
-            self.provider_combo.addItem(name)
 
-    def _on_provider_changed(self, provider_name: str):
+        for provider_key in providers.keys():
+            provider_data = providers[provider_key]
+
+            # 获取显示名称
+            display_name = ""
+            if isinstance(provider_data, dict):
+                # 优先使用 name 字段
+                display_name = provider_data.get("name", "")
+
+                # 如果没有 name，尝试从原生 Provider 获取
+                if not display_name:
+                    native_provider = get_native_provider(provider_key)
+                    if native_provider:
+                        display_name = native_provider.name
+
+            # 构建显示文本
+            if display_name:
+                display_text = f"{provider_key} - {display_name}"
+            else:
+                display_text = provider_key
+
+            # 添加到下拉框，userData 存储实际的 provider_key
+            self.provider_combo.addItem(display_text, userData=provider_key)
+
+    def _on_provider_changed(self, index: int):
         """Provider 切换时刷新模型列表"""
-        self._load_models(provider_name)
+        if index < 0:
+            return
+        provider_key = self.provider_combo.itemData(index)
+        if provider_key:
+            self._load_models(provider_key)
 
     def _load_models(self, provider_name: str):
         """加载指定 Provider 的模型列表"""
@@ -10328,7 +10357,7 @@ class ModelPage(BasePage):
 
     def _on_add(self):
         """添加模型"""
-        provider = self.provider_combo.currentText()
+        provider = self.provider_combo.currentData()
         if not provider:
             self.show_warning(tr("common.info"), tr("model.select_provider_first"))
             return
@@ -10339,7 +10368,7 @@ class ModelPage(BasePage):
 
     def _on_add_preset(self):
         """从预设添加模型"""
-        provider = self.provider_combo.currentText()
+        provider = self.provider_combo.currentData()
         if not provider:
             self.show_warning(tr("common.info"), tr("model.select_provider_first"))
             return
@@ -10350,7 +10379,7 @@ class ModelPage(BasePage):
 
     def _on_edit(self):
         """编辑模型"""
-        provider = self.provider_combo.currentText()
+        provider = self.provider_combo.currentData()
         row = self.table.currentRow()
         if row < 0:
             self.show_warning(tr("common.info"), tr("model.select_model_first"))
@@ -10363,7 +10392,7 @@ class ModelPage(BasePage):
 
     def _on_delete(self):
         """删除模型"""
-        provider = self.provider_combo.currentText()
+        provider = self.provider_combo.currentData()
         row = self.table.currentRow()
         if row < 0:
             self.show_warning(tr("common.info"), tr("model.select_model_first"))
@@ -10399,7 +10428,7 @@ class ModelPage(BasePage):
 
     def _on_fetch_models(self):
         """从API获取模型列表"""
-        provider_name = self.provider_combo.currentText()
+        provider_name = self.provider_combo.currentData()
         if not provider_name:
             self.show_warning(tr("common.info"), tr("model.select_provider_first"))
             return
