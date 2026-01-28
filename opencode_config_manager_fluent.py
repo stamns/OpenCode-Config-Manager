@@ -10477,13 +10477,6 @@ class ModelPage(BasePage):
             )
             return
 
-        if not api_key:
-            self.show_error(
-                tr("provider.fetch_failed"),
-                "未找到API Key。请先配置Provider或设置环境变量。",
-            )
-            return
-
         # 构建模型列表API URL
         models_url = base_url.rstrip("/") + "/models"
 
@@ -10491,8 +10484,11 @@ class ModelPage(BasePage):
 
         try:
             req = urllib.request.Request(models_url)
-            req.add_header("Authorization", f"Bearer {api_key}")
-            req.add_header("x-api-key", api_key)
+
+            # 如果有API Key，添加认证头
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+                req.add_header("x-api-key", api_key)
 
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -10520,7 +10516,17 @@ class ModelPage(BasePage):
                     self.show_success("添加成功", f"已添加 {dialog.added_count} 个模型")
 
         except urllib.error.HTTPError as e:
-            self.show_error(tr("provider.fetch_failed"), f"HTTP {e.code}: {e.reason}")
+            if e.code in (401, 403):
+                # 认证失败
+                if not api_key:
+                    error_msg = f"HTTP {e.code}: {e.reason}\n\n该API需要认证。请先配置Provider的API Key。"
+                else:
+                    error_msg = (
+                        f"HTTP {e.code}: {e.reason}\n\nAPI Key可能无效或已过期。"
+                    )
+            else:
+                error_msg = f"HTTP {e.code}: {e.reason}"
+            self.show_error(tr("provider.fetch_failed"), error_msg)
         except Exception as e:
             self.show_error(tr("provider.fetch_failed"), str(e))
 
