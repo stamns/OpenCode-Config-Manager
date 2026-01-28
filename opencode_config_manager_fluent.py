@@ -8813,18 +8813,36 @@ class NativeProviderPage(BasePage):
             # SDK
             self.table.setItem(row, 1, QTableWidgetItem(provider.sdk))
 
-            # 状态
-            is_configured = provider.id in auth_data and auth_data[provider.id]
-            status_text = (
-                tr("native_provider.configured")
-                if is_configured
-                else tr("native_provider.not_configured")
-            )
-            status_item = QTableWidgetItem(status_text)
-            if is_configured:
-                status_item.setForeground(QColor("#4CAF50"))
+            # 状态 - 同时检查auth.json和环境变量
+            has_auth = provider.id in auth_data and auth_data[provider.id]
+            has_env = bool(self.env_detector.detect_env_vars(provider.id))
+
+            # 确定状态和颜色
+            if has_auth and has_env:
+                # 两者都有：绿色，显示"已配置"
+                status_text = tr("native_provider.configured")
+                status_color = "#4CAF50"  # 绿色
+                status_tooltip = "auth.json + 环境变量"
+            elif has_auth:
+                # 只有auth.json：绿色，显示"已配置"
+                status_text = tr("native_provider.configured")
+                status_color = "#4CAF50"  # 绿色
+                status_tooltip = "auth.json"
+            elif has_env:
+                # 只有环境变量：蓝色，显示"已配置(环境变量)"
+                status_text = tr("native_provider.configured") + "(ENV)"
+                status_color = "#2196F3"  # 蓝色
+                status_tooltip = "环境变量已配置，但未保存到auth.json"
             else:
-                status_item.setForeground(QColor("#9E9E9E"))
+                # 都没有：灰色，显示"未配置"
+                status_text = tr("native_provider.not_configured")
+                status_color = "#9E9E9E"  # 灰色
+                status_tooltip = ""
+
+            status_item = QTableWidgetItem(status_text)
+            status_item.setForeground(QColor(status_color))
+            if status_tooltip:
+                status_item.setToolTip(status_tooltip)
             self.table.setItem(row, 2, status_item)
 
             # 环境变量
@@ -8993,32 +9011,46 @@ class NativeProviderPage(BasePage):
         self._load_data()
 
     def _on_detect_configured(self):
-        """检测已配置的原生Provider"""
+        """检测已配置的原生Provider - 同时检测auth.json和环境变量"""
         # 读取auth.json
         auth_data = {}
         try:
             auth_data = self.auth_manager.read_auth()
-        except Exception as e:
-            self.show_warning("检测失败", f"无法读取auth.json: {str(e)}")
-            return
-
-        if not auth_data:
-            InfoBar.info("检测结果", "未检测到已配置的原生Provider", parent=self)
-            return
+        except Exception:
+            pass
 
         # 统计已配置的Provider
-        configured_providers = []
-        for provider in NATIVE_PROVIDERS:
-            if provider.id in auth_data and auth_data[provider.id]:
-                configured_providers.append(provider.name)
+        auth_providers = []  # auth.json中配置的
+        env_providers = []  # 环境变量中配置的
 
-        if configured_providers:
-            message = f"检测到 {len(configured_providers)} 个已配置的Provider:\n\n"
-            message += "\n".join([f"✓ {name}" for name in configured_providers])
-            message += "\n\n这些Provider的认证信息已保存在auth.json中"
+        for provider in NATIVE_PROVIDERS:
+            has_auth = provider.id in auth_data and auth_data[provider.id]
+            has_env = bool(self.env_detector.detect_env_vars(provider.id))
+
+            if has_auth:
+                auth_providers.append(provider.name)
+            if has_env and not has_auth:
+                # 只有环境变量，没有auth.json
+                env_vars = self.env_detector.detect_env_vars(provider.id)
+                env_names = ", ".join(env_vars.keys())
+                env_providers.append(f"{provider.name} ({env_names})")
+
+        if auth_providers or env_providers:
+            message = ""
+
+            if auth_providers:
+                message += f"📁 auth.json中已配置 ({len(auth_providers)}个):\n"
+                message += "\n".join([f"  ✓ {name}" for name in auth_providers])
+                message += "\n\n"
+
+            if env_providers:
+                message += f"🔧 环境变量已配置 ({len(env_providers)}个):\n"
+                message += "\n".join([f"  ✓ {name}" for name in env_providers])
+                message += "\n\n💡 提示: 环境变量配置的Provider可以直接使用，"
+                message += '但建议点击"配置Provider"保存到auth.json以便管理'
 
             # 显示结果对话框
-            w = FluentMessageBox("检测结果", message, self)
+            w = FluentMessageBox("检测结果", message.strip(), self)
             w.exec_()
 
             # 刷新列表
